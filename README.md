@@ -134,9 +134,12 @@ User Input
 Achat/
 │
 ├─ docs/                           # 프로젝트 문서
-│   ├─ README.md
-│   ├─ 학습후보.md
-│   └─ 대화품질.md
+│   ├─ README.md                  # 총괄 문서 (이 파일)
+│   ├─ DIR.md                     # 파일시스템 현황 참조
+│   ├─ 대화품질.md                # Phase 1~3 상세 설계
+│   ├─ 학습후보.md                # Phase 5~6 학습 실험 설계
+│   └─ plan/
+│       └─ phases.md              # Phase 0~6 실행 계획서
 │
 ├─ conversation/                   # 대화 엔진 (핵심)
 │   ├─ core/
