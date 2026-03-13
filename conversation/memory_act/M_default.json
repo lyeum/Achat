@@ -1,0 +1,11 @@
+{
+  "scope": "default",
+  "character_id": "Haru",
+  "entries": [
+    {
+      "act_id": "init",
+      "location": "unknown",
+      "summary": "아직 특별한 대화 기록은 없다."
+    }
+  ]
+}

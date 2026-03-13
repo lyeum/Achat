@@ -1,0 +1,33 @@
+{
+  "title": "WorldDefinition",
+  "type": "object",
+  "required": ["world_id", "scenarios"],
+  "properties": {
+    "world_id": { "type": "string" },
+    "description": { "type": "string" },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "acts"],
+        "properties": {
+          "scenario_id": { "type": "string" },
+          "acts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["act_id", "locations"],
+              "properties": {
+                "act_id": { "type": "string" },
+                "locations": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

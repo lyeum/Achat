@@ -1,0 +1,22 @@
+world_id: seaside_world
+
+description: >
+  바닷가를 중심으로 전개되는 잔잔한 세계관.
+  감정의 여운과 관계의 변화를 천천히 쌓아간다.
+
+scenarios:
+  - scenario_id: morning_walk
+    acts:
+      - act_id: act_1
+        location: beach
+        context: >
+          새벽의 바닷가.
+          파도 소리가 낮게 울리고, 공기는 차갑지만 상쾌하다.
+          하루는 조용히 옆을 걸으며 말을 아낀다.
+
+      - act_id: act_2
+        location: breakwater
+        context: >
+          방파제 근처.
+          해가 조금씩 떠오르며 주변이 밝아진다.
+          하루는 이전보다 조금 더 솔직한 말을 꺼내기 시작한다.

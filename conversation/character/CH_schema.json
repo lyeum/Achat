@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CharacterPersona",
+  "type": "object",
+  "required": ["id", "personality", "speech"],
+
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Character ID"
+    },
+
+    "description": {
+      "type": "string"
+    },
+
+    "personality": {
+      "type": "object",
+      "properties": {
+        "temperament": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "emotional_expression": {
+          "type": "object",
+          "properties": {
+            "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+            "stability": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+
+        "autonomy_level": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+
+    "speech": {
+      "type": "object",
+      "properties": {
+        "language": { "type": "string" },
+        "formality": { "type": "string" },
+        "sentence_length": { "type": "string" },
+        "pacing": { "type": "string" }
+      }
+    },
+
+    "rag": {
+      "type": "object",
+      "properties": {
+        "priority": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+    
+  }
+}

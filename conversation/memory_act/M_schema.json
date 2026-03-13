@@ -1,0 +1,97 @@
+{
+  "title": "MemoryEntry",
+  "description": "ChromaDB VDB에 저장되는 메모리 단위 스키마. memory/long_term.py가 이 구조를 기준으로 저장/검색한다.",
+
+  "type": "object",
+  "required": ["id", "content", "metadata"],
+
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "고유 식별자. 형식: mem_{character_id}_{sequence} (예: mem_haru_012)"
+    },
+    "content": {
+      "type": "string",
+      "description": "요약된 기억 내용 (자연어). memory/summarizer.py가 생성한 요약문이 들어감."
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["character_id", "importance", "timestamp"],
+      "properties": {
+        "character_id": {
+          "type": "string",
+          "description": "연관 캐릭터 ID. ChromaDB where 필터 기준으로 사용."
+        },
+        "session_id": {
+          "type": "string",
+          "description": "저장된 세션 ID. 세션 단위 필터링에 사용."
+        },
+        "turn_range": {
+          "type": "string",
+          "description": "요약 대상 턴 범위. 예: '3-8'"
+        },
+        "importance": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "중요도 점수. 0.5 미만은 저장하지 않음. 검색 시 where 필터에 사용."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "핵심 키워드 태그. 메타데이터 필터용. 예: ['이름', '취미', '바다']"
+        },
+        "location": {
+          "type": "string",
+          "description": "대화 발생 장소. World YAML의 act location 값."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "저장 시각. ISO 8601 형식. 예: '2025-01-18T09:30:00'"
+        }
+      }
+    }
+  },
+
+  "importance_rules": {
+    "description": "memory/summarizer.py에서 중요도 점수 산정 시 참고하는 규칙",
+    "high": {
+      "range": [0.8, 1.0],
+      "examples": ["사용자 이름 / 고유 정보", "약속 / 선언", "갈등 또는 화해"]
+    },
+    "mid": {
+      "range": [0.5, 0.8],
+      "examples": ["감정적 사건", "취향 / 선호도", "반복된 화제"]
+    },
+    "low": {
+      "range": [0.0, 0.5],
+      "store": false,
+      "examples": ["일상적 잡담", "단순 응답 (응 / 그래)", "날씨 / 중립 소재"]
+    }
+  },
+
+  "retrieval_config": {
+    "description": "memory/long_term.py의 ChromaDB 검색 설정 참고값",
+    "embedding_model": "BAAI/bge-m3",
+    "n_results": 2,
+    "similarity_threshold": 0.7,
+    "filter": {
+      "importance": { "$gte": 0.5 }
+    }
+  },
+
+  "example": {
+    "id": "mem_haru_012",
+    "content": "사용자가 자신의 이름이 민준이라고 말했다. 바다를 좋아한다고 했다.",
+    "metadata": {
+      "character_id": "Haru",
+      "session_id": "session_001",
+      "turn_range": "3-8",
+      "importance": 0.85,
+      "tags": ["이름", "취미", "바다"],
+      "location": "beach",
+      "timestamp": "2025-01-18T09:30:00"
+    }
+  }
+}

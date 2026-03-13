@@ -1,0 +1,11 @@
+{
+  "scope": "instance",
+  "scenario_id": "morning_walk",
+  "entries": [
+    {
+      "act_id": "act_1",
+      "location": "beach",
+      "summary": "새벽 바닷가를 함께 걸으며 가벼운 대화를 나눴다."
+    }
+  ]
+}
