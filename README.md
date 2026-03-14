@@ -1,7 +1,11 @@
-# Achat — 캐릭터 챗봇 위젯 프로젝트
+# Achat — 플로팅 PIP 캐릭터 챗봇 + 기능 도우미
 
-다양한 가상 캐릭터와 자연스러운 대화를 나눌 수 있는 데스크탑 위젯형 챗봇.
+다양한 가상 캐릭터와 자연스러운 대화를 나눌 수 있는 플로팅 PIP형 챗봇.
 한국어 주 사용 / Qwen2.5-3B 기반 / LoRA 파인튜닝 → GGUF 배포 파이프라인.
+
+**두 가지 상위 모드:**
+- **대화 모드** — 캐릭터 챗봇 (기존 설계)
+- **기능 모드** — 선택한 작업에 특화된 챗봇 UI. 실행은 rule-based Python, LLM은 자연어 → 파라미터 추출만 담당.
 
 > 대화 품질 설계 상세: [대화품질.md](대화품질.md)
 > 학습 모델 후보 및 실험 설계: [학습후보.md](학습후보.md)
@@ -59,6 +63,7 @@
   - gradient_checkpointing=True, batch_size=1
   - max_seq_length=512 (한국어 토큰 밀도 고려)
   - 캐릭터 말투 / 감정 반응 / 한국어 일관성
+  - 기능 모드용 자연어 → JSON 파라미터 추출 예시 포함
         │
         ▼
   LoRA 가중치 병합 (merge_and_unload, CPU 오프로드)
@@ -80,8 +85,10 @@
   - 3B Q4_K_M 예상 속도: 8~15 tok/s
         │
         ▼
-  PySide6 위젯 UI
-  - Frameless / Always-on-top / 시스템 트레이
+  PySide6 플로팅 UI (PIP 스타일)
+  - Frameless / Always-on-top / 모서리 스냅
+  - hover 투명도 전환 / 최소화 시 버블 축소
+  - 대화 모드 ↔ 기능 모드 전환
 ```
 
 ---
@@ -94,37 +101,78 @@
 User Input
     │
     ▼
-[Pre-processing]  — 의도 분류, 엔티티 추출
-    │
-    ├──────────────────────┐
-    ▼                      ▼
-[단기 메모리]         [장기 메모리 VDB]
- 최근 3~5턴 직접 삽입   시맨틱 유사도 검색
- (검색 없이)            (bge-m3, 임계값 0.7+)
-    │                      │
-    └──────────┬───────────┘
-               ▼
-[Context Assembly]  — 토큰 예산 관리
-  Layer A: 캐릭터 시스템 프롬프트 (고정, ~300 tok)
-  Layer B: 세계관 + 현재 Act 상황  (고정, ~200 tok)
-  Layer C: VDB 검색 결과           (동적, ~150 tok) ← 캐릭터 관점 재서술
-  Layer D: 단기 버퍼 최근 N턴      (동적, ~300 tok)
-  Layer E: 현재 사용자 입력
-               │
-               ▼
-         LLM (llama-cpp)
-               │
-               ▼
-[Post-processing]
-  - mood / affection 상태 업데이트
-  - Act 전환 조건 체크
-  - 메모리 쓰기 트리거 체크 (N턴 도달 시)
-               │
-        N턴 조건 충족 시
-               ▼
-[Memory Write Pipeline]
-  요약 → 중요도 scoring → 임베딩 → ChromaDB 저장
+[모드 분기]
+    ├── 대화 모드 ──────────────────────────────────────────────┐
+    │                                                            │
+    │   [Pre-processing]  — 의도 분류, 엔티티 추출              │
+    │       │                                                    │
+    │       ├──────────────────────┐                            │
+    │       ▼                      ▼                            │
+    │   [단기 메모리]         [장기 메모리 VDB]                 │
+    │    최근 3~5턴 직접 삽입   시맨틱 유사도 검색              │
+    │    (검색 없이)            (bge-m3, 임계값 0.7+)           │
+    │       │                      │                            │
+    │       └──────────┬───────────┘                            │
+    │                  ▼                                         │
+    │   [Context Assembly]  — 토큰 예산 관리                    │
+    │     Layer A: 캐릭터 시스템 프롬프트 (고정, ~300 tok)      │
+    │     Layer B: 세계관 + 현재 Act 상황  (고정, ~200 tok)     │
+    │     Layer C: VDB 검색 결과           (동적, ~150 tok)     │
+    │     Layer D: 단기 버퍼 최근 N턴      (동적, ~300 tok)     │
+    │     Layer E: 현재 사용자 입력                              │
+    │                  │                                         │
+    │                  ▼                                         │
+    │            LLM (llama-cpp)                                 │
+    │                  │                                         │
+    │                  ▼                                         │
+    │   [Post-processing]                                        │
+    │     - mood / affection 상태 업데이트                      │
+    │     - Act 전환 조건 체크                                   │
+    │     - 메모리 쓰기 트리거 체크 (N턴 도달 시)               │
+    │                  │                                         │
+    │           N턴 조건 충족 시                                 │
+    │                  ▼                                         │
+    │   [Memory Write Pipeline]                                  │
+    │     요약 → 중요도 scoring → 임베딩 → ChromaDB 저장        │
+    │                                                            │
+    └── 기능 모드 ──────────────────────────────────────────────┘
+
+        [선택한 기능 전용 시스템 프롬프트로 LLM 교체]
+        [대화 히스토리 / 장기 메모리 격리 — 기능 세션은 미기록]
+            │
+            ▼
+        LLM (llama-cpp) — 자연어 → JSON 파라미터 추출
+            │
+            ▼
+        [Rule-based 실행기] — 실제 작업 처리 (Python)
+            │
+            ▼
+        결과 요약 → 사용자에게 응답
 ```
+
+---
+
+## 기능 모드 — 도구 목록
+
+각 도구는 대화 엔진에만 종속된 독립 마이크로서비스 형태.
+LLM은 자연어 해석 및 파라미터 추출만 담당, 실행은 rule-based Python.
+
+### 폴더 정리
+| 세부 기능 | 방식 |
+|---|---|
+| 파일 분류 | 확장자 / MIME 타입 기반 자동 분류, 분류 기준은 자연어로 지정 |
+| 확장자 일괄 변환 | 이미지(jpg/png/webp/bmp), 문서(txt/md) — 외부 의존 없음. 영상/음성은 ffmpeg 선택 의존 |
+| 이름 일괄 변환 | 패턴/규칙 자연어 지정 → LLM이 rename 규칙 파싱 → `pathlib` 실행 |
+
+### 프롬프트 변환
+- 사용자가 작성한 텍스트를 LLM 프롬프트 형태로 재구성
+- 기능 전용 시스템 프롬프트로 교체하여 대화 모드와 완전 분리
+
+### 검색엔진
+| 종류 | 방식 |
+|---|---|
+| 로컬 검색 | SQLite FTS5 또는 whoosh 기반 파일 인덱싱 |
+| 인터넷 검색 | DuckDuckGo(무료 비공식) / SearXNG(셀프호스팅) / Brave Search API(선택) |
 
 ---
 
@@ -139,7 +187,7 @@ Achat/
 │   ├─ 대화품질.md                # Phase 1~3 상세 설계
 │   ├─ 학습후보.md                # Phase 5~6 학습 실험 설계
 │   └─ plan/
-│       └─ phases.md              # Phase 0~6 실행 계획서
+│       └─ phases.md              # Phase 0~7 실행 계획서
 │
 ├─ conversation/                   # 대화 엔진 (핵심)
 │   ├─ core/
@@ -178,15 +226,27 @@ Achat/
 │           └─ story.md
 │
 ├─ agent/                          # Agent 오케스트레이터
-│   ├─ core.py                    # 전체 흐름 조율
+│   ├─ core.py                    # 전체 흐름 조율 + 모드 분기
 │   ├─ persona.py                 # 캐릭터 YAML 로딩 + 핫스왑
 │   ├─ state.py                   # mood / affection 상태 정의
 │   └─ router.py                  # 시동어 / 명령어 분기
 │
-├─ ui/                             # PySide6 위젯 (배포 환경)
-│   ├─ widget.py                  # 메인 위젯 (Frameless, Always-on-top)
+├─ ui/                             # PySide6 플로팅 UI (배포 환경)
+│   ├─ widget.py                  # 메인 위젯 (Frameless / Always-on-top / 모서리 스냅)
 │   ├─ chat_panel.py              # 채팅 패널 (스트리밍 토큰 표시)
-│   └─ tray.py                    # 시스템 트레이
+│   ├─ tray.py                    # 시스템 트레이
+│   └─ mode_switcher.py           # 대화 모드 ↔ 기능 모드 전환 UI
+│
+├─ tools/                          # 기능 모드 — 도구 마이크로서비스
+│   ├─ base.py                    # Tool 인터페이스 (파라미터 수신 → 실행 → 결과 반환)
+│   ├─ folder/
+│   │   ├─ classifier.py          # 파일 분류 (확장자 / MIME)
+│   │   ├─ converter.py           # 확장자 일괄 변환
+│   │   └─ renamer.py             # 이름 일괄 변환
+│   ├─ prompt_converter.py        # 프롬프트 변환
+│   └─ search/
+│       ├─ local_search.py        # 로컬 파일 인덱싱 + FTS 검색
+│       └─ web_search.py          # 인터넷 검색 (DuckDuckGo / SearXNG)
 │
 ├─ training/                       # LoRA 파인튜닝
 │   ├─ lora_train.py
@@ -194,6 +254,8 @@ Achat/
 │
 ├─ data/
 │   └─ lora/                      # QLoRA 파인튜닝 학습 데이터
+│       ├─ conversation/           # 대화 모드용 캐릭터 대화 데이터
+│       └─ function/               # 기능 모드용 자연어 → JSON 파라미터 추출 예시
 │
 ├─ scripts/                        # 변환 스크립트
 │   ├─ merge_lora.py              # LoRA 병합
@@ -203,10 +265,6 @@ Achat/
 │   ├─ ai_tell_checker.py         # 이질감 자동 감지
 │   ├─ memory_test.py             # 메모리 정확도 측정
 │   └─ speed_bench.py             # 추론 속도 벤치마크
-│
-├─ tools/
-│   ├─ base.py                    # Tool 인터페이스
-│   └─ commands.py                # 명령어 처리
 │
 ├─ main.py                         # 진입점
 ├─ config.py                       # 환경 설정 (dev / deploy 분기)
@@ -225,8 +283,13 @@ Achat/
 | GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
 | Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
 | CPU 추론 (Windows) | ✅ 가능 | 3B는 7B보다 빠름, AVX2 이상 권장 |
-| PySide6 위젯 | ✅ 가능 | llama-cpp-python 스트리밍 콜백 연동 가능 |
+| PySide6 PIP 플로팅 UI | ✅ 가능 | Frameless + Always-on-top + 모서리 스냅, 외부 OS API 불필요 |
 | 시맨틱 메모리 검색 | ✅ 가능 | ChromaDB + bge-m3, 로컬 동작 |
+| 폴더 정리 도구 | ✅ 가능 | pathlib / shutil 기반 rule-based, 이미지 확장자 변환은 Pillow |
+| 프롬프트 변환 도구 | ✅ 가능 | 기능 전용 시스템 프롬프트 교체로 구현 |
+| 로컬 검색 도구 | ✅ 가능 | SQLite FTS5 또는 whoosh |
+| 인터넷 검색 도구 | ⚠️ API 의존 | DuckDuckGo 비공식 or SearXNG 셀프호스팅 권장 |
+| JSON 파라미터 추출 (3B) | ⚠️ 주의 | 파인튜닝 데이터에 기능 모드 예시 필수 포함 |
 | RTX 5060 Ti BnB | ⚠️ 주의 | `bitsandbytes >= 0.44` + `CUDA 12.8+` 필수 |
 
 ---
@@ -283,21 +346,25 @@ Achat/
 
 ---
 
-### Phase 4 — 위젯 UI 구현
-> 목표: PySide6 데스크탑 위젯 (Windows 배포 대상)
+### Phase 4 — 플로팅 UI 구현
+> 목표: PySide6 PIP 스타일 플로팅 UI (Windows 배포 대상)
 
-- [ ] `ui/widget.py` — Frameless / Always-on-top / 드래그 이동 / 투명도 조절
+- [ ] `ui/widget.py` — Frameless / Always-on-top / 모서리 스냅 / hover 투명도 전환
 - [ ] `ui/chat_panel.py` — 스트리밍 토큰 표시 채팅 패널
 - [ ] `ui/tray.py` — 시스템 트레이 아이콘 및 메뉴
+- [ ] `ui/mode_switcher.py` — 대화 모드 ↔ 기능 모드 전환 UI
+- [ ] 최소화 시 버블 축소 → 클릭 시 확장 동작
 - [ ] 캐릭터 전환 UI 연동
 
 ---
 
 ### Phase 5 — LoRA 파인튜닝 파이프라인
-> 목표: 캐릭터 말투 / 감정 반응 / 한국어 일관성 강화
+> 목표: 캐릭터 말투 / 감정 반응 / 한국어 일관성 강화 + 기능 모드 파라미터 추출 능력 확보
 
-- [ ] `data/lora/` — ChatML 포맷 학습 데이터 구축
-- [ ] `training/dataset.py` — 한국어 캐릭터 대화 데이터셋 로더
+- [ ] `data/lora/conversation/` — ChatML 포맷 캐릭터 대화 데이터 구축
+- [ ] `data/lora/function/` — 자연어 → JSON 파라미터 추출 예시 데이터 구축
+  - 폴더 정리 / 프롬프트 변환 / 검색 각각의 입출력 예시 포함
+- [ ] `training/dataset.py` — 두 데이터셋 혼합 로더
 - [ ] `training/lora_train.py` — QLoRA 학습 (8GB VRAM 최적화 설정)
 - [ ] 학습 후 평가 (`docs/학습후보.md` 평가 척도 기준)
 
@@ -310,7 +377,21 @@ Achat/
 - [ ] `scripts/merge_lora.py` — LoRA 병합 (`low_cpu_mem_usage=True`)
 - [ ] `scripts/convert_to_gguf.sh` — GGUF 변환 + Q4_K_M 양자화
 - [ ] `requirements-deploy.txt` 검증
-- [ ] 실행 스크립트 작성 (`run_widget.bat`)
+- [ ] 실행 스크립트 작성 (`run.bat`)
+
+---
+
+### Phase 7 — 기능 모드 도구 구현
+> 목표: 폴더 정리 / 프롬프트 변환 / 검색엔진 마이크로서비스 구현
+
+- [ ] `tools/base.py` — Tool 인터페이스 확정 (파라미터 수신 → 실행 → 결과 반환)
+- [ ] `tools/folder/classifier.py` — 확장자 / MIME 기반 파일 분류
+- [ ] `tools/folder/converter.py` — 확장자 일괄 변환 (Pillow 기반, ffmpeg 선택)
+- [ ] `tools/folder/renamer.py` — 이름 일괄 변환 (pathlib)
+- [ ] `tools/prompt_converter.py` — 프롬프트 변환
+- [ ] `tools/search/local_search.py` — SQLite FTS5 기반 로컬 파일 검색
+- [ ] `tools/search/web_search.py` — DuckDuckGo / SearXNG 연동
+- [ ] `agent/core.py` — 기능 모드 분기 및 도구 라우팅 연동
 
 ---
 
@@ -357,9 +438,11 @@ rich
 ### 배포 환경 (`requirements-deploy.txt`)
 ```
 llama-cpp-python             # CPU 빌드 (로컬 추론)
-PySide6                      # 데스크탑 위젯
+PySide6                      # 플로팅 UI
 chromadb                     # VDB (장기 메모리 + RAG)
 sentence-transformers        # bge-m3 (시맨틱 검색)
+Pillow                       # 이미지 확장자 변환
+whoosh                       # 로컬 파일 검색 (SQLite FTS5 대안)
 PyYAML
 loguru
 ```
@@ -376,3 +459,8 @@ loguru
 - **CPU 추론 속도**: 3B Q4_K_M 기준 8~15 tok/s. 스트리밍 출력으로 체감 속도 보완.
 - **ChromaDB 로컬 저장 경로**: 개발/배포 환경 각각 경로 분리 필요.
 - **1.5B 폴백 기준**: 병합 OOM, BnB 호환 이슈, 학습 VRAM 부족 중 하나라도 발생 시 전환.
+- **JSON 파라미터 추출 안정성**: 3B 기반 모델은 파인튜닝 없이 JSON 출력이 불안정할 수 있음.
+  기능 모드용 자연어 → JSON 예시 데이터를 Phase 5 학습 데이터에 반드시 포함할 것.
+- **확장자 변환 범위**: 이미지(jpg/png/webp/bmp), 문서(txt/md)는 외부 의존 없음.
+  영상/음성 변환은 ffmpeg 바이너리 필요 — 선택적 기능으로 분리 권장.
+- **인터넷 검색**: DuckDuckGo 비공식 API는 rate limit 있음. 안정성이 필요하면 SearXNG 셀프호스팅 권장.

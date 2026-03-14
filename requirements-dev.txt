@@ -1,0 +1,29 @@
+# ============================================================
+# requirements-dev.txt — 개발 환경 (Linux + RTX 5060 Ti)
+# 용도: QLoRA 파인튜닝, 학습 데이터 구성, 대화 엔진 개발
+#
+# PyTorch는 별도 설치 필요 (Dockerfile 또는 아래 주석 참고):
+#   pip install torch torchvision torchaudio \
+#       --index-url https://download.pytorch.org/whl/cu128
+# ============================================================
+
+# ── LLM / 파인튜닝 ──────────────────────────────────────────
+transformers>=4.45.0
+peft>=0.11.0
+bitsandbytes>=0.44.0          # Blackwell (SM 10.x) 지원 최소 버전
+accelerate>=0.30.0
+datasets>=2.18.0              # 학습 데이터 로딩
+huggingface_hub>=0.23.0
+
+# ── 임베딩 / VDB ────────────────────────────────────────────
+sentence-transformers>=3.0.0  # bge-m3 로컬 임베딩
+chromadb>=0.5.0               # 장기 메모리 + RAG VDB
+
+# ── 데이터 처리 ─────────────────────────────────────────────
+PyYAML>=6.0
+numpy
+
+# ── 유틸리티 ────────────────────────────────────────────────
+loguru>=0.7.0
+tqdm
+rich

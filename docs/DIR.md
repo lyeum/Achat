@@ -3,7 +3,7 @@
 > 이 문서는 실제 파일시스템 기준으로 작성됩니다.
 > README.md의 설계 구조와 차이가 있는 항목은 ⚠️로 표시합니다.
 >
-> 범례: ✅ 완료 | 🔲 비어있음(구현 예정) | 📄 데이터/설정 파일 | ⚠️ README 불일치
+> 범례: ✅ 완료 | 🔲 비어있음(구현 예정) | 📄 데이터/설정 파일 | ⚠️ 불일치/정리 필요
 
 ---
 
@@ -13,12 +13,13 @@
 Achat/
 │
 ├─ docs/                              ✅ 완료
-│   ├─ README.md                      ✅ 총괄 문서
+│   ├─ README.md                      ✅ 총괄 문서 (실제 위치: 루트)
 │   ├─ DIR.md                         ✅ 이 파일 — 파일시스템 현황
 │   ├─ 대화품질.md                    ✅ 대화 품질 설계 (Phase 1~3 구현 참조)
 │   ├─ 학습후보.md                    ✅ 학습 실험 설계 (Phase 5~6 참조)
-│   └─ plan/
-│       └─ phases.md                  ✅ Phase 0~6 실행 계획서
+│   ├─ plan/
+│   │   └─ phases.md                  ✅ Phase 0~7 실행 계획서
+│   └─ plan1/                         ⚠️ 빈 디렉토리 — 삭제 필요
 │
 ├─ conversation/                       # 대화 엔진 (핵심)
 │   ├─ core/
@@ -40,8 +41,8 @@ Achat/
 │   ├─ character/
 │   │   ├─ CH_schema.json            📄 캐릭터 YAML 필드 스키마
 │   │   ├─ CH_haru.yaml              ✅ 예시 캐릭터 (speech_style, memory_voice, state 완료)
-│   │   ├─ CH_default.yaml           📄 기본 캐릭터 (내용 확인 필요)
-│   │   └─ chracter_Haru.yaml        ⚠️ 파일명 오타 (charACTER → character), 정리 필요
+│   │   ├─ CH_default.yaml           📄 기본 캐릭터
+│   │   └─ chracter_Haru.yaml        ⚠️ 파일명 오타 (charACTER → character) — 삭제 권장
 │   │
 │   ├─ world/
 │   │   ├─ W_schema.json             📄 세계관 YAML 스키마
@@ -69,34 +70,45 @@ Achat/
 │           └─ story.md               📄 배경 스토리 (이미 존재)
 │
 ├─ agent/                              # 상위 오케스트레이터
-│   ├─ core.py                        🔲 전체 흐름 조율
+│   ├─ core.py                        🔲 전체 흐름 조율 + 모드 분기 (대화↔기능)
 │   ├─ persona.py                     🔲 캐릭터 YAML 로딩 + 핫스왑
 │   ├─ state.py                       🔲 mood / affection 전환 규칙
 │   ├─ router.py                      🔲 시동어 / 명령어 분기
-│   └─ memory.py                      ⚠️ README에 없음 — 역할 미정의 (agent 레벨 메모리?)
+│   └─ memory.py                      ⚠️ README에 없음 — 역할 미정의 (정리 필요)
 │
-├─ ui/                                 # PySide6 위젯 (배포 환경)
-│   ├─ widget.py                      🔲 Frameless / Always-on-top 메인 위젯
+├─ ui/                                 # PySide6 플로팅 UI (배포 환경)
+│   ├─ widget.py                      🔲 Frameless / Always-on-top / 모서리 스냅 / hover 투명도
 │   ├─ chat_panel.py                  🔲 스트리밍 토큰 표시 채팅 패널
-│   └─ tray.py                        🔲 시스템 트레이
+│   ├─ tray.py                        🔲 시스템 트레이
+│   └─ mode_switcher.py               🔲 대화 모드 ↔ 기능 모드 전환 UI
+│
+├─ tools/                              # 기능 모드 — 도구 마이크로서비스
+│   ├─ base.py                        🔲 Tool 인터페이스 (파라미터 수신 → 실행 → 결과 반환)
+│   ├─ folder/
+│   │   ├─ classifier.py             🔲 파일 분류 (확장자 / MIME 기반)
+│   │   ├─ converter.py              🔲 확장자 일괄 변환 (Pillow, ffmpeg 선택)
+│   │   └─ renamer.py                🔲 이름 일괄 변환 (pathlib)
+│   ├─ prompt_converter.py            🔲 프롬프트 변환
+│   └─ search/
+│       ├─ local_search.py           🔲 로컬 파일 인덱싱 + FTS 검색 (SQLite FTS5 / whoosh)
+│       └─ web_search.py             🔲 인터넷 검색 (DuckDuckGo / SearXNG)
 │
 ├─ training/                           # LoRA 파인튜닝
 │   ├─ lora_train.py                  🔲 QLoRA 학습 (8GB VRAM 최적화)
 │   ├─ dataset.py                     🔲 ChatML 포맷 데이터셋 로더
-│   └─ data/                          ⚠️ README는 루트의 data/lora/ 로 표기 — 실제 위치 다름
+│   └─ data/                          ⚠️ 기존 데이터 위치 (README는 루트 data/lora/ 로 변경)
 │       ├─ data_gen_prompt.md         📄 학습 데이터 생성 프롬프트 가이드
 │       ├─ common/
 │       │   ├─ memory_ref.jsonl       📄 기억 참조 학습 데이터
 │       │   ├─ ai_tell_removal.jsonl  📄 AI 투 표현 제거 학습 데이터
 │       │   └─ persona_follow.jsonl   📄 페르소나 준수 학습 데이터
-│       ├─ personality/
-│       │   ├─ bright.jsonl           📄 밝은 성격
-│       │   ├─ calm.jsonl             📄 차분한 성격
-│       │   ├─ tsundere.jsonl         📄 츤데레 성격
-│       │   ├─ dependent.jsonl        📄 의존적 성격
-│       │   └─ cynical.jsonl          📄 냉소적 성격
+│       ├─ personality/               📄 5종 성격별 데이터
 │       └─ speech_style/              📄 말투 조합 데이터
-│           └─ (informal/formal/mixed × blunt/soft)
+│
+├─ data/                               ⚠️ README 신규 표기 — 실제 미생성 (Phase 5 전 생성 필요)
+│   └─ lora/
+│       ├─ conversation/              🔲 대화 모드용 캐릭터 대화 데이터 (ChatML)
+│       └─ function/                  🔲 기능 모드용 자연어 → JSON 파라미터 추출 예시
 │
 ├─ scripts/                            # 변환 스크립트
 │   ├─ merge_lora.py                  🔲 LoRA 병합 (low_cpu_mem_usage=True)
@@ -107,16 +119,12 @@ Achat/
 │   ├─ memory_test.py                 🔲 기억 유지 정확도
 │   └─ speed_bench.py                 🔲 GPU/CPU 추론 속도 벤치마크
 │
-├─ api/                                ⚠️ README에 없음
-│   └─ server.py                      🔲 역할 미정의 (향후 웹 UI 확장 용도 추정)
-│
-├─ tools/
-│   ├─ base.py                        🔲 Tool 인터페이스
-│   └─ commands.py                    🔲 명령어 처리
+├─ api/                                ⚠️ README에 없음 — 역할 미정의
+│   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
 │
 ├─ main.py                             🔲 프로젝트 진입점
 ├─ config.py                           🔲 dev / deploy 환경 분기 설정
-├─ requirements.txt                    📄 (현재 단일 파일 — dev/deploy 분리 필요)
+├─ requirements.txt                    ⚠️ 단일 파일 — Phase 0에서 dev/deploy 분리 필요
 ├─ Dockerfile                          📄 Docker 설정
 └─ .gitignore
 ```
@@ -127,14 +135,16 @@ Achat/
 
 | 항목 | README.md 표기 | 실제 파일시스템 | 처리 방안 |
 |---|---|---|---|
-| 학습 데이터 위치 | `data/lora/` (루트) | `training/data/` | README 또는 실제 경로 통일 필요 |
-| `api/server.py` | 없음 | 존재 | 역할 정의 후 README에 추가하거나 삭제 |
+| 학습 데이터 위치 | `data/lora/conversation/` + `data/lora/function/` (루트) | `training/data/` (기존 구조) | Phase 5 전 `data/lora/` 신규 생성, 기존 데이터 병합/이전 |
+| `data/lora/function/` | 신규 표기 | 미존재 | Phase 5에서 기능 모드 JSON 추출 데이터 구축 시 생성 |
+| `tools/folder/`, `tools/search/` | 하위 구조화 | 이전 `tools/base.py`, `tools/commands.py`만 존재 | Phase 7에서 신규 구현 |
+| `ui/mode_switcher.py` | 신규 추가 | 미존재 | Phase 4에서 구현 |
 | `agent/memory.py` | 없음 | 존재 | 역할 정의 필요 (`memory/` 레이어와 중복 가능성) |
-| `conversation/utils/` | 없음 | 존재 | README에 추가 검토 |
-| `chracter_Haru.yaml` | 없음 | 존재 (오타) | 삭제 또는 `CH_haru.yaml`로 통합 |
-| `CH_default.yaml` | 없음 | 존재 | 기본 캐릭터 역할이면 README에 추가 |
-| `rag/sources/` 내용물 | 파일명만 기재 | place.md, culture.md, story.md 존재 | 이미 준비됨 |
-| `requirements.txt` | `requirements-dev.txt` / `requirements-deploy.txt` 분리 | 단일 `requirements.txt` | Phase 0 작업 필요 |
+| `conversation/utils/` | 없음 | 존재 | README에 추가 또는 삭제 검토 |
+| `chracter_Haru.yaml` | 없음 | 존재 (오타) | 삭제 권장 |
+| `api/server.py` | 없음 | 존재 | 역할 정의 후 README에 추가하거나 삭제 |
+| `requirements.txt` | `requirements-dev.txt` / `requirements-deploy.txt` 분리 | 단일 파일 | Phase 0 작업 |
+| `docs/plan1/` | 없음 | 빈 디렉토리 | 삭제 권장 |
 
 ---
 
@@ -143,6 +153,6 @@ Achat/
 | 상태 | 수 | 항목 |
 |---|---|---|
 | ✅ 완료 | 9 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 |
-| 📄 데이터/설정 | 20+ | .yaml, .json 스키마, .jsonl 학습 데이터 |
-| 🔲 구현 예정 | 30 | 모든 .py 파일 (현재 비어있음) |
-| ⚠️ 정리 필요 | 4 | 오타 파일, 경로 불일치, 역할 미정 파일 |
+| 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터 |
+| 🔲 구현 예정 | 33 | 모든 .py 파일 + data/lora/ 데이터 |
+| ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |
