@@ -1,0 +1,42 @@
+[project]
+name = "achat"
+version = "0.1.0"
+description = "플로팅 PIP 캐릭터 챗봇 + 기능 도우미 — 개발 환경 (Linux + GPU)"
+requires-python = ">=3.10"
+dependencies = [
+    # ── LLM / 파인튜닝 ──────────────────────────────────────
+    "transformers>=4.45.0",
+    "peft>=0.11.0",
+    "bitsandbytes>=0.44.0",      # Blackwell RTX 50xx (SM 10.x) 지원 최소 버전
+    "accelerate>=0.30.0",
+    "datasets>=2.18.0",
+    "huggingface_hub>=0.23.0",
+    # PyTorch CUDA 빌드는 아래 [tool.uv.sources] 인덱스를 통해 설치됨
+    "torch",
+    "torchvision",
+    "torchaudio",
+
+    # ── 임베딩 / VDB ────────────────────────────────────────
+    "sentence-transformers>=3.0.0",   # bge-m3 로컬 임베딩
+    "chromadb>=0.5.0",                # 장기 메모리 + RAG VDB
+
+    # ── 데이터 처리 ─────────────────────────────────────────
+    "PyYAML>=6.0",
+    "numpy",
+
+    # ── 유틸리티 ────────────────────────────────────────────
+    "loguru>=0.7.0",
+    "tqdm",
+    "rich",
+]
+
+# PyTorch CUDA 12.8 빌드 인덱스 (RTX 5060 Ti / Blackwell 대응)
+[tool.uv.sources]
+torch     = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio  = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name     = "pytorch-cu128"
+url      = "https://download.pytorch.org/whl/cu128"
+explicit = true

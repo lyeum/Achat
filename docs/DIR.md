@@ -123,8 +123,10 @@ Achat/
 │   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
 │
 ├─ main.py                             🔲 프로젝트 진입점
-├─ config.py                           🔲 dev / deploy 환경 분기 설정
-├─ requirements.txt                    ⚠️ 단일 파일 — Phase 0에서 dev/deploy 분리 필요
+├─ config.py                           ✅ dev / deploy 환경 분기 설정
+├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU)
+├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
+├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
 ├─ Dockerfile                          📄 Docker 설정
 └─ .gitignore
 ```
@@ -143,7 +145,7 @@ Achat/
 | `conversation/utils/` | 없음 | 존재 | README에 추가 또는 삭제 검토 |
 | `chracter_Haru.yaml` | 없음 | 존재 (오타) | 삭제 권장 |
 | `api/server.py` | 없음 | 존재 | 역할 정의 후 README에 추가하거나 삭제 |
-| `requirements.txt` | `requirements-dev.txt` / `requirements-deploy.txt` 분리 | 단일 파일 | Phase 0 작업 |
+| 패키지 관리 | `requirements-*.txt` | `pyproject.toml` / `pyproject-deploy.toml` (uv) | ✅ 완료 |
 | `docs/plan1/` | 없음 | 빈 디렉토리 | 삭제 권장 |
 
 ---
