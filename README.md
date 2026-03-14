@@ -419,32 +419,31 @@ Achat/
 
 ---
 
-## 주요 의존성
+## 패키지 관리 (uv)
 
-### 개발 환경 (`requirements-dev.txt`)
-```
-transformers>=4.45.0
-peft>=0.11.0
-bitsandbytes>=0.44.0
-accelerate>=0.30.0
-sentence-transformers        # bge-m3 임베딩
-chromadb                     # VDB (장기 메모리 + RAG)
-PyYAML
-loguru
-tqdm
-rich
+의존성은 uv로 관리합니다. 환경별로 별도 toml 파일을 사용합니다.
+
+| 파일 | 환경 | 용도 |
+|---|---|---|
+| `pyproject.toml` | Linux + GPU | QLoRA 학습 / 대화 엔진 개발 |
+| `pyproject-deploy.toml` | Windows + CPU | GGUF 추론 + PySide6 위젯 실행 |
+
+### 개발 환경 설치 (Linux)
+```bash
+# uv 설치 (최초 1회)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 의존성 설치 (pyproject.toml 기준)
+uv sync
+
+# PyTorch CUDA 12.8 빌드는 [tool.uv.sources] 설정으로 자동 처리됨
 ```
 
-### 배포 환경 (`requirements-deploy.txt`)
-```
-llama-cpp-python             # CPU 빌드 (로컬 추론)
-PySide6                      # 플로팅 UI
-chromadb                     # VDB (장기 메모리 + RAG)
-sentence-transformers        # bge-m3 (시맨틱 검색)
-Pillow                       # 이미지 확장자 변환
-whoosh                       # 로컬 파일 검색 (SQLite FTS5 대안)
-PyYAML
-loguru
+### 배포 환경 설치 (Windows)
+```bash
+# pyproject-deploy.toml → pyproject.toml 로 복사 후 sync
+copy pyproject-deploy.toml pyproject.toml
+uv sync
 ```
 
 ---
