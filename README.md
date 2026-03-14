@@ -299,8 +299,8 @@ Achat/
 ### Phase 0 — 환경 구성 및 기반 설계
 > 목표: 개발/배포 환경 분리, 설정 파일 구조 확정
 
-- [ ] `requirements-dev.txt` / `requirements-deploy.txt` 분리
-- [ ] `config.py` — dev / deploy 환경 분기 설정
+- [x] `requirements-dev.txt` / `requirements-deploy.txt` 분리
+- [x] `config.py` — dev / deploy 환경 분기 설정
 - [x] 캐릭터 YAML 스키마 확정 (`speech_style`, `memory_voice`, `state` 필드 추가) — `CH_haru.yaml` 반영 완료
 - [x] 메모리 VDB 스키마 확정 (`M_schema.json` 확장) — 중요도 규칙, 검색 설정 반영 완료
 

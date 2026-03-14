@@ -69,8 +69,8 @@ CONFIG = {
 - **방침**: Phase 5 전 `data/lora/` 디렉토리 생성 후 기존 데이터 분류·이전
 
 ### 완료 기준
-- [ ] `requirements-dev.txt` / `requirements-deploy.txt` 두 파일 존재
-- [ ] `config.py` — `get_config()` 함수로 환경별 dict 반환
+- [x] `requirements-dev.txt` / `requirements-deploy.txt` 두 파일 존재
+- [x] `config.py` — `get_config()` 함수로 환경별 dict 반환
 
 ---
 
