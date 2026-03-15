@@ -341,10 +341,10 @@ Achat/
 > 목표: 세계관 문서 시맨틱 검색 연동
 > 상세 구현: [대화품질.md](대화품질.md) — 시맨틱 검색 전략, 캐릭터 관점 재서술
 
-- [ ] `rag/index.py` — 세계관 문서 청킹 + ChromaDB 인덱싱 (bge-m3)
-- [ ] `rag/retrieve.py` — 시맨틱 유사도 검색, 임계값 0.7 이상만 반환
-  - 키워드 트리거 방식 **사용 안 함** — 매 턴 유사도 검색, 결과 없으면 삽입 안 함
-- [ ] 검색 결과를 캐릭터 관점으로 재서술 후 Layer C에 삽입
+- [x] `rag/index.py` — 세계관 문서 청킹(400자/overlap 50) + ChromaDB 인덱싱 (bge-m3, cosine space)
+- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, threshold 0.7 미만 빈 리스트 반환
+- [x] `conversation/core/prompt_build.py` — `assemble(rag_results=)` 추가, Layer B에 RAG 결과 병합
+- [x] `conversation/core/router.py` — RAG 검색 연동 (장기 메모리 > 세계관 RAG 우선순위)
 
 ---
 

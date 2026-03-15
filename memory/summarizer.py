@@ -9,7 +9,7 @@ from conversation.core.session import ConversationSession
 from memory.long_term import LongTermMemory
 
 # 중요도 판정 키워드 (M_schema.json importance_rules 기준)
-_HIGH_KEYWORDS = ["이름", "이야", "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워"]
+_HIGH_KEYWORDS = ["이름", "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워"]
 _MID_KEYWORDS  = ["좋아", "싫어", "취미", "매일", "항상", "자주", "기억"]
 
 
@@ -79,6 +79,7 @@ def write_to_vdb(
     session: ConversationSession,
     long_term: LongTermMemory,
     character: dict,
+    trigger_n: int = 10,
 ) -> bool:
     """score >= 0.5인 경우에만 ChromaDB에 저장한다.
 
@@ -91,13 +92,14 @@ def write_to_vdb(
         return False
 
     mem_id = f"mem_{session.character_id.lower()}_{uuid.uuid4().hex[:8]}"
+    turn_start = max(0, session.turn_count - trigger_n)
     entry = {
         "id": mem_id,
         "content": summary,
         "metadata": {
             "character_id": session.character_id,
             "session_id":   str(id(session)),
-            "turn_range":   f"{session.turn_count - 10}-{session.turn_count}",
+            "turn_range":   f"{turn_start}-{session.turn_count}",
             "importance":   score,
             "tags":         [],
             "location":     session.act_id or "",

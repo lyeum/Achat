@@ -25,8 +25,8 @@ Achat/
 │   ├─ __init__.py                    ✅ 패키지 초기화 (import 경로 확보)
 │   ├─ core/
 │   │   ├─ llm_client.py             ✅ llama_cpp + transformers 듀얼 백엔드 (스트리밍, 토큰 카운트)
-│   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly (Layer E는 호출자 append)
-│   │   ├─ router.py                 ✅ `handle_turn()` — VDB 검색 → PromptBuilder → LLM → mood/affection → 요약 트리거
+│   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly, assemble(rag_results=) — Layer B에 RAG 병합
+│   │   ├─ router.py                 ✅ `handle_turn()` — VDB + RAG 검색 → PromptBuilder → LLM → mood/affection → 요약 트리거
 │   │   └─ session.py                ✅ 세션 상태 (mood, affection, turn_count, dialogue_log)
 │   │
 │   ├─ loader/
@@ -63,8 +63,9 @@ Achat/
 │   └─ summarizer.py                  ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 │
 ├─ rag/                                # RAG 파이프라인
-│   ├─ index.py                       🔲 세계관 문서 청킹 + ChromaDB 인덱싱
-│   ├─ retrieve.py                    🔲 시맨틱 유사도 검색
+│   ├─ __init__.py                    ✅ 패키지 초기화
+│   ├─ index.py                       ✅ `index_world()` — .md 청킹(400자/overlap 50) + ChromaDB 인덱싱 (cosine space)
+│   ├─ retrieve.py                    ✅ `WorldRetriever.query()` — 매 턴 실행, threshold 0.7, 컬렉션 미존재 안전 처리
 │   └─ sources/
 │       └─ world/
 │           ├─ place.md               📄 장소 정보 (이미 존재)
@@ -157,7 +158,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 25 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 (memory/__init__, short_term, long_term, summarizer / agent/__init__, core, persona, state / conversation/core/router) |
+| ✅ 완료 | 28 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 (rag/__init__, index, retrieve) |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터 |
-| 🔲 구현 예정 | 17 | Phase 3~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
+| 🔲 구현 예정 | 14 | Phase 4~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |
