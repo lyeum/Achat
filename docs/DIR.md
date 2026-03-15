@@ -26,7 +26,7 @@ Achat/
 │   ├─ core/
 │   │   ├─ llm_client.py             ✅ llama_cpp + transformers 듀얼 백엔드 (스트리밍, 토큰 카운트)
 │   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly (Layer E는 호출자 append)
-│   │   ├─ router.py                 🔲 턴 처리 + Post-processing
+│   │   ├─ router.py                 ✅ `handle_turn()` — VDB 검색 → PromptBuilder → LLM → mood/affection → 요약 트리거
 │   │   └─ session.py                ✅ 세션 상태 (mood, affection, turn_count, dialogue_log)
 │   │
 │   ├─ loader/
@@ -57,9 +57,10 @@ Achat/
 │   └─ main.py                        ✅ CLI 루프 진입점 (dry-run 모드 포함, ROOT sys.path 삽입)
 │
 ├─ memory/                             # 메모리 관리 레이어
-│   ├─ short_term.py                  🔲 슬라이딩 윈도우 (최근 N턴)
-│   ├─ long_term.py                   🔲 ChromaDB 저장 / 시맨틱 검색 (bge-m3)
-│   └─ summarizer.py                  🔲 N턴 트리거 + 요약 + 중요도 scoring
+│   ├─ __init__.py                    ✅ 패키지 초기화
+│   ├─ short_term.py                  ✅ `get_recent()` — 슬라이딩 윈도우
+│   ├─ long_term.py                   ✅ ChromaDB store/query (bge-m3, threshold 0.7, importance≥0.5)
+│   └─ summarizer.py                  ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 │
 ├─ rag/                                # RAG 파이프라인
 │   ├─ index.py                       🔲 세계관 문서 청킹 + ChromaDB 인덱싱
@@ -71,10 +72,11 @@ Achat/
 │           └─ story.md               📄 배경 스토리 (이미 존재)
 │
 ├─ agent/                              # 상위 오케스트레이터
-│   ├─ core.py                        🔲 전체 흐름 조율 + 모드 분기 (대화↔기능)
-│   ├─ persona.py                     🔲 캐릭터 YAML 로딩 + 핫스왑
-│   ├─ state.py                       🔲 mood / affection 전환 규칙
-│   ├─ router.py                      🔲 시동어 / 명령어 분기
+│   ├─ __init__.py                    ✅ 패키지 초기화
+│   ├─ core.py                        ✅ `Agent` 클래스 — 컴포넌트 초기화 + `chat()` 대화 진입점
+│   ├─ persona.py                     ✅ `load_persona()` / `swap_persona()` 핫스왑
+│   ├─ state.py                       ✅ mood_triggers 키워드 매칭, affection ±3 증감
+│   ├─ router.py                      🔲 시동어 / 명령어 분기 (Phase 2 미구현, Phase 7에서 확장)
 │   └─ memory.py                      ⚠️ README에 없음 — 역할 미정의 (정리 필요)
 │
 ├─ ui/                                 # PySide6 플로팅 UI (배포 환경)
@@ -155,7 +157,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 16 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1 구현 7개 (llm_client, prompt_build, session, character_load, world_load, memory_load, main.py + __init__.py) |
+| ✅ 완료 | 25 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 (memory/__init__, short_term, long_term, summarizer / agent/__init__, core, persona, state / conversation/core/router) |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터 |
-| 🔲 구현 예정 | 26 | Phase 2~7 .py 파일 + data/lora/ 데이터 |
+| 🔲 구현 예정 | 17 | Phase 3~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |

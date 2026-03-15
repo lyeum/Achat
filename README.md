@@ -325,15 +325,15 @@ Achat/
 > 목표: 페르소나, 상태, 메모리, Post-processing 전 레이어 완성
 > 상세 구현: [대화품질.md](대화품질.md) — 7계층 아키텍처, session/state/memory 구현 계획
 
-- [ ] `agent/persona.py` — 캐릭터 YAML 로딩 및 핫스왑
-- [ ] `agent/state.py` — mood / affection 상태 정의 및 전환 규칙
-- [ ] `memory/short_term.py` — 최근 N턴 슬라이딩 윈도우 버퍼
-- [ ] `memory/long_term.py` — ChromaDB 저장 / 시맨틱 검색 (bge-m3)
-- [ ] `memory/summarizer.py` — N턴 트리거 + 요약 + 중요도 scoring
-- [ ] `conversation/core/router.py` — Post-processing 레이어
-  - mood / affection 업데이트
-  - 메모리 쓰기 트리거 체크
-  - Act 전환 조건 체크
+- [x] `agent/persona.py` — 캐릭터 YAML 로딩 및 핫스왑 (`load_persona`, `swap_persona`)
+- [x] `agent/state.py` — mood_triggers 키워드 매칭, affection ±3 증감 (0~100 클램핑)
+- [x] `agent/core.py` — 전체 컴포넌트 초기화 + 대화 모드 진입점 `chat()`
+- [x] `memory/short_term.py` — `get_recent()` 슬라이딩 윈도우
+- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.7, importance ≥ 0.5 필터)
+- [x] `memory/summarizer.py` — N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
+- [x] `conversation/core/router.py` — `handle_turn()` 전체 턴 파이프라인
+  - VDB 검색 → PromptBuilder → LLM → mood/affection 업데이트 → 세션 기록 → 요약 트리거
+- [x] `conversation/main.py` — Router 연동으로 업데이트
 
 ---
 
