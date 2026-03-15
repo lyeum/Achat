@@ -143,12 +143,14 @@ Achat/
 ├─ api/                                ⚠️ README에 없음 — 역할 미정의
 │   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
 │
-├─ main.py                             ✅ QApplication + UIEngine + AppTrayIcon 조립 진입점
+├─ main.py                             ✅ 루트 진입점 — torch 먼저 로드 후 Qt 초기화 (shared lib 충돌 방지)
+│                                          _cleanup_previous() PID 파일 기반 이전 프로세스 정리
+│                                          _check_vram() CUDA 여유 메모리 확인 및 경고
 ├─ config.py                           ✅ dev / deploy 환경 분기 설정
 ├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU)
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
-├─ Dockerfile                          📄 Docker 설정
+├─ Dockerfile                          ✅ CUDA 12.8 + Ubuntu 22.04 + uv 기반 (fcitx5-hangul 포함)
 └─ .gitignore
 ```
 
@@ -176,7 +178,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 38 | docs 문서 6개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 (ui_ux/__init__, bridge, chat_panel, widget, tray, qml/main.qml, qml/ChatBubble.qml, main.py) + training/log/_schema.json |
+| ✅ 완료 | 40 | docs 문서 6개, CH_Haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 + main.py + training/log/_schema.json + Dockerfile |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
 | 🔲 구현 예정 | 8 | Phase 5~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |

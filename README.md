@@ -362,9 +362,10 @@ Achat/
 - [x] `ui_ux/chat_panel.py` — `LLMWorker(QThread)` 비동기 LLM 호출
 - [x] `ui_ux/widget.py` — `UIEngine` QML 엔진 초기화 + bridge 등록
 - [x] `ui_ux/tray.py` — `AppTrayIcon` 열기/숨기기, 캐릭터 변경, 종료
-- [x] `ui_ux/qml/main.qml` — 플로팅 윈도우 (Frameless/Always-on-top, 드래그, 모서리 스냅, hover 투명도, 버블 축소/확장, 모드 전환)
+- [x] `ui_ux/qml/main.qml` — 플로팅 윈도우 (전체 창 드래그, 모서리 스냅, hover 투명도, 버블 축소/확장, 모드 전환, 한글 폰트 로드)
 - [x] `ui_ux/qml/ChatBubble.qml` — 재사용 가능한 말풍선 컴포넌트
-- [x] `main.py` — 루트 진입점 (Agent + UIEngine + AppTrayIcon)
+- [x] `ui_ux/qml/Style.qml` — 디자인 토큰 singleton
+- [x] `main.py` — torch 선로드 → Qt 초기화 순서 보장, PID 파일 기반 이전 프로세스 정리, VRAM 체크
 
 ---
 
