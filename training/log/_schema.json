@@ -1,0 +1,46 @@
+{
+  "description": "training/log/ JSONL 저장 형식 정의. 각 파일은 카테고리별로 분리된다.",
+  "files": {
+    "daily.jsonl":   "일상 잡담, 날씨, 근황",
+    "emotion.jsonl": "감정 표현 / 반응",
+    "advice.jsonl":  "고민 상담, 의견 요청",
+    "memory.jsonl":  "이전 대화 언급, 기억 참조",
+    "persona.jsonl": "페르소나 일관성 테스트 (무례한 입력, 경계 침범 등)"
+  },
+
+  "fields": {
+    "messages": {
+      "type": "array",
+      "description": "user/assistant 교대 턴. system 메시지 포함하지 않음 — 빌드 시 character_id + affection 기준으로 자동 삽입.",
+      "items": {
+        "role":    "user | assistant",
+        "content": "대화 내용"
+      }
+    },
+    "character_id":    { "type": "string", "example": "Haru" },
+    "category":        { "type": "string", "values": ["daily", "emotion", "advice", "memory", "persona"] },
+    "affection":       { "type": "string", "values": ["low", "mid", "high"], "description": "대화 당시 친밀도 구간" },
+    "mood":            { "type": "string", "values": ["neutral", "happy", "annoyed", "sad"] },
+    "emotion_trigger": { "type": "string", "description": "대화 유발 상황 자유 기술. 예: 고민_상담, 장난, 재회" }
+  },
+
+  "example": {
+    "messages": [
+      { "role": "user",      "content": "하..이직할까 말까 고민이야." },
+      { "role": "assistant", "content": "왜, 거기서 또 무슨 일 있었어?" },
+      { "role": "user",      "content": "뭔가 내가 성장을 못하는 거 같아서." },
+      { "role": "assistant", "content": "음.. 성장이 가능한 쪽으로 가는 게 낫지 않아?" }
+    ],
+    "character_id":    "Haru",
+    "category":        "advice",
+    "affection":       "high",
+    "mood":            "neutral",
+    "emotion_trigger": "고민_상담"
+  },
+
+  "notes": [
+    "한 줄(line) = 대화 한 건. jsonl 저장 시 줄바꿈 없이 한 줄로 직렬화.",
+    "system 메시지는 포함하지 않음. 빌드 시 scripts/build_dataset.py가 자동 삽입.",
+    "검토 후 제외할 항목은 줄 앞에 // 를 붙여 비활성화하거나 삭제."
+  ]
+}
