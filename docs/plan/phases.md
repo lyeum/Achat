@@ -242,51 +242,70 @@ return response
 
 ## Phase 4 — 플로팅 UI 구현
 
-> 목표: PySide6 PIP 스타일 플로팅 UI (Windows 배포 대상)
+> 목표: **QML + PySide6** PIP 스타일 플로팅 UI (Windows 배포 대상)
 > 선행 조건: Phase 2 완료 (agent/core.py `chat()` 동작)
-> 참고: Phase 1~3와 병렬 진행 가능 (agent.chat() 인터페이스만 있으면 됨)
+> **설계 변경**: 순수 QWidget → QML + PySide6로 전환 (비정형 모양/애니메이션 구현 용이성)
+
+### 아키텍처
+
+```
+main.py
+  └─ UIEngine (ui_ux/widget.py)
+       ├─ QQmlApplicationEngine
+       ├─ ChatBridge (ui_ux/bridge.py) ──→ context property 'bridge'
+       │     └─ LLMWorker (ui_ux/chat_panel.py) : QThread
+       └─ ui_ux/qml/main.qml
+             └─ ui_ux/qml/ChatBubble.qml
+  └─ AppTrayIcon (ui_ux/tray.py)
+```
 
 ### 구현 순서
 
-#### 4-1. `ui/widget.py` — 메인 위젯
-- `QWidget` 상속, `Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint`
-- 드래그 이동: `mousePressEvent`, `mouseMoveEvent` 오버라이드
-- 반투명 배경: `setAttribute(Qt.WA_TranslucentBackground)`
-- **모서리 스냅**: 화면 가장자리 근접 시 자동 흡착
-- **hover 투명도 전환**: 마우스 벗어나면 투명도 증가 (QPropertyAnimation 활용)
-- **버블 축소/확장**: 최소화 시 원형 버블로 축소 → 클릭 시 채팅 패널 확장
-- 크기 조절 핸들 (우하단)
+#### 4-1. `ui_ux/bridge.py` — Python↔QML 브리지
+- `ChatBridge(QObject)` — QML context property `bridge`로 등록
+- Signal (Python→QML): `messageAdded(role, content)`, `statusChanged(status)`, `characterNameChanged(name)`
+- Slot (QML→Python): `sendMessage(text)`, `snapToEdge(x,y,w,h) -> list`, `changeCharacter(id)`
 
-#### 4-2. `ui/chat_panel.py` — 채팅 패널
-- `QScrollArea` + `QVBoxLayout` 기반 말풍선 UI
-- 스트리밍 토큰 표시: `QThread` + `pyqtSignal` 패턴
-  ```python
-  class LLMWorker(QThread):
-      token_received = pyqtSignal(str)
-      finished = pyqtSignal()
-  ```
-- 사용자/캐릭터 말풍선 색상 구분
+#### 4-2. `ui_ux/chat_panel.py` — LLMWorker
+- `LLMWorker(QThread)` — `agent.chat(stream=False)` 비동기 실행
+- Signal: `response_ready(str)`, `error_occurred(str)`
 
-#### 4-3. `ui/tray.py` — 시스템 트레이
-- `QSystemTrayIcon` 설정
-- 메뉴: 열기 / 캐릭터 변경 / 모드 전환 / 종료
-- 더블클릭 시 위젯 토글
+#### 4-3. `ui_ux/widget.py` — QML 엔진
+- `UIEngine` — `QQmlApplicationEngine` 래퍼
+- bridge를 context property로 등록 후 `main.qml` 로드
 
-#### 4-4. `ui/mode_switcher.py` — 모드 전환 UI
-- 대화 모드 ↔ 기능 모드 전환 버튼/탭
-- 기능 모드 선택 시: 도구 목록 표시 (폴더 정리 / 프롬프트 변환 / 검색)
-- 모드 전환 시 `agent.core`에 모드 변경 신호 전달
+#### 4-4. `ui_ux/qml/main.qml` — 플로팅 윈도우
+- `Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool`
+- 드래그: `MouseArea` → `bridge.snapToEdge()` 호출로 모서리 스냅
+- hover 투명도: `HoverHandler` + `Behavior on opacity`
+- 버블 축소/확장: `isBubble` 프로퍼티 토글, width/height `Behavior` 애니메이션
+- 모드 전환 버튼 (대화 / 기능) — Phase 7에서 기능 모드 패널 확장
+- `ListView` + `messageModel(ListModel)` — `bridge.messageAdded` 시그널로 추가
 
-#### 4-5. 캐릭터 전환 UI 연동
-- 트레이 메뉴 "캐릭터 변경" → `agent.swap_persona()` 호출
-- 전환 시 채팅 패널 클리어 여부 선택 다이얼로그
+#### 4-5. `ui_ux/qml/ChatBubble.qml` — 말풍선 컴포넌트
+- `role` 프로퍼티로 좌/우 정렬 및 색상 분기
+
+#### 4-6. `ui_ux/tray.py` — 시스템 트레이
+- 열기/숨기기, 캐릭터 변경(`bridge.changeCharacter()`), 종료
+
+#### 4-7. `ui_ux/qml/Style.qml` — 디자인 토큰 (추가)
+- `pragma Singleton` — 색상(bgWindow/Bubble/User/Assistant), 폰트 패밀리/크기, 간격/반지름, 애니메이션 ms, 불투명도, 기본 크기 상수
+- `qmldir`에 `singleton Style 1.0 Style.qml` 등록
+
+#### 4-8. `ui_ux/assets/` — 에셋 디렉토리 (추가)
+- `icons/` — 앱 아이콘 PNG (tray.py `_make_default_icon()` fallback 교체용)
+- `characters/` — 캐릭터 PNG/GIF (bubble 상태 아바타 표시용)
 
 ### 완료 기준
-- [ ] 위젯 항상 최상위 표시, 드래그 이동, 화면 모서리 스냅 동작
-- [ ] hover 이탈 시 투명도 전환 동작
-- [ ] 최소화 시 버블 축소 → 클릭 시 확장
-- [ ] 응답이 스트리밍으로 표시됨
-- [ ] 대화 ↔ 기능 모드 전환 UI 동작
+- [x] `ui_ux/__init__.py`, `ui_ux/bridge.py`, `ui_ux/chat_panel.py`, `ui_ux/widget.py`, `ui_ux/tray.py` 구현
+- [x] `ui_ux/qml/main.qml`, `ui_ux/qml/ChatBubble.qml` 구현
+- [x] `ui_ux/qml/Style.qml`, `ui_ux/qml/qmldir` 작성
+- [x] `ui_ux/assets/icons/`, `ui_ux/assets/characters/` 디렉토리 생성
+- [x] `main.py` — UIEngine + AppTrayIcon 연동
+- [x] `mode_switcher.py` 제거 — QML 모드 전환 버튼으로 대체
+- [ ] (실환경 검증) Frameless 플로팅 윈도우 표시, 드래그, 모서리 스냅
+- [ ] (실환경 검증) hover 투명도 전환, 버블 축소/확장 애니메이션
+- [ ] (실환경 검증) 메시지 전송 → LLMWorker 비동기 응답 → ListView 추가
 
 ---
 
