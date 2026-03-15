@@ -43,27 +43,20 @@ class LLMClient:
 
     def _load_transformers(self) -> None:
         import torch
-        from transformers import (
-            AutoModelForCausalLM,
-            AutoTokenizer,
-            BitsAndBytesConfig,
-        )
+        from transformers import AutoModelForCausalLM, AutoTokenizer
 
         model_name = self.cfg.get("model_name")
         if not model_name:
             raise ValueError("dev 환경에서 model_name이 설정되지 않았습니다.")
         logger.info(f"[llm_client] transformers 로딩: {model_name}")
 
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-        )
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
         self._model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            quantization_config=bnb_config,
-            device_map="auto",
+            dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
         )
+        self._model = self._model.to("cuda")
 
     # ── 생성 ─────────────────────────────────────────────────────────────────
 

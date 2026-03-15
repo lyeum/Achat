@@ -10,6 +10,22 @@
 ~/.local/bin/uv run python config.py
 ```
 
+### VRAM 확인 및 정리 (dev 환경 — GPU 사용 시)
+
+이전 실행이 비정상 종료된 경우 python 프로세스가 VRAM을 점유한 채 남아있을 수 있습니다.
+
+```bash
+# GPU 메모리 점유 확인
+nvidia-smi
+
+# Achat 이전 프로세스만 종료 (PID 파일 기준 — 다른 프로세스에 영향 없음)
+kill $(cat /tmp/achat.pid) && rm /tmp/achat.pid
+```
+
+> `main.py`는 시작 시 `/tmp/achat.pid`에 자기 PID를 기록하고,
+> 다음 실행 때 해당 PID만 자동으로 정리합니다.
+> VRAM 여유가 3 GB 미만이면 경고 로그가 출력됩니다.
+
 ### 대화 시작
 ```bash
 # dev 환경 (transformers 백엔드 — Qwen2.5-3B-Instruct 자동 다운로드)

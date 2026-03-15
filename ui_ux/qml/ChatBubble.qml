@@ -5,6 +5,7 @@ Item {
 
     property string role: "user"      // "user" | "assistant" | "system"
     property string content: ""
+    property string fontFamily: ""
 
     // 말풍선 너비: 부모의 75% 이하
     width: parent.width
@@ -40,7 +41,7 @@ Item {
             text: root.content
             color: "#E0E0E0"
             font.pixelSize: 13
-            font.family: "Malgun Gothic"
+            font.family: root.fontFamily
             wrapMode: Text.WordWrap
         }
     }
