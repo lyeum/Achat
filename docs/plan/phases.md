@@ -190,9 +190,14 @@ return response
 - 모드 분기는 Phase 7에서 확장
 
 ### 완료 기준
-- [ ] 10턴 대화 후 ChromaDB에 요약 저장 확인
-- [ ] 11턴 기억 참조 질문 시 VDB 결과가 Layer C에 삽입됨을 확인
-- [ ] mood/affection 상태가 대화에 따라 변하는 것 확인
+- [x] `memory/`, `agent/` 패키지 `__init__.py` 추가 (import 경로 확보)
+- [x] ChromaDB store/query 구현 (bge-m3 임베딩, threshold 0.7, importance ≥ 0.5 필터)
+- [x] `memory_trigger_n`턴마다 LLM 요약 → 중요도 scoring → VDB 저장 파이프라인
+- [x] `handle_turn()` — VDB 검색 → PromptBuilder → LLM → mood/affection → 세션 기록 → 요약 트리거
+- [x] `Agent` 클래스 — 전체 컴포넌트 초기화 + `chat()` 대화 진입점
+- [ ] (실환경 검증) 10턴 대화 후 ChromaDB에 요약 저장 확인
+- [ ] (실환경 검증) 기억 참조 질문 시 VDB 결과가 Layer C에 삽입됨 확인
+- [ ] (실환경 검증) mood/affection 상태 변화 확인
 
 ---
 
