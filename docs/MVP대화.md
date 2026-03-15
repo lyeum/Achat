@@ -26,14 +26,37 @@ kill $(cat /tmp/achat.pid) && rm /tmp/achat.pid
 > 다음 실행 때 해당 PID만 자동으로 정리합니다.
 > VRAM 여유가 3 GB 미만이면 경고 로그가 출력됩니다.
 
-### 대화 시작
+### 사전 준비 (Ubuntu 22.04 + 최초 1회)
+
 ```bash
-# dev 환경 (transformers 백엔드 — Qwen2.5-3B-Instruct 자동 다운로드)
-ACHAT_ENV=dev ~/.local/bin/uv run python -m conversation.main
+# 시스템 패키지 (Qt6 + 한글 입력기)
+sudo apt-get install -y \
+  libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+  libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+  libxcb-xinerama0 libxcb-xkb1 libegl1 libegl-mesa0 libglib2.0-0 \
+  fcitx5 fcitx5-hangul
+```
+
+### UI 대화 시작 (메인)
+
+```bash
+# 한글 입력기 시작 (최초 1회 또는 재부팅 후)
+fcitx5 &
+
+# dev 환경 실행
+ACHAT_ENV=dev python main.py
 ```
 
 > 처음 실행 시 HuggingFace에서 모델을 다운로드합니다 (약 6GB, 시간 소요).
 > 이후 실행부터는 캐시에서 로드되어 빠릅니다.
+> 앱 실행 중 **Ctrl+Space** 로 한/영 전환합니다.
+
+### CLI 대화 (UI 없이 터미널에서)
+
+```bash
+# dev 환경 (transformers 백엔드)
+ACHAT_ENV=dev python -m conversation.main
+```
 
 ### 대화 중 명령어
 | 입력 | 동작 |

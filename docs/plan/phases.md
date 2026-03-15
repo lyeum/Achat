@@ -275,12 +275,15 @@ main.py
 - bridge를 context property로 등록 후 `main.qml` 로드
 
 #### 4-4. `ui_ux/qml/main.qml` — 플로팅 윈도우
-- `Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool`
-- 드래그: `MouseArea` → `bridge.snapToEdge()` 호출로 모서리 스냅
+- `Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint` (`Qt.Tool` 제거 — WSLg 미표시 문제)
+- 드래그: `DragHandler + startSystemMove()` — 전체 창 드래그, 버튼 이벤트 충돌 없음
 - hover 투명도: `HoverHandler` + `Behavior on opacity`
 - 버블 축소/확장: `isBubble` 프로퍼티 토글, width/height `Behavior` 애니메이션
 - 모드 전환 버튼 (대화 / 기능) — Phase 7에서 기능 모드 패널 확장
 - `ListView` + `messageModel(ListModel)` — `bridge.messageAdded` 시그널로 추가
+- `FontLoader` — `/mnt/c/Windows/Fonts/malgun.ttf` 로드 (WSL2 한글 폰트)
+- `onClosing: Qt.quit()` — X 버튼/Alt+F4 시 앱 완전 종료
+- `Component.onCompleted` — 초기 위치 우하단 설정 (`Screen.width/height` 기준)
 
 #### 4-5. `ui_ux/qml/ChatBubble.qml` — 말풍선 컴포넌트
 - `role` 프로퍼티로 좌/우 정렬 및 색상 분기
@@ -301,11 +304,21 @@ main.py
 - [x] `ui_ux/qml/main.qml`, `ui_ux/qml/ChatBubble.qml` 구현
 - [x] `ui_ux/qml/Style.qml`, `ui_ux/qml/qmldir` 작성
 - [x] `ui_ux/assets/icons/`, `ui_ux/assets/characters/` 디렉토리 생성
-- [x] `main.py` — UIEngine + AppTrayIcon 연동
+- [x] `main.py` — torch 선로드, PID 정리, VRAM 체크, Qt 지연 import
 - [x] `mode_switcher.py` 제거 — QML 모드 전환 버튼으로 대체
-- [ ] (실환경 검증) Frameless 플로팅 윈도우 표시, 드래그, 모서리 스냅
-- [ ] (실환경 검증) hover 투명도 전환, 버블 축소/확장 애니메이션
-- [ ] (실환경 검증) 메시지 전송 → LLMWorker 비동기 응답 → ListView 추가
+- [x] (WSL2 dev 검증) 플로팅 윈도우 표시, 전체 창 드래그, 대화 동작 확인
+- [x] (WSL2 dev 검증) 메시지 전송 → LLMWorker 비동기 응답 → ListView 추가
+- [ ] (미해결) 한글 입력 — Ubuntu 22.04 + fcitx5-hangul 필요 (현재 20.04)
+- [ ] (미검증) hover 투명도 전환, 버블 축소/확장 애니메이션 (Windows 배포 환경)
+
+### WSL2 dev 환경 실행 이슈 및 해결
+| 이슈 | 원인 | 해결 |
+|---|---|---|
+| Segfault | PySide6 import가 torch보다 먼저 shared lib 로드 | torch → Qt 순서로 변경 (lazy import) |
+| 한글 폰트 깨짐 | Malgun Gothic이 Linux에 없음 | `FontLoader`로 Windows 폰트 직접 로드 |
+| 버튼 안 먹힘 | 전체 창 MouseArea가 이벤트 가로챔 | `DragHandler + startSystemMove()`로 교체 |
+| 창 안 보임 | `Qt.Tool` 플래그 + opacity 0.25 | Tool 제거, `Component.onCompleted` 위치 설정 |
+| 한글 입력 불가 | Ubuntu 20.04에 fcitx5-hangul 없음 | Ubuntu 22.04 필요 |
 
 ---
 
