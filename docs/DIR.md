@@ -17,6 +17,7 @@ Achat/
 │   ├─ DIR.md                         ✅ 이 파일 — 파일시스템 현황
 │   ├─ 대화품질.md                    ✅ 대화 품질 설계 (Phase 1~3 구현 참조)
 │   ├─ 학습후보.md                    ✅ 학습 실험 설계 (Phase 5~6 참조)
+│   ├─ MVP대화.md                     ✅ MVP 실행 명령어 + 대화 로그 수집/검토 매뉴얼
 │   ├─ plan/
 │   │   └─ phases.md                  ✅ Phase 0~7 실행 계획서
 │   └─ plan1/                         ⚠️ 빈 디렉토리 — 삭제 필요
@@ -80,11 +81,20 @@ Achat/
 │   ├─ router.py                      🔲 시동어 / 명령어 분기 (Phase 2 미구현, Phase 7에서 확장)
 │   └─ memory.py                      ⚠️ README에 없음 — 역할 미정의 (정리 필요)
 │
-├─ ui/                                 # PySide6 플로팅 UI (배포 환경)
-│   ├─ widget.py                      🔲 Frameless / Always-on-top / 모서리 스냅 / hover 투명도
-│   ├─ chat_panel.py                  🔲 스트리밍 토큰 표시 채팅 패널
-│   ├─ tray.py                        🔲 시스템 트레이
-│   └─ mode_switcher.py               🔲 대화 모드 ↔ 기능 모드 전환 UI
+├─ ui_ux/                              # QML + PySide6 플로팅 UI (배포 환경)
+│   ├─ __init__.py                    ✅ 패키지 초기화
+│   ├─ bridge.py                      ✅ ChatBridge(QObject) — QML↔Python 시그널/슬롯 브리지 (sendMessage, snapToEdge, changeCharacter)
+│   ├─ chat_panel.py                  ✅ LLMWorker(QThread) — 백그라운드 LLM 추론 (response_ready / error_occurred 시그널)
+│   ├─ widget.py                      ✅ UIEngine — QQmlApplicationEngine 래퍼, bridge context property 등록, main.qml 로드
+│   ├─ tray.py                        ✅ AppTrayIcon — 시스템 트레이 (열기/숨기기, 캐릭터 변경, 종료)
+│   ├─ qml/
+│   │   ├─ qmldir                    ✅ QML 모듈 선언 (AchatUI — Style singleton, ChatBubble)
+│   │   ├─ Style.qml                 ✅ 디자인 토큰 singleton — 색상/폰트/간격/애니메이션 상수
+│   │   ├─ main.qml                  ✅ 프레임리스 플로팅 Window — isBubble 토글(72px↔360×520), 드래그+모서리 스냅, 채팅 ListView, 모드 전환 버튼
+│   │   └─ ChatBubble.qml            ✅ 재사용 말풍선 컴포넌트 (role 프로퍼티로 좌/우 정렬·색상 제어)
+│   └─ assets/
+│       ├─ icons/                    🔲 앱 아이콘 PNG (16/32/64/256px) — tray.py fallback 교체용
+│       └─ characters/               🔲 캐릭터 PNG/GIF — bubble 상태 아바타 표시용
 │
 ├─ tools/                              # 기능 모드 — 도구 마이크로서비스
 │   ├─ base.py                        🔲 Tool 인터페이스 (파라미터 수신 → 실행 → 결과 반환)
@@ -100,6 +110,13 @@ Achat/
 ├─ training/                           # LoRA 파인튜닝
 │   ├─ lora_train.py                  🔲 QLoRA 학습 (8GB VRAM 최적화)
 │   ├─ dataset.py                     🔲 ChatML 포맷 데이터셋 로더
+│   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 JSONL)
+│   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger)
+│   │   ├─ daily.jsonl                📄 일상 대화 로그 (수집 예정)
+│   │   ├─ emotion.jsonl              📄 감정 공감 로그
+│   │   ├─ advice.jsonl               📄 고민 상담 로그
+│   │   ├─ memory.jsonl               📄 기억 관련 로그
+│   │   └─ persona.jsonl              📄 페르소나 이탈 교정 로그
 │   └─ data/                          ⚠️ 기존 데이터 위치 (README는 루트 data/lora/ 로 변경)
 │       ├─ data_gen_prompt.md         📄 학습 데이터 생성 프롬프트 가이드
 │       ├─ common/
@@ -126,7 +143,7 @@ Achat/
 ├─ api/                                ⚠️ README에 없음 — 역할 미정의
 │   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
 │
-├─ main.py                             🔲 프로젝트 진입점
+├─ main.py                             ✅ QApplication + UIEngine + AppTrayIcon 조립 진입점
 ├─ config.py                           ✅ dev / deploy 환경 분기 설정
 ├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU)
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
@@ -144,7 +161,8 @@ Achat/
 | 학습 데이터 위치 | `data/lora/conversation/` + `data/lora/function/` (루트) | `training/data/` (기존 구조) | Phase 5 전 `data/lora/` 신규 생성, 기존 데이터 병합/이전 |
 | `data/lora/function/` | 신규 표기 | 미존재 | Phase 5에서 기능 모드 JSON 추출 데이터 구축 시 생성 |
 | `tools/folder/`, `tools/search/` | 하위 구조화 | 이전 `tools/base.py`, `tools/commands.py`만 존재 | Phase 7에서 신규 구현 |
-| `ui/mode_switcher.py` | 신규 추가 | 미존재 | Phase 4에서 구현 |
+| `ui_ux/mode_switcher.py` | 신규 추가 | 미존재 → 삭제됨 | QML `Repeater` 기반 모드 버튼으로 대체 (Phase 4 완료) |
+| `ui_ux/qml/` | 없음 | 신규 생성 | QML + PySide6 아키텍처 채택, main.qml + ChatBubble.qml |
 | `agent/memory.py` | 없음 | 존재 | 역할 정의 필요 (`memory/` 레이어와 중복 가능성) |
 | `conversation/utils/` | 없음 | 존재 | README에 추가 또는 삭제 검토 |
 | `chracter_Haru.yaml` | 없음 | 존재 (오타) | 삭제 권장 |
@@ -158,7 +176,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 28 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 (rag/__init__, index, retrieve) |
-| 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터 |
-| 🔲 구현 예정 | 14 | Phase 4~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
+| ✅ 완료 | 38 | docs 문서 6개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 (ui_ux/__init__, bridge, chat_panel, widget, tray, qml/main.qml, qml/ChatBubble.qml, main.py) + training/log/_schema.json |
+| 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
+| 🔲 구현 예정 | 8 | Phase 5~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |

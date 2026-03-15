@@ -231,11 +231,18 @@ Achat/
 │   ├─ state.py                   # mood / affection 상태 정의
 │   └─ router.py                  # 시동어 / 명령어 분기
 │
-├─ ui/                             # PySide6 플로팅 UI (배포 환경)
-│   ├─ widget.py                  # 메인 위젯 (Frameless / Always-on-top / 모서리 스냅)
-│   ├─ chat_panel.py              # 채팅 패널 (스트리밍 토큰 표시)
+├─ ui_ux/                          # QML + PySide6 플로팅 UI/UX (배포 환경)
+│   ├─ bridge.py                  # ChatBridge(QObject) — QML↔Python 시그널/슬롯
+│   ├─ chat_panel.py              # LLMWorker(QThread) — 백그라운드 LLM 추론
+│   ├─ widget.py                  # UIEngine — QML 엔진 래퍼
 │   ├─ tray.py                    # 시스템 트레이
-│   └─ mode_switcher.py           # 대화 모드 ↔ 기능 모드 전환 UI
+│   ├─ qml/
+│   │   ├─ Style.qml              # 디자인 토큰 singleton (색상/폰트/애니메이션)
+│   │   ├─ main.qml               # 플로팅 윈도우 (버블 축소/확장, 드래그, 스냅)
+│   │   └─ ChatBubble.qml         # 재사용 말풍선 컴포넌트
+│   └─ assets/
+│       ├─ icons/                 # 앱 아이콘 PNG
+│       └─ characters/            # 캐릭터 PNG/GIF
 │
 ├─ tools/                          # 기능 모드 — 도구 마이크로서비스
 │   ├─ base.py                    # Tool 인터페이스 (파라미터 수신 → 실행 → 결과 반환)
@@ -349,14 +356,15 @@ Achat/
 ---
 
 ### Phase 4 — 플로팅 UI 구현
-> 목표: PySide6 PIP 스타일 플로팅 UI (Windows 배포 대상)
+> 목표: QML + PySide6 PIP 스타일 플로팅 UI (Windows 배포 대상)
 
-- [ ] `ui/widget.py` — Frameless / Always-on-top / 모서리 스냅 / hover 투명도 전환
-- [ ] `ui/chat_panel.py` — 스트리밍 토큰 표시 채팅 패널
-- [ ] `ui/tray.py` — 시스템 트레이 아이콘 및 메뉴
-- [ ] `ui/mode_switcher.py` — 대화 모드 ↔ 기능 모드 전환 UI
-- [ ] 최소화 시 버블 축소 → 클릭 시 확장 동작
-- [ ] 캐릭터 전환 UI 연동
+- [x] `ui_ux/bridge.py` — `ChatBridge(QObject)` Python↔QML 브리지 (Signal/Slot)
+- [x] `ui_ux/chat_panel.py` — `LLMWorker(QThread)` 비동기 LLM 호출
+- [x] `ui_ux/widget.py` — `UIEngine` QML 엔진 초기화 + bridge 등록
+- [x] `ui_ux/tray.py` — `AppTrayIcon` 열기/숨기기, 캐릭터 변경, 종료
+- [x] `ui_ux/qml/main.qml` — 플로팅 윈도우 (Frameless/Always-on-top, 드래그, 모서리 스냅, hover 투명도, 버블 축소/확장, 모드 전환)
+- [x] `ui_ux/qml/ChatBubble.qml` — 재사용 가능한 말풍선 컴포넌트
+- [x] `main.py` — 루트 진입점 (Agent + UIEngine + AppTrayIcon)
 
 ---
 
