@@ -1,4 +1,4 @@
-"""Phase 1 CLI 루프 — 로더 → 세션 → PromptBuilder → LLMClient 연결 확인용."""
+"""CLI 루프 — Agent(router + VDB + state) 연동."""
 
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ from loguru import logger
 from config import get_config
 from conversation.core.llm_client import LLMClient
 from conversation.core.prompt_build import PromptBuilder
+from conversation.core.router import ConversationRouter
 from conversation.core.session import ConversationSession
 from conversation.loader.character_load import load_character
 from conversation.loader.world_load import load_world
+from memory.long_term import LongTermMemory
 
 # ── 기본 경로 ─────────────────────────────────────────────────────────────────
 CHARACTER_PATH = ROOT / "conversation/character/CH_haru.yaml"
@@ -44,8 +46,7 @@ def main() -> None:
         f"mood: {session.mood} / affection: {session.affection}"
     )
 
-    # 3. LLM 로딩 (모델 경로가 없으면 건너뜀 — 구조 확인용 dry-run)
-    llm: LLMClient | None = None
+    # 3. LLM / Router 초기화
     model_ready = (
         cfg["model_backend"] == "llama_cpp" and cfg.get("model_path")
         and Path(cfg["model_path"]).exists()
@@ -54,18 +55,25 @@ def main() -> None:
     if model_ready:
         logger.info("LLM 로딩 중... (처음 실행 시 시간이 걸릴 수 있습니다)")
         llm = LLMClient(cfg)
-        count_fn = llm.count_tokens
+        long_term = LongTermMemory(cfg)
+        router = ConversationRouter(
+            character=character,
+            world=world,
+            session=session,
+            llm=llm,
+            long_term=long_term,
+            config=cfg,
+        )
+        use_router = True
     else:
         logger.warning(
             "모델 파일 없음 — dry-run 모드로 실행합니다. "
             "(GGUF 모델은 Phase 6 이후 생성됩니다)"
         )
-        count_fn = None
+        builder = PromptBuilder(character, world, session)
+        use_router = False
 
-    # 4. PromptBuilder 초기화
-    builder = PromptBuilder(character, world, session, count_tokens_fn=count_fn)
-
-    # 5. CLI 루프
+    # 4. CLI 루프
     print(f"\n{'─'*50}")
     print(f"  {character['name']}와 대화를 시작합니다.  (종료: /quit)")
     print(f"{'─'*50}\n")
@@ -83,23 +91,20 @@ def main() -> None:
             print("종료합니다.")
             break
 
-        # short_buf: dialogue_log 전체 (Layer D에서 예산 기준으로 축소)
-        messages = builder.assemble(
-            short_buf=session.dialogue_log,
-            vdb_results=[],   # Phase 2에서 long_term.query() 연동
-        )
-        messages.append({"role": "user", "content": user_input})
-
-        if llm is None:
+        if use_router:
+            response = router.handle_turn(user_input, stream=True)
+        else:
             # dry-run: 조립된 시스템 프롬프트 출력
+            messages = builder.assemble(short_buf=session.dialogue_log, vdb_results=[])
+            messages.append({"role": "user", "content": user_input})
             print(f"\n[dry-run] system 프롬프트:\n{messages[0]['content']}\n")
             response = "(LLM 미연결 — dry-run)"
-        else:
-            response = llm.generate(messages, stream=True)
+            session.add_turn(user_input, response)
 
         print(f"{character['name']}: {response}\n")
-        session.add_turn(user_input, response)
-        logger.debug(f"turn={session.turn_count}  mood={session.mood}  aff={session.affection}")
+        logger.debug(
+            f"turn={session.turn_count}  mood={session.mood}  aff={session.affection}"
+        )
 
 
 if __name__ == "__main__":
