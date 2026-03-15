@@ -55,12 +55,19 @@ class PromptBuilder:
         self,
         short_buf: list[dict],
         vdb_results: list[str],
+        rag_results: list[str] | None = None,
     ) -> list[dict]:
         """Layer A~D를 조립해 messages 리스트를 반환한다.
 
         Layer E(현재 사용자 입력)는 호출 측에서 마지막에 append한다.
+
+        Parameters
+        ----------
+        vdb_results : 장기 메모리 VDB 검색 결과 (Layer C — 우선순위 높음)
+        rag_results : 세계관 RAG 검색 결과 (Layer B에 병합 — 우선순위 낮음)
         """
-        system_parts = [self._layer_a(), self._layer_b()]
+        layer_b = self._layer_b(rag_results or [])
+        system_parts = [self._layer_a(), layer_b]
         if vdb_results:
             system_parts.append(self._layer_c(vdb_results))
 
@@ -91,15 +98,25 @@ class PromptBuilder:
             f"[금지 규칙]\n{rules}",
         ])
 
-    def _layer_b(self) -> str:
-        """세계관 설명 + 현재 Act 상황."""
+    def _layer_b(self, rag_results: list[str] | None = None) -> str:
+        """세계관 설명 + 현재 Act 상황 + RAG 검색 결과 (있을 때).
+
+        우선순위: 장기 메모리(Layer C) > 세계관 RAG
+        RAG 결과는 Layer B 말미에 병합하여 ~350tok 합산 예산 안에서 처리.
+        """
         world_desc = self.world.get("description", "").strip()
         act = self._current_act()
+
+        parts = [f"[세계관]\n{world_desc}"]
         if act:
             location = act.get("location", "")
             ctx = act.get("context", "").strip()
-            return f"[세계관]\n{world_desc}\n\n[현재 상황 — {location}]\n{ctx}"
-        return f"[세계관]\n{world_desc}"
+            parts.append(f"[현재 상황 — {location}]\n{ctx}")
+        if rag_results:
+            rag_text = "\n".join(f"- {r}" for r in rag_results)
+            parts.append(f"[세계관 참고]\n{rag_text}")
+
+        return "\n\n".join(parts)
 
     def _layer_c(self, vdb_results: list[str]) -> str:
         """VDB 검색 결과를 캐릭터 관점으로 재서술한다.

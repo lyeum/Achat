@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from loguru import logger
 
@@ -29,10 +28,15 @@ class LongTermMemory:
         logger.info(f"[long_term] ChromaDB 초기화: {chroma_path}")
 
     def _collection(self, character_id: str):
-        """캐릭터별 컬렉션을 가져오거나 생성한다."""
+        """캐릭터별 컬렉션을 가져오거나 생성한다.
+
+        hnsw:space=cosine 으로 고정 — query()의 cutoff = 1.0 - threshold 계산이
+        cosine distance (0=동일, 1=직교)를 전제로 하기 때문.
+        """
         return self._client.get_or_create_collection(
             name=f"{character_id.lower()}_memory",
             embedding_function=self._ef,
+            metadata={"hnsw:space": "cosine"},
         )
 
     def store(self, entry: dict) -> None:
