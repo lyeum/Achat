@@ -22,16 +22,17 @@ Achat/
 │   └─ plan1/                         ⚠️ 빈 디렉토리 — 삭제 필요
 │
 ├─ conversation/                       # 대화 엔진 (핵심)
+│   ├─ __init__.py                    ✅ 패키지 초기화 (import 경로 확보)
 │   ├─ core/
-│   │   ├─ llm_client.py             🔲 llama-cpp-python 추론 래퍼
-│   │   ├─ prompt_build.py           🔲 Layer A~E Context Assembly
+│   │   ├─ llm_client.py             ✅ llama_cpp + transformers 듀얼 백엔드 (스트리밍, 토큰 카운트)
+│   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly (Layer E는 호출자 append)
 │   │   ├─ router.py                 🔲 턴 처리 + Post-processing
-│   │   └─ session.py                🔲 세션 상태 (mood, affection, turn_count)
+│   │   └─ session.py                ✅ 세션 상태 (mood, affection, turn_count, dialogue_log)
 │   │
 │   ├─ loader/
-│   │   ├─ character_load.py         🔲 캐릭터 YAML → dict
-│   │   ├─ memory_load.py            🔲 메모리 초기 데이터 로더
-│   │   └─ world_load.py             🔲 세계관 YAML → dict
+│   │   ├─ character_load.py         ✅ 캐릭터 YAML → dict (필수 필드 검증 포함)
+│   │   ├─ memory_load.py            ✅ M_default.json → ChromaDB 초기 삽입용 리스트
+│   │   └─ world_load.py             ✅ 세계관 YAML → dict (get_act 헬퍼 포함)
 │   │
 │   ├─ utils/                         ⚠️ README에 없음 — 유틸리티 디렉토리
 │   │   ├─ __init__.py               🔲
@@ -53,7 +54,7 @@ Achat/
 │   │   ├─ M_default.json            📄 캐릭터별 기본 기억 초기값
 │   │   └─ M_instance.json           📄 세션 인스턴스 기억 템플릿
 │   │
-│   └─ main.py                        🔲 대화 엔진 진입점
+│   └─ main.py                        ✅ CLI 루프 진입점 (dry-run 모드 포함, ROOT sys.path 삽입)
 │
 ├─ memory/                             # 메모리 관리 레이어
 │   ├─ short_term.py                  🔲 슬라이딩 윈도우 (최근 N턴)
@@ -154,7 +155,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 9 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개 |
+| ✅ 완료 | 16 | docs 문서 5개, CH_haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1 구현 7개 (llm_client, prompt_build, session, character_load, world_load, memory_load, main.py + __init__.py) |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터 |
-| 🔲 구현 예정 | 33 | 모든 .py 파일 + data/lora/ 데이터 |
+| 🔲 구현 예정 | 26 | Phase 2~7 .py 파일 + data/lora/ 데이터 |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |

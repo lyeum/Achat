@@ -268,8 +268,9 @@ Achat/
 │
 ├─ main.py                         # 진입점
 ├─ config.py                       # 환경 설정 (dev / deploy 분기)
-├─ requirements-dev.txt            # Linux GPU 환경
-└─ requirements-deploy.txt         # Windows CPU 환경
+├─ pyproject.toml                  # 개발 환경 의존성 (uv, Linux + GPU)
+├─ pyproject-deploy.toml           # 배포 환경 의존성 (uv, Windows + CPU)
+└─ uv.lock                         # uv lock 파일 (dev 기준)
 ```
 
 ---
@@ -299,7 +300,7 @@ Achat/
 ### Phase 0 — 환경 구성 및 기반 설계
 > 목표: 개발/배포 환경 분리, 설정 파일 구조 확정
 
-- [x] `requirements-dev.txt` / `requirements-deploy.txt` 분리
+- [x] `pyproject.toml` / `pyproject-deploy.toml` 구성 (uv 기반, Linux+GPU / Windows+CPU 분리)
 - [x] `config.py` — dev / deploy 환경 분기 설정
 - [x] 캐릭터 YAML 스키마 확정 (`speech_style`, `memory_voice`, `state` 필드 추가) — `CH_haru.yaml` 반영 완료
 - [x] 메모리 VDB 스키마 확정 (`M_schema.json` 확장) — 중요도 규칙, 검색 설정 반영 완료
@@ -310,11 +311,13 @@ Achat/
 > 목표: llama-cpp-python 기반 로컬 추론 인터페이스 구현
 > 상세 구현: [대화품질.md](대화품질.md) — Context Assembly, 토큰 예산 설계
 
-- [ ] `conversation/core/llm_client.py` — llama-cpp-python 스트리밍 인터페이스
-- [ ] `conversation/core/prompt_build.py` — Context Assembly + 토큰 예산 관리
+- [x] `conversation/core/llm_client.py` — llama_cpp + transformers 듀얼 백엔드 (스트리밍 포함)
+- [x] `conversation/core/prompt_build.py` — Context Assembly + 토큰 예산 관리
   - 레이어별 예산: system(300) + world(200) + VDB(150) + history(300) + input(가변)
   - 한국어 토큰 밀도 반영 (영어 대비 2~3배)
-- [ ] CLI 수준 기본 대화 루프 동작 확인
+- [x] `conversation/core/session.py` — mood, affection, turn_count, dialogue_log
+- [x] `conversation/loader/` — character_load, world_load, memory_load
+- [x] `conversation/main.py` — CLI 루프 (dry-run 모드 포함)
 
 ---
 
@@ -322,7 +325,6 @@ Achat/
 > 목표: 페르소나, 상태, 메모리, Post-processing 전 레이어 완성
 > 상세 구현: [대화품질.md](대화품질.md) — 7계층 아키텍처, session/state/memory 구현 계획
 
-- [ ] `conversation/core/session.py` — `mood`, `affection`, `turn_count` 필드 추가
 - [ ] `agent/persona.py` — 캐릭터 YAML 로딩 및 핫스왑
 - [ ] `agent/state.py` — mood / affection 상태 정의 및 전환 규칙
 - [ ] `memory/short_term.py` — 최근 N턴 슬라이딩 윈도우 버퍼
@@ -376,7 +378,7 @@ Achat/
 
 - [ ] `scripts/merge_lora.py` — LoRA 병합 (`low_cpu_mem_usage=True`)
 - [ ] `scripts/convert_to_gguf.sh` — GGUF 변환 + Q4_K_M 양자화
-- [ ] `requirements-deploy.txt` 검증
+- [ ] `pyproject-deploy.toml` 검증 (Windows 클린 설치 확인)
 - [ ] 실행 스크립트 작성 (`run.bat`)
 
 ---

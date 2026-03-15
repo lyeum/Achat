@@ -13,32 +13,14 @@
 
 ### 작업 목록
 
-#### 0-1. `requirements-dev.txt` 작성 (Linux + GPU 환경)
-```
-transformers>=4.45.0
-peft>=0.11.0
-bitsandbytes>=0.44.0       # Blackwell RTX 50xx 대응
-accelerate>=0.30.0
-sentence-transformers       # bge-m3
-chromadb
-PyYAML
-loguru
-tqdm
-rich
-datasets                    # 학습 데이터 로더
-```
+#### 0-1. `pyproject.toml` 작성 (Linux + GPU 환경, uv 기반) ✅
+주요 의존성: transformers, peft, bitsandbytes>=0.44.0 (Blackwell 대응), accelerate,
+sentence-transformers (bge-m3), chromadb, PyYAML, loguru, tqdm, rich, datasets
+PyTorch CUDA 12.8 빌드는 `[tool.uv.sources]` 설정으로 자동 처리.
 
-#### 0-2. `requirements-deploy.txt` 작성 (Windows + CPU 환경)
-```
-llama-cpp-python            # CPU 빌드
-PySide6
-chromadb
-sentence-transformers       # bge-m3 (시맨틱 검색)
-Pillow                      # 이미지 확장자 변환 (jpg/png/webp/bmp)
-whoosh                      # 로컬 파일 검색 (SQLite FTS5 대안)
-PyYAML
-loguru
-```
+#### 0-2. `pyproject-deploy.toml` 작성 (Windows + CPU 환경, uv 기반) ✅
+주요 의존성: llama-cpp-python (CPU 빌드), PySide6, chromadb,
+sentence-transformers, Pillow, whoosh, PyYAML, loguru
 
 #### 0-3. `config.py` 설계
 ```python
@@ -69,7 +51,7 @@ CONFIG = {
 - **방침**: Phase 5 전 `data/lora/` 디렉토리 생성 후 기존 데이터 분류·이전
 
 ### 완료 기준
-- [x] `requirements-dev.txt` / `requirements-deploy.txt` 두 파일 존재
+- [x] `pyproject.toml` / `pyproject-deploy.toml` 구성 완료 (uv 기반, Linux+GPU / Windows+CPU)
 - [x] `config.py` — `get_config()` 함수로 환경별 dict 반환
 
 ---
@@ -101,14 +83,15 @@ CONFIG = {
 class ConversationSession:
     character_id: str
     world_id:     str | None = None
+    scenario_id:  str | None = None   # PromptBuilder._current_act() 조회에 필요 (spec 추가)
     act_id:       str | None = None
-    mood:         str = "neutral"   # CH_*.yaml state.mood_default에서 초기화
-    affection:    int = 30          # CH_*.yaml state.affection_default에서 초기화
+    mood:         str = "neutral"     # CH_*.yaml state.mood_default에서 초기화
+    affection:    int = 30            # CH_*.yaml state.affection_default에서 초기화
     turn_count:   int = 0
     dialogue_log: list = field(default_factory=list)
 ```
 - `add_turn(user: str, assistant: str)` 메서드
-- character_data 로드 후 mood/affection 초기값 설정
+- `from_character(character, world_id, scenario_id, act_id)` 클래스메서드로 초기값 설정
 
 #### 1-5. `conversation/core/llm_client.py`
 - `llama_cpp.Llama` 인스턴스 (n_ctx=4096)
@@ -119,7 +102,7 @@ class ConversationSession:
 #### 1-6. `conversation/core/prompt_build.py`
 - `PromptBuilder(character: dict, world: dict, session: ConversationSession)`
 - `assemble(short_buf, vdb_results) -> list[dict]` — messages 리스트 반환
-- Layer별 메서드 분리: `_layer_a()` ~ `_layer_e()`
+- Layer별 메서드 분리: `_layer_a()` ~ `_layer_d()` (Layer E는 caller가 append — `{"role": "user", "content": user_input}`)
 - 토큰 카운트: `llm.tokenize(text.encode())` 활용
 - Layer D 축소: 5턴 → 3턴 → 2턴 (예산 초과 시)
 - Layer C 재서술: `character['memory_voice']` 포맷으로 VDB 결과 감쌈
@@ -135,9 +118,9 @@ while True:
 ```
 
 ### 완료 기준
-- [ ] `python conversation/main.py` 실행 시 캐릭터 YAML 로드 후 대화 루프 진입
-- [ ] 응답에 캐릭터 말투 반영 확인 (speech_style 적용)
-- [ ] 토큰 예산 초과 시 Layer D 자동 축소 확인
+- [x] `python -m conversation.main` 실행 시 캐릭터 YAML 로드 후 대화 루프 진입
+- [x] dry-run 모드: 모델 없어도 시스템 프롬프트 조립 확인 가능
+- [x] 토큰 예산 초과 시 Layer D 자동 축소 (5→3→2턴) 구현
 
 ---
 
@@ -396,8 +379,8 @@ python llama.cpp/convert_hf_to_gguf.py \
 # 최종 파일 크기: 3B Q4_K_M ≈ 2GB
 ```
 
-#### 6-3. `requirements-deploy.txt` 검증
-- Windows 환경에서 클린 설치 확인
+#### 6-3. `pyproject-deploy.toml` 검증
+- Windows 환경에서 `uv sync` 클린 설치 확인
 - `llama-cpp-python` AVX2 빌드 여부 확인
 
 #### 6-4. 실행 스크립트 `run.bat`
