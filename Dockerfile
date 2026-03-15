@@ -14,6 +14,21 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     ca-certificates \
+    # Qt6 / PySide6 런타임 의존성
+    libxkbcommon-x11-0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-shape0 \
+    libxcb-xinerama0 \
+    libxcb-xkb1 \
+    libxcb-cursor0 \
+    libegl1 \
+    libegl-mesa0 \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # python 기본 설정
