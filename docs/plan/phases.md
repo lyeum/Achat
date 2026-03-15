@@ -216,9 +216,10 @@ return response
 - 이미 인덱싱된 경우 스킵 (collection 존재 여부 체크)
 
 #### 3-2. `rag/retrieve.py`
-- `query_world(text: str, n_results=2, threshold=0.7) -> list`
+- `WorldRetriever(config)` 클래스 — `query(text: str) -> list[str]`
   - bge-m3 임베딩 → ChromaDB 검색
   - 유사도 < 0.7 → 빈 리스트 반환
+  - 컬렉션 미존재(인덱싱 전) → 빈 리스트 반환 (안전 처리)
   - **키워드 트리거 방식 사용 안 함** — 매 턴 실행
 
 #### 3-3. `conversation/core/prompt_build.py` — Layer B/C 연동 업데이트
@@ -227,9 +228,15 @@ return response
 - 두 소스 합산 ~350tok 예산, 우선순위: 장기 메모리 > 세계관 RAG
 
 ### 완료 기준
-- [ ] `rag/sources/world/` 문서가 ChromaDB에 인덱싱됨
-- [ ] 세계관 관련 질문 시 RAG 결과가 Layer에 삽입됨
-- [ ] 무관한 질문 시 RAG 결과 삽입 안 됨 (임계값 0.7 동작 확인)
+- [x] `rag/__init__.py` 추가 (패키지 초기화)
+- [x] `index_world()` — `.md` 청킹 + ChromaDB 인덱싱, cosine space 지정, 기존 컬렉션 스킵
+- [x] `WorldRetriever.query()` — 매 턴 실행, threshold 미만 빈 리스트, 컬렉션 미존재 안전 처리
+- [x] `PromptBuilder.assemble(rag_results=)` — Layer B에 RAG 결과 병합
+- [x] `ConversationRouter` — RAG 검색 연동 (우선순위: 장기 메모리 > 세계관 RAG)
+- [x] **버그 수정**: ChromaDB distance metric `l2` → `cosine` (long_term, rag/index 모두)
+- [x] **버그 수정**: `summarizer.write_to_vdb(trigger_n=)` — turn_range 하드코딩 제거
+- [ ] (실환경 검증) 세계관 관련 질문 시 RAG 결과 Layer B 삽입 확인
+- [ ] (실환경 검증) 무관한 질문 시 RAG 결과 삽입 안 됨 확인
 
 ---
 
