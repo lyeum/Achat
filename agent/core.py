@@ -29,11 +29,12 @@ _TOOLS: dict[str, BaseTool] = {
 }
 
 # 도구 선택용 키워드 매핑 (자연어 힌트 → tool name)
+# 순서 중요: 더 구체적인 키워드가 위에 있어야 "변환" 같은 공통 단어에 먼저 걸리지 않음
 _KEYWORDS: list[tuple[tuple[str, ...], str]] = [
-    (("분류", "정리", "폴더"), "folder_classify"),
-    (("변환", "convert", "이미지", "png", "jpg", "webp"), "image_convert"),
+    (("프롬프트", "prompt", "명확하게", "간결하게", "상세하게", "질문형", "지시형"), "prompt_convert"),
     (("이름", "rename", "renamer", "파일명"), "file_rename"),
-    (("프롬프트", "prompt", "명확", "간결", "상세", "질문형", "지시형"), "prompt_convert"),
+    (("분류", "정리", "폴더"), "folder_classify"),
+    (("이미지", "image", "png", "jpg", "jpeg", "webp", "bmp", "tiff"), "image_convert"),
     (("검색", "search", "찾아", "파일 찾"), "local_search"),
 ]
 
@@ -149,8 +150,10 @@ class Agent:
             params: dict = {}
         else:
             llm_output = self.llm.generate(
-                system=tool.system_prompt,
-                user=user_input,
+                messages=[
+                    {"role": "system", "content": tool.system_prompt},
+                    {"role": "user", "content": user_input},
+                ],
                 stream=False,
             )
             params = tool.parse_params(llm_output)
