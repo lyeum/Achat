@@ -23,12 +23,14 @@ RUN apt-get update && apt-get install -y \
     libxcb-cursor0 \
     libegl1 \
     libegl-mesa0 \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
-    # 한글 입력기 (Ubuntu 24.04 이상 — fcitx5-frontend-qt6 필요)
-    fcitx5 \
-    fcitx5-hangul \
-    fcitx5-frontend-qt6 \
+    # D-Bus (ibus 데몬 세션 연결에 필요)
+    dbus-x11 \
+    # 한글 입력기 — ibus 기반 (PySide6 번들 Qt6와 ABI 호환)
+    # 주의: fcitx5-frontend-qt6는 시스템 Qt6 기준 빌드 → PySide6 번들 Qt6와 ABI 불일치로 로드 실패
+    ibus \
+    ibus-hangul \
     && rm -rf /var/lib/apt/lists/*
 
 # uv 설치 (Python + 패키지 관리)
@@ -47,9 +49,11 @@ RUN uv sync
 # 소스 복사
 COPY . .
 
-# 한글 입력기 환경 변수
-ENV QT_IM_MODULE=fcitx
-ENV GTK_IM_MODULE=fcitx
-ENV XMODIFIERS=@im=fcitx
+# 한글 입력기 환경 변수 (ibus 기반)
+ENV QT_IM_MODULE=ibus
+ENV GTK_IM_MODULE=ibus
+ENV XMODIFIERS=@im=ibus
+# Portal 없는 WSL2/최소 환경에서 ibus 직접 연결 강제
+ENV IBUS_USE_PORTAL=0
 
 CMD ["/bin/bash"]

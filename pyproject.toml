@@ -1,3 +1,19 @@
+# ── 시스템 패키지 의존성 (apt) ──────────────────────────────────────────────
+# Ubuntu 24.04 기준. Dockerfile에도 동일하게 명시됨.
+#
+# 한글 입력기 (ibus 기반 — PySide6 번들 Qt6와 ABI 호환):
+#   sudo apt install dbus-x11 ibus ibus-hangul
+#
+# Qt6 / PySide6 런타임:
+#   sudo apt install libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0
+#                    libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+#                    libxcb-xinerama0 libxcb-xkb1 libegl1 libegl-mesa0 libgl1 libglib2.0-0
+#
+# 실행 전 환경변수:
+#   export QT_IM_MODULE=ibus GTK_IM_MODULE=ibus XMODIFIERS=@im=ibus IBUS_USE_PORTAL=0
+#   eval $(dbus-launch --sh-syntax)
+#   ibus-daemon -d && ibus engine hangul
+
 [project]
 name = "achat"
 version = "0.1.0"
