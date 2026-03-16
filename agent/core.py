@@ -29,10 +29,19 @@ class Agent:
         config: dict | None = None,
     ):
         self.cfg = config or get_config()
+        self._stub = self.cfg.get("model_backend") == "stub"
 
         # 캐릭터 / 세계관 로드
         self.character = load_persona(character_id)
         self.world = load_world(world_path)
+
+        if self._stub:
+            logger.info("[agent] stub 모드 — LLM/메모리 로딩 건너뜀")
+            self.llm = None
+            self.long_term = None
+            self.session = None
+            self.router = None
+            return
 
         world_id = self.world.get("world_id")
 
@@ -68,4 +77,6 @@ class Agent:
 
     def chat(self, user_input: str, stream: bool = True) -> str:
         """대화 모드 진입점. user_input을 받아 캐릭터 응답을 반환한다."""
+        if self._stub:
+            return f"[stub] 입력 받음: {user_input}"
         return self.router.handle_turn(user_input, stream=stream)

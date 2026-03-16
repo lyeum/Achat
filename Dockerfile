@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
 # 기본 환경 변수
 ENV DEBIAN_FRONTEND=noninteractive
@@ -25,9 +25,10 @@ RUN apt-get update && apt-get install -y \
     libegl-mesa0 \
     libgl1-mesa-glx \
     libglib2.0-0 \
-    # 한글 입력기 (Ubuntu 22.04 이상 필요)
+    # 한글 입력기 (Ubuntu 24.04 이상 — fcitx5-frontend-qt6 필요)
     fcitx5 \
     fcitx5-hangul \
+    fcitx5-frontend-qt6 \
     && rm -rf /var/lib/apt/lists/*
 
 # uv 설치 (Python + 패키지 관리)
@@ -48,6 +49,7 @@ COPY . .
 
 # 한글 입력기 환경 변수
 ENV QT_IM_MODULE=fcitx
+ENV GTK_IM_MODULE=fcitx
 ENV XMODIFIERS=@im=fcitx
 
 CMD ["/bin/bash"]

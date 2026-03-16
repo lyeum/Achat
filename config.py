@@ -4,7 +4,7 @@ import os
 # 미설정 시 llama-cpp-python 임포트 가능 여부로 자동 분기
 def _detect_env() -> str:
     env = os.environ.get("ACHAT_ENV", "").lower()
-    if env in ("dev", "deploy"):
+    if env in ("dev", "deploy", "ui_test"):
         return env
     try:
         import llama_cpp  # type: ignore  # noqa: F401
@@ -14,6 +14,17 @@ def _detect_env() -> str:
 
 
 _CONFIGS = {
+    "ui_test": {
+        "model_backend": "stub",
+        "model_name": None,
+        "model_path": None,
+        "chroma_path": "./chroma_dev",
+        "short_term_n": 5,
+        "memory_trigger_n": 10,
+        "embedding_model": None,
+        "vdb_top_k": 2,
+        "vdb_threshold": 0.7,
+    },
     "dev": {
         "model_backend": "transformers",   # QLoRA 학습 / 개발용 HF 모델
         "model_name": "Qwen/Qwen2.5-3B-Instruct",
