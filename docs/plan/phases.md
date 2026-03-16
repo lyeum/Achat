@@ -361,11 +361,13 @@ def load_training_data(data_dir: str, model_name: str, tokenizer):
 - conversation/ + function/ 데이터 혼합 로드
 
 #### 5-3. `training/lora_train.py`
-- CLI 인자: `--model` (HF 모델명), `--data_dir`, `--output_dir`, `--epochs`, `--lora_r` 등
-- ⚠️ **BitsAndBytesConfig 미사용** — RTX 5060 (Blackwell SM 10.x) 4-bit 양자화 미지원 (segfault 확인됨)
-  → `torch_dtype=torch.bfloat16` + `device_map="auto"` 방식 사용
+- CLI 인자: `--model`, `--data_dir`, `--output_dir`, `--epochs`, `--lora_r`, `--no_save`, `--max_steps` 등
+- ⚠️ **BitsAndBytesConfig 미사용** — RTX 5060 (Blackwell SM 10.x) 4-bit 양자화 미지원
+  → GPU: `dtype=bfloat16` + `device_map="auto"` / CPU: `dtype=float32` + `device_map="cpu"` 자동 전환
 - `LoraConfig` (r=16, alpha=32, target q/k/v/o/gate/up/down proj)
-- `TrainingArguments` (batch=1, grad_accum=8, bf16=True, gradient_checkpointing=True)
+- `TrainingArguments` (batch=1, grad_accum=8, bf16=GPU only, gradient_checkpointing=GPU only)
+- `--no_save`: 어댑터 저장 생략 (파이프라인 테스트용)
+- `--max_steps`: 지정 스텝에서 종료 (CPU smoke test용)
 - 학습 완료 후 `output/{run_name}/adapter/` 에 어댑터 저장
 
 #### 5-4. 평가 실행 (eval/)
@@ -375,18 +377,23 @@ python eval/memory_test.py
 python eval/speed_bench.py --backend transformers
 ```
 - 학습후보.md 섹션 4-3 양식으로 결과 기록
-- 모델 비교 순서: EXAONE-3.5-2.4B → Qwen2.5-3B
+
+#### 5-5. `training/학습.md`
+- Step 0 (사전 확인) ~ Step 6 (기존 데이터 직접 학습) 단계별 실행 가이드
+- GPU/CPU 옵션, OOM 대응, 평가 스크립트 실행법 포함
 
 ### 완료 기준
 - [x] `data/lora/conversation/` 디렉토리 생성 (training/log 빌드 대상)
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터 작성
-- [x] `scripts/build_dataset.py` — training/log/*.jsonl → data/lora/conversation/ 빌드 + 시스템 프롬프트 삽입
-- [x] `training/dataset.py` — data/lora/**/*.jsonl 로드 + apply_chat_template + max_length 필터
-- [x] `training/lora_train.py` — LoRA 학습 (bfloat16, gradient_checkpointing, AdamW, cosine lr)
-- [x] `eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교
+- [x] `scripts/build_dataset.py` — training/log/*.jsonl → data/lora/conversation/ 빌드 + 시스템 프롬프트 삽입 (버그 수정: TOKENS_PER_CHAR 역수 오류, relative_to 예외 처리)
+- [x] `training/dataset.py` — data/lora/**/*.jsonl 로드 + apply_chat_template + max_length 필터 (버그 수정: relative_to 예외 처리)
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, processing_class, warmup_steps, pin_memory 버그 수정
+- [x] `training/학습.md` — Step 0~6 실행 가이드 작성
+- [x] `eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교 (F541 버그 수정)
 - [x] `eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
 - [x] `eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
-- [ ] (실행 검증) `lora_train.py` OOM 없이 3 epoch 완료
+- [x] CPU 파이프라인 smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
+- [ ] (실행 검증) GPU에서 `lora_train.py` OOM 없이 3 epoch 완료
 - [ ] (실행 검증) `ai_tell_checker.py` 파인튜닝 후 AI투 감소 확인
 - [ ] (실행 검증) 기능 모드 JSON 출력 정확도 확인
 - [ ] 최종 채택 모델 1개 결정 (학습후보.md 평가 결과 기준)
@@ -401,52 +408,37 @@ python eval/speed_bench.py --backend transformers
 
 ### 구현 순서
 
-#### 6-1. `scripts/merge_lora.py`
-```python
-# ⚠️ 실행 전 브라우저 등 메모리 사용 프로세스 종료 필수 (RAM ~6GB 소모)
-model = AutoModelForCausalLM.from_pretrained(
-    base_model_path,
-    torch_dtype=torch.float16,
-    low_cpu_mem_usage=True,
-    device_map="cpu",
-)
-model = PeftModel.from_pretrained(model, adapter_path)
-model = model.merge_and_unload()
-model.save_pretrained(output_path)
-tokenizer.save_pretrained(output_path)
-```
+#### 6-1. `scripts/merge_lora.py` ✅
+- `PeftModel.from_pretrained` → `merge_and_unload()` → HF 포맷 저장
+- `dtype=torch.float16`, `low_cpu_mem_usage=True`, `device_map="cpu"`
 - OOM 발생 시: swap 4GB 임시 확장 후 재시도
+  ```bash
+  sudo fallocate -l 4G /swapfile2 && sudo chmod 600 /swapfile2
+  sudo mkswap /swapfile2 && sudo swapon /swapfile2
+  ```
 
-#### 6-2. `scripts/convert_to_gguf.sh`
-```bash
-#!/bin/bash
-python llama.cpp/convert_hf_to_gguf.py \
-    $MERGED_MODEL_PATH \
-    --outfile output/model_fp16.gguf \
-    --outtype f16
-
-./llama.cpp/quantize \
-    output/model_fp16.gguf \
-    output/model_q4km.gguf \
-    Q4_K_M
-# 최종 파일 크기: 3B Q4_K_M ≈ 2GB
-```
+#### 6-2. `scripts/convert_to_gguf.sh` ✅
+- `--merged`, `--out_dir`, `--llama_cpp` 인자로 경로 지정
+- Step 1: `convert_hf_to_gguf.py` → `model_fp16.gguf`
+- Step 2: `llama-quantize` → `model_q4km.gguf` (Q4_K_M, ~2GB)
+- 선행 조건: llama.cpp 클론 + cmake 빌드 필요
 
 #### 6-3. `pyproject-deploy.toml` 검증
 - Windows 환경에서 `uv sync` 클린 설치 확인
 - `llama-cpp-python` AVX2 빌드 여부 확인
 
-#### 6-4. 실행 스크립트 `run.bat`
-```batch
-@echo off
-python main.py --env deploy --model models/model_q4km.gguf
-```
+#### 6-4. 실행 스크립트 `run.bat` ✅
+- 모델 파일 존재 여부 확인 후 `uv run python main.py --env deploy` 실행
 
 ### 완료 기준
-- [ ] `merge_lora.py` OOM 없이 완료, HF 포맷 병합 모델 저장
-- [ ] `model_q4km.gguf` 생성 (~2GB)
-- [ ] Windows에서 `run.bat` 실행 시 위젯 정상 구동
-- [ ] CPU 추론 속도 8+ tok/s 달성 확인
+- [x] `scripts/merge_lora.py` 작성 완료
+- [x] `scripts/convert_to_gguf.sh` 작성 완료
+- [x] `run.bat` 작성 완료
+- [ ] **GPU 파인튜닝 실행** — RTX 5060 Ti에서 3 epoch 완료, 평가 결과 기록 (ai_tell_checker / memory_test / speed_bench)
+- [ ] (실행 검증) `merge_lora.py` OOM 없이 완료, HF 포맷 병합 모델 저장 ← GPU 학습 완료 후 진행
+- [ ] (실행 검증) `model_q4km.gguf` 생성 (~2GB) ← llama.cpp 빌드 필요
+- [ ] (실행 검증) **배포 파이프라인 전체 작동 확인** — merge → GGUF 변환 → Windows run.bat 실행 → 위젯 정상 구동
+- [ ] (실행 검증) CPU 추론 속도 8+ tok/s 달성 확인
 
 ---
 
@@ -553,3 +545,18 @@ Phase 0 (환경/설정)
 - Phase 4는 `agent.chat()` 인터페이스만 있으면 Phase 2/3와 병렬 진행 가능
 - Phase 5/6는 대화 엔진 완성과 무관하게 데이터 준비 후 진행 가능
 - Phase 7은 Phase 2의 `agent/core.py` 기본 구조와 Phase 4의 `mode_switcher.py`가 있으면 진행 가능
+
+---
+
+## CI 구성
+
+> `main`, `dev` 브랜치 push/PR 시 GitHub Actions 자동 실행
+
+| Job | 내용 | 비고 |
+|---|---|---|
+| lint | `ruff check .` | E402(sys.path 패턴), E501, F401 ignore |
+| data-validate | `build_dataset.py --dry_run` + `dataset.py` 구조 검증 | torch 없이 경량 실행 |
+
+- `.github/workflows/ci.yml` ✅
+- `pyproject.toml` — `[tool.ruff]` 설정 추가 ✅
+- GPU 학습 smoke test는 모델 다운로드 비용 문제로 로컬 전용

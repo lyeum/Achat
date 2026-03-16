@@ -108,7 +108,8 @@ Achat/
 │       └─ web_search.py             🔲 인터넷 검색 (DuckDuckGo / SearXNG)
 │
 ├─ training/                           # LoRA 파인튜닝
-│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, gradient_checkpointing, no BnB)
+│   ├─ 학습.md                        ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
+│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps)
 │   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터)
 │   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 JSONL)
 │   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger)
@@ -133,8 +134,8 @@ Achat/
 │
 ├─ scripts/                            # 변환 스크립트
 │   ├─ build_dataset.py               ✅ training/log/*.jsonl → data/lora/conversation/ 빌드
-│   ├─ merge_lora.py                  🔲 LoRA 병합 (low_cpu_mem_usage=True)
-│   └─ convert_to_gguf.sh             🔲 GGUF 변환 + Q4_K_M 양자화
+│   ├─ merge_lora.py                  ✅ LoRA 어댑터 병합 (float16, low_cpu_mem_usage=True) — 학습 완료 후 실행
+│   └─ convert_to_gguf.sh             ✅ GGUF 변환 + Q4_K_M 양자화 (--llama_cpp 경로 지정 필요)
 │
 ├─ eval/                               # 평가 스크립트 (Phase 5)
 │   ├─ ai_tell_checker.py             ✅ AI투 표현 패턴 측정 + 베이스/LoRA 비교
@@ -144,15 +145,20 @@ Achat/
 ├─ api/                                ⚠️ README에 없음 — 역할 미정의
 │   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
 │
+├─ .github/
+│   └─ workflows/
+│       └─ ci.yml                      ✅ CI — ruff 린트 + 데이터 파이프라인 검증 (push/PR 자동 실행)
+│
 ├─ main.py                             ✅ 루트 진입점 — torch 먼저 로드 후 Qt 초기화 (shared lib 충돌 방지)
 │                                          _cleanup_previous() PID 파일 기반 이전 프로세스 정리
 │                                          _check_vram() CUDA 여유 메모리 확인 및 경고
+├─ run.bat                             ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
 ├─ config.py                           ✅ dev / deploy 환경 분기 설정
-├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU)
+├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
 ├─ Dockerfile                          ✅ CUDA 12.8 + Ubuntu 24.04 + uv 기반 (ibus-hangul, libgl1, IBUS_USE_PORTAL=0)
-└─ .gitignore
+└─ .gitignore                          ✅ output/ 추가 (학습 체크포인트/어댑터 제외)
 ```
 
 ---
@@ -179,7 +185,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 49 | docs 문서 6개, CH_Haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 + main.py + training/log/_schema.json + Dockerfile + Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개) |
+| ✅ 완료 | 55 | docs 7개(학습.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
-| 🔲 구현 예정 | 4 | Phase 6~7 .py 파일 (merge_lora, convert_to_gguf, tools/, agent/router.py) |
+| 🔲 구현 예정 | 2 | Phase 7 tools/ 구현, agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |

@@ -376,9 +376,11 @@ Achat/
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터
 - [x] `scripts/build_dataset.py` — training/log → data/lora/conversation 빌드 (시스템 프롬프트 자동 삽입)
 - [x] `training/dataset.py` — 두 데이터셋 혼합 로더 (apply_chat_template + max_length 필터)
-- [x] `training/lora_train.py` — LoRA 학습 (bfloat16, BitsAndBytes 미사용 — Blackwell SM 10.x 호환성)
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환)
+- [x] `training/학습.md` — Step 0~6 실행 가이드 (GPU/CPU 옵션, OOM 대응, 평가 포함)
 - [x] `eval/ai_tell_checker.py` / `eval/memory_test.py` / `eval/speed_bench.py` 구현
-- [ ] (실행 검증) 학습 완료 및 평가 결과 기록
+- [x] CPU smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
+- [ ] (실행 검증) GPU 3 epoch 완료 및 평가 결과 기록
 
 ---
 
@@ -386,10 +388,13 @@ Achat/
 > 목표: Windows CPU 배포 가능한 단일 패키지 구성
 > 상세 구현: [학습후보.md](학습후보.md) — merge_lora, convert_to_gguf 스크립트 계획
 
-- [ ] `scripts/merge_lora.py` — LoRA 병합 (`low_cpu_mem_usage=True`)
-- [ ] `scripts/convert_to_gguf.sh` — GGUF 변환 + Q4_K_M 양자화
-- [ ] `pyproject-deploy.toml` 검증 (Windows 클린 설치 확인)
-- [ ] 실행 스크립트 작성 (`run.bat`)
+- [x] `scripts/merge_lora.py` — LoRA 병합 (`low_cpu_mem_usage=True`)
+- [x] `scripts/convert_to_gguf.sh` — GGUF 변환 + Q4_K_M 양자화
+- [x] `run.bat` — Windows 배포 실행 스크립트
+- [ ] GPU 파인튜닝 실행 — RTX 5060 Ti 3 epoch 완료 및 평가 결과 기록
+- [ ] (실행 검증) merge → GGUF 변환 → Windows `run.bat` 전체 배포 파이프라인 작동 확인
+- [ ] (실행 검증) `pyproject-deploy.toml` Windows 클린 설치 확인
+- [ ] (실행 검증) CPU 추론 속도 8+ tok/s 달성 확인
 
 ---
 
@@ -457,6 +462,19 @@ uv sync
 copy pyproject-deploy.toml pyproject.toml
 uv sync
 ```
+
+---
+
+## CI
+
+GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
+
+| Job | 내용 |
+|---|---|
+| lint | `ruff check` — 코드 품질 검사 |
+| data-validate | `build_dataset.py --dry_run` + `dataset.py` 구조 검증 (torch 없이 경량 실행) |
+
+파이프라인 smoke test (GPU 학습)는 모델 다운로드 비용 문제로 로컬에서만 실행.
 
 ---
 
