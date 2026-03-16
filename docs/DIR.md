@@ -185,7 +185,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 49 | docs 문서 6개, CH_Haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 + main.py + training/log/_schema.json + Dockerfile + Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개) |
+| ✅ 완료 | 55 | docs 7개(학습.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
 | 🔲 구현 예정 | 2 | Phase 7 tools/ 구현, agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |
