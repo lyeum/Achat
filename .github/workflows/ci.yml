@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  # ── 1. 코드 품질 ────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: ruff 검사
+        run: uvx ruff check .
+
+  # ── 2. 데이터 파이프라인 검증 ────────────────────────────────────────────────
+  data-validate:
+    name: Data Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 경량 의존성 설치 (torch 제외)
+        run: |
+          uv pip install --system \
+            pyyaml loguru datasets
+
+      - name: build_dataset.py dry-run (training/log 검증)
+        run: |
+          # training/log 가 없으면 스킵 (데이터 수집 전 단계)
+          if [ -d training/log ] && ls training/log/*.jsonl 2>/dev/null; then
+            python scripts/build_dataset.py --dry_run
+          else
+            echo "training/log JSONL 없음 — 스킵"
+          fi
+
+      - name: dataset.py 구조 검증 (training/data)
+        run: |
+          python training/dataset.py --data_dir training/data
+
+      - name: dataset.py 구조 검증 (data/lora, 존재 시)
+        run: |
+          if [ -d data/lora ] && find data/lora -name "*.jsonl" | grep -q .; then
+            python training/dataset.py --data_dir data/lora
+          else
+            echo "data/lora JSONL 없음 — 스킵"
+          fi

@@ -59,3 +59,16 @@ torchaudio  = { index = "pytorch-cu128" }
 name     = "pytorch-cu128"
 url      = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]   # pycodestyle + pyflakes
+ignore = [
+    "E501",   # 줄 길이 (주석/로그 문자열 제외)
+    "F401",   # 미사용 import (모듈 __init__.py에서 허용)
+    "E402",   # sys.path.insert 이후 로컬 모듈 import — 프로젝트 루트 설정 패턴
+]
+exclude = ["training/data/**", "data/**"]
