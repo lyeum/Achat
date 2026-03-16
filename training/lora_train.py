@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--save_steps",  type=int,   default=100)
     parser.add_argument("--logging_steps", type=int, default=10)
+    parser.add_argument("--eval_split",  type=float, default=0.1,             help="validation 비율 (0이면 eval 비활성)")
     # 저장 및 테스트 옵션
     parser.add_argument("--no_save",     action="store_true", help="학습 후 어댑터 저장 건너뜀 (테스트용)")
     parser.add_argument("--max_steps",   type=int,   default=-1, help="최대 학습 스텝 수 (-1=에폭 기준)")
@@ -103,7 +104,7 @@ def apply_lora(model, args) -> object:
         bias="none",
         target_modules=[
             "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",  # MLP도 포함 (Qwen2 구조)
+            "gate_proj", "up_proj", "down_proj",
         ],
         inference_mode=False,
     )
@@ -148,29 +149,39 @@ def main():
     logger.info(f"데이터 로드: {args.data_dir} (subset={args.subset})")
     raw_ds = load_training_data(args.data_dir, tokenizer, args.max_length, args.subset)
     tokenized_ds = tokenize_dataset(raw_ds, tokenizer, args.max_length)
-    logger.info(f"학습 샘플 수: {len(tokenized_ds)}")
+    logger.info(f"전체 샘플 수: {len(tokenized_ds)}")
+
+    # ── Train / Eval 분리 ─────────────────────────────────────────────────────
+    use_eval = args.eval_split > 0 and not args.no_save
+    if use_eval:
+        split = tokenized_ds.train_test_split(test_size=args.eval_split, seed=42)
+        train_ds = split["train"]
+        eval_ds  = split["test"]
+        logger.info(f"학습: {len(train_ds)}건 / 검증: {len(eval_ds)}건 (eval_split={args.eval_split})")
+    else:
+        train_ds = tokenized_ds
+        eval_ds  = None
+        logger.info(f"학습 샘플 수: {len(train_ds)} (eval 비활성)")
 
     # ── TrainingArguments ──────────────────────────────────────────────────────
     use_bf16 = use_gpu and torch.cuda.is_bf16_supported()
-    # gradient_checkpointing: GPU에서만 유효 (VRAM 절약). CPU에서는 오버헤드만 추가됨
     use_gc   = use_gpu
 
-    # warmup_steps: 전체 스텝의 5% (warmup_ratio=0.05 대체 — transformers v5.2에서 deprecated)
     effective_total = args.max_steps if args.max_steps > 0 else (
-        (len(tokenized_ds) // (args.batch_size * args.grad_accum) + 1) * args.epochs
+        (len(train_ds) // (args.batch_size * args.grad_accum) + 1) * args.epochs
     )
     warmup_steps = max(1, int(effective_total * 0.05))
 
     logger.info(
         f"학습 설정: bf16={use_bf16}, gradient_checkpointing={use_gc}, "
         f"max_steps={args.max_steps if args.max_steps > 0 else '(에폭 기준)'}, "
-        f"no_save={args.no_save}"
+        f"no_save={args.no_save}, best_model={use_eval}"
     )
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=args.epochs,
-        max_steps=args.max_steps,            # -1이면 에폭 기준, 양수면 스텝 기준으로 override
+        max_steps=args.max_steps,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
@@ -179,15 +190,21 @@ def main():
         gradient_checkpointing=use_gc,
         gradient_checkpointing_kwargs={"use_reentrant": False} if use_gc else {},
         logging_steps=args.logging_steps,
-        save_steps=args.save_steps if not args.no_save else 999999,  # no_save 시 체크포인트도 억제
-        save_total_limit=2 if not args.no_save else 0,
+        save_steps=args.save_steps if not args.no_save else 999999,
+        save_total_limit=3 if not args.no_save else 0,
         optim="adamw_torch",
         warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
         report_to="none",
         dataloader_num_workers=0,
-        dataloader_pin_memory=use_gpu,  # CPU 모드에서 pin_memory 경고 억제
+        dataloader_pin_memory=use_gpu,
         remove_unused_columns=False,
+        # ── Best model 저장 (eval_split > 0 일 때만) ─────────────────────────
+        eval_strategy="steps" if use_eval else "no",
+        eval_steps=args.save_steps if use_eval else None,
+        load_best_model_at_end=use_eval,
+        metric_for_best_model="loss" if use_eval else None,
+        greater_is_better=False if use_eval else None,
     )
 
     data_collator = DataCollatorForSeq2Seq(
@@ -202,9 +219,10 @@ def main():
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_ds,
+        train_dataset=train_ds,
+        eval_dataset=eval_ds,
         data_collator=data_collator,
-        processing_class=tokenizer,  # transformers ≥4.47: tokenizer → processing_class
+        processing_class=tokenizer,
     )
 
     logger.info("학습 시작")
