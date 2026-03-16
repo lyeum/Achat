@@ -361,11 +361,12 @@ def load_training_data(data_dir: str, model_name: str, tokenizer):
 - conversation/ + function/ 데이터 혼합 로드
 
 #### 5-3. `training/lora_train.py`
-- CLI 인자: `--model` (HF 모델명), `--data_dir`, `--output_dir`
-- `BitsAndBytesConfig` (4-bit nf4, fp16 compute)
-- `LoraConfig` (r=16, alpha=32, target q/v/k/o proj)
-- `TrainingArguments` (batch=1, grad_accum=8, checkpointing=True, fp16=True)
-- 학습 완료 후 `output/{model_name}/` 에 adapter 저장
+- CLI 인자: `--model` (HF 모델명), `--data_dir`, `--output_dir`, `--epochs`, `--lora_r` 등
+- ⚠️ **BitsAndBytesConfig 미사용** — RTX 5060 (Blackwell SM 10.x) 4-bit 양자화 미지원 (segfault 확인됨)
+  → `torch_dtype=torch.bfloat16` + `device_map="auto"` 방식 사용
+- `LoraConfig` (r=16, alpha=32, target q/k/v/o/gate/up/down proj)
+- `TrainingArguments` (batch=1, grad_accum=8, bf16=True, gradient_checkpointing=True)
+- 학습 완료 후 `output/{run_name}/adapter/` 에 어댑터 저장
 
 #### 5-4. 평가 실행 (eval/)
 ```bash
@@ -377,10 +378,18 @@ python eval/speed_bench.py --backend transformers
 - 모델 비교 순서: EXAONE-3.5-2.4B → Qwen2.5-3B
 
 ### 완료 기준
-- [ ] `lora_train.py` OOM 없이 3 epoch 완료
-- [ ] `ai_tell_checker.py` 이질감 점수 파인튜닝 후 감소 확인
-- [ ] 기능 모드 프롬프트에 올바른 JSON 출력 비율 확인
-- [ ] 최종 채택 모델 1개 결정
+- [x] `data/lora/conversation/` 디렉토리 생성 (training/log 빌드 대상)
+- [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터 작성
+- [x] `scripts/build_dataset.py` — training/log/*.jsonl → data/lora/conversation/ 빌드 + 시스템 프롬프트 삽입
+- [x] `training/dataset.py` — data/lora/**/*.jsonl 로드 + apply_chat_template + max_length 필터
+- [x] `training/lora_train.py` — LoRA 학습 (bfloat16, gradient_checkpointing, AdamW, cosine lr)
+- [x] `eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교
+- [x] `eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
+- [x] `eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
+- [ ] (실행 검증) `lora_train.py` OOM 없이 3 epoch 완료
+- [ ] (실행 검증) `ai_tell_checker.py` 파인튜닝 후 AI투 감소 확인
+- [ ] (실행 검증) 기능 모드 JSON 출력 정확도 확인
+- [ ] 최종 채택 모델 1개 결정 (학습후보.md 평가 결과 기준)
 
 ---
 

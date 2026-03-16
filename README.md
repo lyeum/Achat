@@ -372,12 +372,13 @@ Achat/
 ### Phase 5 — LoRA 파인튜닝 파이프라인
 > 목표: 캐릭터 말투 / 감정 반응 / 한국어 일관성 강화 + 기능 모드 파라미터 추출 능력 확보
 
-- [ ] `data/lora/conversation/` — ChatML 포맷 캐릭터 대화 데이터 구축
-- [ ] `data/lora/function/` — 자연어 → JSON 파라미터 추출 예시 데이터 구축
-  - 폴더 정리 / 프롬프트 변환 / 검색 각각의 입출력 예시 포함
-- [ ] `training/dataset.py` — 두 데이터셋 혼합 로더
-- [ ] `training/lora_train.py` — QLoRA 학습 (8GB VRAM 최적화 설정)
-- [ ] 학습 후 평가 (`docs/학습후보.md` 평가 척도 기준)
+- [x] `data/lora/conversation/` — 빌드 대상 디렉토리 생성
+- [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터
+- [x] `scripts/build_dataset.py` — training/log → data/lora/conversation 빌드 (시스템 프롬프트 자동 삽입)
+- [x] `training/dataset.py` — 두 데이터셋 혼합 로더 (apply_chat_template + max_length 필터)
+- [x] `training/lora_train.py` — LoRA 학습 (bfloat16, BitsAndBytes 미사용 — Blackwell SM 10.x 호환성)
+- [x] `eval/ai_tell_checker.py` / `eval/memory_test.py` / `eval/speed_bench.py` 구현
+- [ ] (실행 검증) 학습 완료 및 평가 결과 기록
 
 ---
 

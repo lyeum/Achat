@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# LoRA 학습 출력물 (체크포인트, 어댑터)
+output/

@@ -108,8 +108,8 @@ Achat/
 │       └─ web_search.py             🔲 인터넷 검색 (DuckDuckGo / SearXNG)
 │
 ├─ training/                           # LoRA 파인튜닝
-│   ├─ lora_train.py                  🔲 QLoRA 학습 (8GB VRAM 최적화)
-│   ├─ dataset.py                     🔲 ChatML 포맷 데이터셋 로더
+│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, gradient_checkpointing, no BnB)
+│   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터)
 │   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 JSONL)
 │   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger)
 │   │   ├─ daily.jsonl                📄 일상 대화 로그 (수집 예정)
@@ -126,19 +126,20 @@ Achat/
 │       ├─ personality/               📄 5종 성격별 데이터
 │       └─ speech_style/              📄 말투 조합 데이터
 │
-├─ data/                               ⚠️ README 신규 표기 — 실제 미생성 (Phase 5 전 생성 필요)
+├─ data/                               ✅ Phase 5에서 생성
 │   └─ lora/
-│       ├─ conversation/              🔲 대화 모드용 캐릭터 대화 데이터 (ChatML)
-│       └─ function/                  🔲 기능 모드용 자연어 → JSON 파라미터 추출 예시
+│       ├─ conversation/              🔲 training/log 빌드 후 생성 (scripts/build_dataset.py)
+│       └─ function/                  ✅ folder_organize / prompt_convert / search 예시 JSONL
 │
 ├─ scripts/                            # 변환 스크립트
+│   ├─ build_dataset.py               ✅ training/log/*.jsonl → data/lora/conversation/ 빌드
 │   ├─ merge_lora.py                  🔲 LoRA 병합 (low_cpu_mem_usage=True)
 │   └─ convert_to_gguf.sh             🔲 GGUF 변환 + Q4_K_M 양자화
 │
-├─ eval/                               # 평가 스크립트 (Phase 5 이후)
-│   ├─ ai_tell_checker.py             🔲 이질감 자동 측정
-│   ├─ memory_test.py                 🔲 기억 유지 정확도
-│   └─ speed_bench.py                 🔲 GPU/CPU 추론 속도 벤치마크
+├─ eval/                               # 평가 스크립트 (Phase 5)
+│   ├─ ai_tell_checker.py             ✅ AI투 표현 패턴 측정 + 베이스/LoRA 비교
+│   ├─ memory_test.py                 ✅ 멀티턴 기억 유지 정확도 (5케이스)
+│   └─ speed_bench.py                 ✅ transformers/llama_cpp 추론 속도 벤치마크
 │
 ├─ api/                                ⚠️ README에 없음 — 역할 미정의
 │   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
@@ -178,7 +179,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 40 | docs 문서 6개, CH_Haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 + main.py + training/log/_schema.json + Dockerfile |
+| ✅ 완료 | 49 | docs 문서 6개, CH_Haru.yaml, M_schema.json, rag/sources/ 3개 + Phase 1 8개 + Phase 2 9개 + Phase 3 3개 + Phase 4 8개 + main.py + training/log/_schema.json + Dockerfile + Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개) |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
-| 🔲 구현 예정 | 8 | Phase 5~7 .py 파일 + data/lora/ 데이터 + agent/router.py |
+| 🔲 구현 예정 | 4 | Phase 6~7 .py 파일 (merge_lora, convert_to_gguf, tools/, agent/router.py) |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |
