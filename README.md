@@ -401,14 +401,14 @@ Achat/
 ### Phase 7 — 기능 모드 도구 구현
 > 목표: 폴더 정리 / 프롬프트 변환 / 검색엔진 마이크로서비스 구현
 
-- [ ] `tools/base.py` — Tool 인터페이스 확정 (파라미터 수신 → 실행 → 결과 반환)
-- [ ] `tools/folder/classifier.py` — 확장자 / MIME 기반 파일 분류
-- [ ] `tools/folder/converter.py` — 확장자 일괄 변환 (Pillow 기반, ffmpeg 선택)
-- [ ] `tools/folder/renamer.py` — 이름 일괄 변환 (pathlib)
-- [ ] `tools/prompt_converter.py` — 프롬프트 변환
-- [ ] `tools/search/local_search.py` — SQLite FTS5 기반 로컬 파일 검색
-- [ ] `tools/search/web_search.py` — DuckDuckGo / SearXNG 연동
-- [ ] `agent/core.py` — 기능 모드 분기 및 도구 라우팅 연동
+- [x] `tools/base.py` — `BaseTool` 인터페이스 (JSON 파라미터 파싱 + execute 추상 메서드)
+- [x] `tools/folder/classifier.py` — 확장자별 / 종류별 파일 분류 (shutil.move, dry_run)
+- [x] `tools/folder/converter.py` — 이미지 포맷 변환 (Pillow: jpg/png/webp/bmp/tiff)
+- [x] `tools/folder/renamer.py` — 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
+- [x] `tools/prompt_converter.py` — 프롬프트 변환 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형)
+- [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적)
+- [ ] `tools/search/web_search.py` — DuckDuckGo / SearXNG 연동 ← 네트워크 의존, 보류
+- [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 + 키워드 기반 도구 선택
 
 ---
 

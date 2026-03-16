@@ -75,7 +75,7 @@ Achat/
 │
 ├─ agent/                              # 상위 오케스트레이터
 │   ├─ __init__.py                    ✅ 패키지 초기화
-│   ├─ core.py                        ✅ `Agent` 클래스 — 컴포넌트 초기화 + `chat()` 대화 진입점
+│   ├─ core.py                        ✅ `Agent` 클래스 — 컴포넌트 초기화 + `chat()` / `handle_input(mode)` 모드 분기
 │   ├─ persona.py                     ✅ `load_persona()` / `swap_persona()` 핫스왑
 │   ├─ state.py                       ✅ mood_triggers 키워드 매칭, affection ±3 증감
 │   ├─ router.py                      🔲 시동어 / 명령어 분기 (Phase 2 미구현, Phase 7에서 확장)
@@ -97,15 +97,19 @@ Achat/
 │       └─ characters/               🔲 캐릭터 PNG/GIF — bubble 상태 아바타 표시용
 │
 ├─ tools/                              # 기능 모드 — 도구 마이크로서비스
-│   ├─ base.py                        🔲 Tool 인터페이스 (파라미터 수신 → 실행 → 결과 반환)
+│   ├─ __init__.py                    ✅ BaseTool re-export
+│   ├─ base.py                        ✅ BaseTool 인터페이스 (parse_params JSON 추출 + execute 추상 메서드)
+│   ├─ commands.py                    📄 (미사용 — 추후 정리)
 │   ├─ folder/
-│   │   ├─ classifier.py             🔲 파일 분류 (확장자 / MIME 기반)
-│   │   ├─ converter.py              🔲 확장자 일괄 변환 (Pillow, ffmpeg 선택)
-│   │   └─ renamer.py                🔲 이름 일괄 변환 (pathlib)
-│   ├─ prompt_converter.py            🔲 프롬프트 변환
+│   │   ├─ __init__.py               ✅ 패키지 초기화
+│   │   ├─ classifier.py             ✅ 파일 분류 (확장자별 / 종류별, CATEGORY_MAP, dry_run)
+│   │   ├─ converter.py              ✅ 이미지 포맷 변환 (Pillow: jpg/png/webp/bmp/tiff, RGBA→RGB)
+│   │   └─ renamer.py                ✅ 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
+│   ├─ prompt_converter.py            ✅ 프롬프트 변환 (명확하게/간결하게/상세하게/질문형/지시형)
 │   └─ search/
-│       ├─ local_search.py           🔲 로컬 파일 인덱싱 + FTS 검색 (SQLite FTS5 / whoosh)
-│       └─ web_search.py             🔲 인터넷 검색 (DuckDuckGo / SearXNG)
+│       ├─ __init__.py               ✅ 패키지 초기화
+│       ├─ local_search.py           ✅ SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, ~/.cache/achat/)
+│       └─ web_search.py             🔲 인터넷 검색 (DuckDuckGo / SearXNG) ← 네트워크 의존, 보류
 │
 ├─ training/                           # LoRA 파인튜닝
 │   ├─ 학습.md                        ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
@@ -185,7 +189,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 55 | docs 7개(학습.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore |
+| ✅ 완료 | 62 | docs 7개(학습.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 7개 (base, classifier, converter, renamer, prompt_converter, local_search, __init__ 3개) |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
-| 🔲 구현 예정 | 2 | Phase 7 tools/ 구현, agent/router.py |
+| 🔲 구현 예정 / 보류 | 2 | tools/search/web_search.py (네트워크 의존 보류), agent/router.py |
 | ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |
