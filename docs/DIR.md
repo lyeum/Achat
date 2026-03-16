@@ -20,7 +20,9 @@ Achat/
 │   ├─ MVP대화.md                     ✅ MVP 실행 명령어 + 대화 로그 수집/검토 매뉴얼
 │   ├─ plan/
 │   │   └─ phases.md                  ✅ Phase 0~7 실행 계획서
-│   └─ plan1/                         ⚠️ 빈 디렉토리 — 삭제 필요
+│   └─ BUG/
+│       ├─ BUG_1.md                   ✅ 인수인계 문서 (환경 셋업, 해결된 이슈 기록)
+│       └─ BUG_small.md               ✅ 소규모 버그 수정 기록 (Phase 7 이후)
 │
 ├─ conversation/                       # 대화 엔진 (핵심)
 │   ├─ __init__.py                    ✅ 패키지 초기화 (import 경로 확보)
@@ -35,16 +37,15 @@ Achat/
 │   │   ├─ memory_load.py            ✅ M_default.json → ChromaDB 초기 삽입용 리스트
 │   │   └─ world_load.py             ✅ 세계관 YAML → dict (get_act 헬퍼 포함)
 │   │
-│   ├─ utils/                         ⚠️ README에 없음 — 유틸리티 디렉토리
-│   │   ├─ __init__.py               🔲
-│   │   ├─ logger.py                 🔲 로거 설정
-│   │   └─ file_io.py                🔲 파일 입출력 유틸
+│   ├─ utils/                         ✅ 유틸리티 디렉토리
+│   │   ├─ __init__.py               ✅ 패키지 초기화 (setup_logger, load_yaml 등 re-export)
+│   │   ├─ logger.py                 ✅ loguru 설정 — 콘솔+파일 핸들러, 로테이션
+│   │   └─ file_io.py                ✅ YAML/JSON/JSONL 파일 입출력 헬퍼
 │   │
 │   ├─ character/
 │   │   ├─ CH_schema.json            📄 캐릭터 YAML 필드 스키마
-│   │   ├─ CH_haru.yaml              ✅ 예시 캐릭터 (speech_style, memory_voice, state 완료)
-│   │   ├─ CH_default.yaml           📄 기본 캐릭터
-│   │   └─ chracter_Haru.yaml        ⚠️ 파일명 오타 (charACTER → character) — 삭제 권장
+│   │   ├─ CH_Haru.yaml              ✅ 예시 캐릭터 (speech_style, memory_voice, state 완료)
+│   │   └─ CH_default.yaml           📄 기본 캐릭터
 │   │
 │   ├─ world/
 │   │   ├─ W_schema.json             📄 세계관 YAML 스키마
@@ -60,13 +61,13 @@ Achat/
 ├─ memory/                             # 메모리 관리 레이어
 │   ├─ __init__.py                    ✅ 패키지 초기화
 │   ├─ short_term.py                  ✅ `get_recent()` — 슬라이딩 윈도우
-│   ├─ long_term.py                   ✅ ChromaDB store/query (bge-m3, threshold 0.7, importance≥0.5)
+│   ├─ long_term.py                   ✅ ChromaDB store/query (bge-m3, threshold 0.52, importance≥0.5)
 │   └─ summarizer.py                  ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 │
 ├─ rag/                                # RAG 파이프라인
 │   ├─ __init__.py                    ✅ 패키지 초기화
 │   ├─ index.py                       ✅ `index_world()` — .md 청킹(400자/overlap 50) + ChromaDB 인덱싱 (cosine space)
-│   ├─ retrieve.py                    ✅ `WorldRetriever.query()` — 매 턴 실행, threshold 0.7, 컬렉션 미존재 안전 처리
+│   ├─ retrieve.py                    ✅ `WorldRetriever.query()` — 매 턴 실행, threshold 0.52, 컬렉션 미존재 안전 처리
 │   └─ sources/
 │       └─ world/
 │           ├─ place.md               📄 장소 정보 (이미 존재)
@@ -78,8 +79,8 @@ Achat/
 │   ├─ core.py                        ✅ `Agent` 클래스 — 컴포넌트 초기화 + `chat()` / `handle_input(mode)` 모드 분기
 │   ├─ persona.py                     ✅ `load_persona()` / `swap_persona()` 핫스왑
 │   ├─ state.py                       ✅ mood_triggers 키워드 매칭, affection ±3 증감
-│   ├─ router.py                      🔲 시동어 / 명령어 분기 (Phase 2 미구현, Phase 7에서 확장)
-│   └─ memory.py                      ⚠️ README에 없음 — 역할 미정의 (정리 필요)
+│   ├─ router.py                      ✅ `CommandRouter` — 슬래시 명령어 감지/파싱 (/캐릭터변경, /초기화, /상태 등)
+│   └─ memory.py                      ✅ memory/ 패키지 re-export (LongTermMemory, get_recent, summarizer 함수)
 │
 ├─ ui_ux/                              # QML + PySide6 플로팅 UI (배포 환경)
 │   ├─ __init__.py                    ✅ 패키지 초기화
@@ -109,11 +110,11 @@ Achat/
 │   └─ search/
 │       ├─ __init__.py               ✅ 패키지 초기화
 │       ├─ local_search.py           ✅ SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, ~/.cache/achat/)
-│       └─ web_search.py             🔲 인터넷 검색 (DuckDuckGo / SearXNG) ← 네트워크 의존, 보류
+│       └─ web_search.py             ✅ 인터넷 검색 — DuckDuckGo Instant Answer API (urllib, 추가 의존성 없음)
 │
 ├─ training/                           # LoRA 파인튜닝
 │   ├─ 학습.md                        ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
-│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps)
+│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps, --eval_split, best loss 저장)
 │   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터)
 │   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 JSONL)
 │   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger)
@@ -144,10 +145,11 @@ Achat/
 ├─ eval/                               # 평가 스크립트 (Phase 5)
 │   ├─ ai_tell_checker.py             ✅ AI투 표현 패턴 측정 + 베이스/LoRA 비교
 │   ├─ memory_test.py                 ✅ 멀티턴 기억 유지 정확도 (5케이스)
-│   └─ speed_bench.py                 ✅ transformers/llama_cpp 추론 속도 벤치마크
+│   ├─ speed_bench.py                 ✅ transformers/llama_cpp 추론 속도 벤치마크
+│   └─ verify_phases.py               ✅ Phase 2/3 실환경 검증 (12턴 자동 대화, 5항목 PASS)
 │
-├─ api/                                ⚠️ README에 없음 — 역할 미정의
-│   └─ server.py                      🔲 (향후 웹 UI 확장 용도 추정, 필요시 정리)
+├─ api/                                📄 향후 웹 UI / REST API 확장용 (Phase 8 예정)
+│   └─ server.py                      📄 FastAPI 서버 스텁 — 현재 미구현, Phase 8 이후 확장
 │
 ├─ .github/
 │   └─ workflows/
@@ -176,10 +178,10 @@ Achat/
 | `tools/folder/`, `tools/search/` | 하위 구조화 | 이전 `tools/base.py`, `tools/commands.py`만 존재 | Phase 7에서 신규 구현 |
 | `ui_ux/mode_switcher.py` | 신규 추가 | 미존재 → 삭제됨 | QML `Repeater` 기반 모드 버튼으로 대체 (Phase 4 완료) |
 | `ui_ux/qml/` | 없음 | 신규 생성 | QML + PySide6 아키텍처 채택, main.qml + ChatBubble.qml |
-| `agent/memory.py` | 없음 | 존재 | 역할 정의 필요 (`memory/` 레이어와 중복 가능성) |
-| `conversation/utils/` | 없음 | 존재 | README에 추가 또는 삭제 검토 |
-| `chracter_Haru.yaml` | 없음 | 존재 (오타) | 삭제 권장 |
-| `api/server.py` | 없음 | 존재 | 역할 정의 후 README에 추가하거나 삭제 |
+| `agent/memory.py` | 없음 | ✅ 정리 완료 | memory/ 패키지 re-export 모듈로 역할 정의 |
+| `conversation/utils/` | 없음 | ✅ 정리 완료 | logger.py + file_io.py 구현, __init__.py re-export |
+| `chracter_Haru.yaml` | 없음 | ✅ 삭제 완료 | 오타 파일 삭제 |
+| `api/server.py` | 없음 | 📄 스텁 유지 | FastAPI 서버 스텁 — Phase 8 확장 예정 |
 | 패키지 관리 | `requirements-*.txt` | `pyproject.toml` / `pyproject-deploy.toml` (uv) | ✅ 완료 |
 | `docs/plan1/` | 없음 | 빈 디렉토리 | 삭제 권장 |
 
@@ -189,7 +191,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 62 | docs 7개(학습.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train, dataset, build_dataset, eval 3개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 7개 (base, classifier, converter, renamer, prompt_converter, local_search, __init__ 3개) |
-| 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl |
-| 🔲 구현 예정 / 보류 | 2 | tools/search/web_search.py (네트워크 의존 보류), agent/router.py |
-| ⚠️ 정리 필요 | 6 | 오타 파일, 경로 불일치, 역할 미정 파일, 빈 디렉토리 |
+| ✅ 완료 | 73 | docs/ 9개(학습.md, BUG_1.md, BUG_small.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train+eval_split, dataset, build_dataset, eval 4개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 8개, agent/router.py, agent/memory.py, conversation/utils/ 3개 |
+| 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl, api/server.py (스텁) |
+| 🔲 구현 예정 / 보류 | 0 | 없음 |
+| ⚠️ 정리 필요 | 0 | 없음 |

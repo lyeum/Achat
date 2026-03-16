@@ -191,13 +191,13 @@ return response
 
 ### 완료 기준
 - [x] `memory/`, `agent/` 패키지 `__init__.py` 추가 (import 경로 확보)
-- [x] ChromaDB store/query 구현 (bge-m3 임베딩, threshold 0.7, importance ≥ 0.5 필터)
+- [x] ChromaDB store/query 구현 (bge-m3 임베딩, threshold 0.52, importance ≥ 0.5 필터)
 - [x] `memory_trigger_n`턴마다 LLM 요약 → 중요도 scoring → VDB 저장 파이프라인
 - [x] `handle_turn()` — VDB 검색 → PromptBuilder → LLM → mood/affection → 세션 기록 → 요약 트리거
 - [x] `Agent` 클래스 — 전체 컴포넌트 초기화 + `chat()` 대화 진입점
-- [ ] (실환경 검증) 10턴 대화 후 ChromaDB에 요약 저장 확인
-- [ ] (실환경 검증) 기억 참조 질문 시 VDB 결과가 Layer C에 삽입됨 확인
-- [ ] (실환경 검증) mood/affection 상태 변화 확인
+- [x] (실환경 검증) 10턴 대화 후 ChromaDB에 요약 저장 확인
+- [x] (실환경 검증) 기억 참조 질문 시 VDB 결과가 Layer C에 삽입됨 확인
+- [x] (실환경 검증) mood/affection 상태 변화 확인
 
 ---
 
@@ -235,8 +235,8 @@ return response
 - [x] `ConversationRouter` — RAG 검색 연동 (우선순위: 장기 메모리 > 세계관 RAG)
 - [x] **버그 수정**: ChromaDB distance metric `l2` → `cosine` (long_term, rag/index 모두)
 - [x] **버그 수정**: `summarizer.write_to_vdb(trigger_n=)` — turn_range 하드코딩 제거
-- [ ] (실환경 검증) 세계관 관련 질문 시 RAG 결과 Layer B 삽입 확인
-- [ ] (실환경 검증) 무관한 질문 시 RAG 결과 삽입 안 됨 확인
+- [x] (실환경 검증) 세계관 관련 질문 시 RAG 결과 Layer B 삽입 확인
+- [x] (실환경 검증) 무관한 질문 시 RAG 결과 삽입 안 됨 확인
 
 ---
 
@@ -393,10 +393,12 @@ python eval/speed_bench.py --backend transformers
 - [x] `eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
 - [x] `eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
 - [x] CPU 파이프라인 smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
-- [ ] (실행 검증) GPU에서 `lora_train.py` OOM 없이 3 epoch 완료
-- [ ] (실행 검증) `ai_tell_checker.py` 파인튜닝 후 AI투 감소 확인
-- [ ] (실행 검증) 기능 모드 JSON 출력 정확도 확인
-- [ ] 최종 채택 모델 1개 결정 (학습후보.md 평가 결과 기준)
+- [x] (실행 검증) GPU에서 `lora_train.py` OOM 없이 3 epoch 완료 (loss 0.4425, 36.6분)
+- [x] (실행 검증) `ai_tell_checker.py` — AI투 0건, 캐릭터 말투 개선 확인
+- [x] (실행 검증) `memory_test.py` — 40% (2/5), 목표 미달 (memory_ref 데이터 보강 필요)
+- [x] (실행 검증) `speed_bench.py` — 10.3 tok/s GPU, 목표 8+ 달성
+- [ ] 기능 모드 JSON 출력 정확도 확인 (data/lora/function 데이터로 별도 평가 필요)
+- [ ] 최종 채택 모델 1개 결정 (기억 정확도 개선 후 재평가 권장 — 학습후보.md 4-4 참조)
 
 ---
 
@@ -517,7 +519,7 @@ def handle_input(self, user_input: str, mode: str) -> str:
 - [x] 이름 변환: 패턴 규칙 적용 실행 (`tools/folder/renamer.py`)
 - [x] 프롬프트 변환: rule-based 변환 구현, 기능 세션 격리 (`tools/prompt_converter.py`)
 - [x] 로컬 검색: SQLite FTS5 인덱싱 + MATCH 쿼리 결과 반환 (`tools/search/local_search.py`)
-- [ ] 웹 검색: DuckDuckGo 또는 SearXNG 결과 반환 ← 네트워크 의존, 보류
+- [x] 웹 검색: DuckDuckGo Instant Answer API (urllib, 추가 의존성 없음) (`tools/search/web_search.py`)
 - [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 구현 (도구 선택 → LLM 파싱 → execute)
 
 ---

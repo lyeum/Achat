@@ -192,6 +192,80 @@ logger.info(f"[llm_client] 디바이스: {self._device}")
 
 ---
 
+---
+
+## BUG-07 · `config.py` / `rag/retrieve.py` — vdb_threshold 0.7 과도하게 엄격
+
+**발견**: Phase 2/3 실환경 검증 (2026-03-16)
+
+**문제**
+`vdb_threshold=0.7`로 설정 시 bge-m3 한국어 임베딩에서 세계관 관련 질문조차 threshold를 통과하지 못해
+RAG 결과가 항상 빈 리스트로 반환됨.
+
+**원인**
+bge-m3 코사인 유사도 실측값:
+- 세계관 관련 질문 (등대지기 전설): ~0.559
+- 무관한 질문 (날씨, 기억): ~0.380~0.483
+- 0.7은 양쪽 모두 걸러냄
+
+**수정**
+`config.py` dev/deploy 모두 `vdb_threshold: 0.52` 로 변경.
+0.52 기준: 관련 쿼리(~0.55+) 통과 / 무관 쿼리(~0.48-) 차단.
+
+---
+
+## BUG-08 · `rag/sources/world/*.md` — 세계관 문서 내용 불일치
+
+**발견**: Phase 3 실환경 검증 (2026-03-16)
+
+**문제**
+`place.md`, `story.md`, `culture.md`에 일반 판타지 마을 내용이 작성되어 있었음.
+`W_sea.yaml`이 바다 세계관을 지정하고 있으나 RAG 소스 문서가 불일치.
+"등대지기 전설에 대해 들어봤어?" 질문에 관련 문서가 없어 RAG 히트 0건.
+
+**수정**
+세 파일 모두 바다 마을 세계관으로 교체:
+- `place.md`: 해변/방파제/등대/항구 시장/마을 카페
+- `story.md`: 마을 역사/등대지기 전설(100년 전 노인, 폭풍 속 불빛 유지)/태풍 사건
+- `culture.md`: 생활방식/해맞이·등대축제·어부의날/사회규칙
+
+---
+
+## BUG-09 · `eval/verify_phases.py` — VDB 검증 타이밍 오류
+
+**발견**: Phase 2 검증 스크립트 초안 작성 시 (2026-03-16)
+
+**문제**
+10번째 턴에서 "내 이름 기억해?" 질문으로 VDB Layer C 삽입을 검증하려 했으나,
+같은 턴(10번째)에서 요약 저장이 실행되므로 저장 전에 VDB 쿼리가 먼저 실행됨.
+→ VDB가 비어있어 항상 0건.
+
+**수정**
+시나리오를 12턴으로 확장:
+- 1~10턴: 대화 진행 + 10번째 턴 종료 후 요약 저장
+- 11번째 턴: 세계관 질문 (RAG 검증)
+- 12번째 턴: "내 이름 기억해?" (VDB Layer C 검증 — 저장 이후)
+
+---
+
+## BUG-10 · `training/lora_train.py` — best loss 저장 없음
+
+**발견**: Phase 5 학습 완료 후 (2026-03-16)
+
+**문제**
+학습 마지막 스텝 가중치를 `adapter/`에 저장하는 구조.
+`save_total_limit=2`로 best checkpoint가 삭제될 수 있음.
+validation set 없어 과적합 감지 불가.
+
+**수정**
+`--eval_split` 옵션 추가 (기본값 0.1):
+- `train_test_split(test_size=0.1, seed=42)`로 검증셋 분리
+- `eval_strategy="steps"`, `load_best_model_at_end=True`
+- `metric_for_best_model="loss"`, `greater_is_better=False`
+- `save_total_limit=3` (best + 최근 2개 유지)
+
+---
+
 ## 미수정 항목 (계획 미완성 / 의도적 설계)
 
 | 항목 | 이유 |
