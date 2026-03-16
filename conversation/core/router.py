@@ -5,6 +5,7 @@ from loguru import logger
 from agent import state as state_mod
 from conversation.core.llm_client import LLMClient
 from conversation.core.prompt_build import PromptBuilder
+from conversation.core.session import ConversationSession
 from memory import short_term, summarizer
 from memory.long_term import LongTermMemory
 from rag.retrieve import WorldRetriever

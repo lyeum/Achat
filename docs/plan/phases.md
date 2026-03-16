@@ -401,52 +401,37 @@ python eval/speed_bench.py --backend transformers
 
 ### 구현 순서
 
-#### 6-1. `scripts/merge_lora.py`
-```python
-# ⚠️ 실행 전 브라우저 등 메모리 사용 프로세스 종료 필수 (RAM ~6GB 소모)
-model = AutoModelForCausalLM.from_pretrained(
-    base_model_path,
-    torch_dtype=torch.float16,
-    low_cpu_mem_usage=True,
-    device_map="cpu",
-)
-model = PeftModel.from_pretrained(model, adapter_path)
-model = model.merge_and_unload()
-model.save_pretrained(output_path)
-tokenizer.save_pretrained(output_path)
-```
+#### 6-1. `scripts/merge_lora.py` ✅
+- `PeftModel.from_pretrained` → `merge_and_unload()` → HF 포맷 저장
+- `dtype=torch.float16`, `low_cpu_mem_usage=True`, `device_map="cpu"`
 - OOM 발생 시: swap 4GB 임시 확장 후 재시도
+  ```bash
+  sudo fallocate -l 4G /swapfile2 && sudo chmod 600 /swapfile2
+  sudo mkswap /swapfile2 && sudo swapon /swapfile2
+  ```
 
-#### 6-2. `scripts/convert_to_gguf.sh`
-```bash
-#!/bin/bash
-python llama.cpp/convert_hf_to_gguf.py \
-    $MERGED_MODEL_PATH \
-    --outfile output/model_fp16.gguf \
-    --outtype f16
-
-./llama.cpp/quantize \
-    output/model_fp16.gguf \
-    output/model_q4km.gguf \
-    Q4_K_M
-# 최종 파일 크기: 3B Q4_K_M ≈ 2GB
-```
+#### 6-2. `scripts/convert_to_gguf.sh` ✅
+- `--merged`, `--out_dir`, `--llama_cpp` 인자로 경로 지정
+- Step 1: `convert_hf_to_gguf.py` → `model_fp16.gguf`
+- Step 2: `llama-quantize` → `model_q4km.gguf` (Q4_K_M, ~2GB)
+- 선행 조건: llama.cpp 클론 + cmake 빌드 필요
 
 #### 6-3. `pyproject-deploy.toml` 검증
 - Windows 환경에서 `uv sync` 클린 설치 확인
 - `llama-cpp-python` AVX2 빌드 여부 확인
 
-#### 6-4. 실행 스크립트 `run.bat`
-```batch
-@echo off
-python main.py --env deploy --model models/model_q4km.gguf
-```
+#### 6-4. 실행 스크립트 `run.bat` ✅
+- 모델 파일 존재 여부 확인 후 `uv run python main.py --env deploy` 실행
 
 ### 완료 기준
-- [ ] `merge_lora.py` OOM 없이 완료, HF 포맷 병합 모델 저장
-- [ ] `model_q4km.gguf` 생성 (~2GB)
-- [ ] Windows에서 `run.bat` 실행 시 위젯 정상 구동
-- [ ] CPU 추론 속도 8+ tok/s 달성 확인
+- [x] `scripts/merge_lora.py` 작성 완료
+- [x] `scripts/convert_to_gguf.sh` 작성 완료
+- [x] `run.bat` 작성 완료
+- [ ] **GPU 파인튜닝 실행** — RTX 5060 Ti에서 3 epoch 완료, 평가 결과 기록 (ai_tell_checker / memory_test / speed_bench)
+- [ ] (실행 검증) `merge_lora.py` OOM 없이 완료, HF 포맷 병합 모델 저장 ← GPU 학습 완료 후 진행
+- [ ] (실행 검증) `model_q4km.gguf` 생성 (~2GB) ← llama.cpp 빌드 필요
+- [ ] (실행 검증) **배포 파이프라인 전체 작동 확인** — merge → GGUF 변환 → Windows run.bat 실행 → 위젯 정상 구동
+- [ ] (실행 검증) CPU 추론 속도 8+ tok/s 달성 확인
 
 ---
 

@@ -170,7 +170,7 @@ def main():
         lora_rate = reports[1]["ai_tell_rate"]
         delta = lora_rate - base_rate
         sign = "↓" if delta < 0 else "↑"
-        logger.info(f"\n비교 요약:")
+        logger.info("\n비교 요약:")
         logger.info(f"  베이스 AI투 건당: {base_rate:.2f}")
         logger.info(f"  LoRA  AI투 건당: {lora_rate:.2f}  ({sign}{abs(delta):.2f})")
 
