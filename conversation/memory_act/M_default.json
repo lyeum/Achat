@@ -3,9 +3,17 @@
   "character_id": "Haru",
   "entries": [
     {
-      "act_id": "init",
-      "location": "unknown",
-      "summary": "아직 특별한 대화 기록은 없다."
+      "id": "mem_haru_000",
+      "content": "아직 특별한 대화 기록은 없다.",
+      "metadata": {
+        "character_id": "Haru",
+        "session_id": "default",
+        "turn_range": "0-0",
+        "importance": 0.5,
+        "tags": [],
+        "location": "unknown",
+        "timestamp": "2025-01-01T00:00:00+00:00"
+      }
     }
   ]
 }

@@ -85,7 +85,11 @@ class ChatBridge(QObject):
     @Slot(str)
     def changeCharacter(self, char_id: str) -> None:
         """캐릭터를 핫스왑하고 이름 변경 시그널을 emit한다."""
+        if self._agent.session is None:   # stub / ui_test 모드
+            return
+
         from agent.persona import swap_persona
+        from conversation.core.prompt_build import PromptBuilder
         try:
             new_char, new_session = swap_persona(
                 session=self._agent.session,
@@ -93,7 +97,19 @@ class ChatBridge(QObject):
             )
             self._agent.character = new_char
             self._agent.session   = new_session
-            self._character_name  = new_char.get("name", char_id)
+
+            # router와 builder도 새 character / session 으로 교체
+            if self._agent.router is not None:
+                self._agent.router.character = new_char
+                self._agent.router.session   = new_session
+                self._agent.router.builder   = PromptBuilder(
+                    new_char,
+                    self._agent.world,
+                    new_session,
+                    count_tokens_fn=self._agent.llm.count_tokens,
+                )
+
+            self._character_name = new_char.get("name", char_id)
             self.characterNameChanged.emit(self._character_name)
         except FileNotFoundError as e:
             self.messageAdded.emit("system", f"[캐릭터 변경 실패] {e}")

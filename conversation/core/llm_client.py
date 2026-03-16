@@ -50,13 +50,15 @@ class LLMClient:
             raise ValueError("dev 환경에서 model_name이 설정되지 않았습니다.")
         logger.info(f"[llm_client] transformers 로딩: {model_name}")
 
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
         self._model = AutoModelForCausalLM.from_pretrained(
             model_name,
             dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
         )
-        self._model = self._model.to("cuda")
+        self._model = self._model.to(self._device)
+        logger.info(f"[llm_client] 디바이스: {self._device}")
 
     # ── 생성 ─────────────────────────────────────────────────────────────────
 
