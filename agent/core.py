@@ -9,6 +9,42 @@ from conversation.core.router import ConversationRouter
 from conversation.core.session import ConversationSession
 from conversation.loader.world_load import load_world
 from memory.long_term import LongTermMemory
+from tools.base import BaseTool
+from tools.folder.classifier import ClassifierTool
+from tools.folder.converter import ConverterTool
+from tools.folder.renamer import RenamerTool
+from tools.prompt_converter import PromptConverterTool
+from tools.search.local_search import LocalSearchTool
+
+# 등록된 도구 목록 (name → instance)
+_TOOLS: dict[str, BaseTool] = {
+    t.name: t
+    for t in [
+        ClassifierTool(),
+        ConverterTool(),
+        RenamerTool(),
+        PromptConverterTool(),
+        LocalSearchTool(),
+    ]
+}
+
+# 도구 선택용 키워드 매핑 (자연어 힌트 → tool name)
+_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    (("분류", "정리", "폴더"), "folder_classify"),
+    (("변환", "convert", "이미지", "png", "jpg", "webp"), "image_convert"),
+    (("이름", "rename", "renamer", "파일명"), "file_rename"),
+    (("프롬프트", "prompt", "명확", "간결", "상세", "질문형", "지시형"), "prompt_convert"),
+    (("검색", "search", "찾아", "파일 찾"), "local_search"),
+]
+
+
+def _select_tool(user_input: str) -> BaseTool | None:
+    """user_input 에서 키워드를 감지해 도구를 선택한다."""
+    lower = user_input.lower()
+    for keywords, name in _KEYWORDS:
+        if any(kw in lower for kw in keywords):
+            return _TOOLS.get(name)
+    return None
 
 
 class Agent:
@@ -17,7 +53,7 @@ class Agent:
     phases.md 2-7:
     - 컴포넌트 초기화 (LLM, LongTermMemory, Session, Router)
     - chat(user_input) → 대화 모드 진입점
-    - 모드 분기는 Phase 7에서 확장
+    - handle_input(user_input, mode) → 모드별 분기 (Phase 7)
     """
 
     def __init__(
@@ -80,3 +116,44 @@ class Agent:
         if self._stub:
             return f"[stub] 입력 받음: {user_input}"
         return self.router.handle_turn(user_input, stream=stream)
+
+    def handle_input(self, user_input: str, mode: str = "chat", stream: bool = True) -> str:
+        """모드별 분기 진입점.
+
+        mode == "chat"     : 대화 엔진(Router) 경유
+        mode == "function" : 도구 선택 → LLM 파라미터 파싱 → rule-based 실행
+        """
+        if mode == "chat":
+            return self.chat(user_input, stream=stream)
+
+        if mode == "function":
+            return self._handle_function(user_input)
+
+        logger.warning(f"[agent] 알 수 없는 모드: {mode!r} — chat 으로 대체")
+        return self.chat(user_input, stream=stream)
+
+    def _handle_function(self, user_input: str) -> str:
+        """기능 모드 처리: 도구 선택 → LLM 파라미터 추출 → execute"""
+        tool = _select_tool(user_input)
+        if tool is None:
+            registered = ", ".join(_TOOLS.keys())
+            return (
+                f"어떤 기능을 원하시는지 파악하지 못했습니다.\n"
+                f"사용 가능한 도구: {registered}"
+            )
+
+        logger.info(f"[agent:function] 도구 선택 — {tool.name}")
+
+        if self._stub:
+            # stub 모드: LLM 없이 빈 params 로 execute
+            params: dict = {}
+        else:
+            llm_output = self.llm.generate(
+                system=tool.system_prompt,
+                user=user_input,
+                stream=False,
+            )
+            params = tool.parse_params(llm_output)
+            logger.debug(f"[agent:function] 파싱된 파라미터 — {params}")
+
+        return tool.execute(params)
