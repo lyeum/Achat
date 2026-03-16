@@ -127,7 +127,7 @@ class PromptBuilder:
         voice_hint = self.character.get("memory_voice", "").strip()
         parts = [f"- {r}" for r in vdb_results]
         hint = f"\n(기억 표현 방식: {voice_hint})" if voice_hint else ""
-        return f"[어렴풋한 기억]\n" + "\n".join(parts) + hint
+        return "[어렴풋한 기억]\n" + "\n".join(parts) + hint
 
     def _layer_d(self, short_buf: list[dict]) -> list[dict]:
         """단기 히스토리 — 토큰 예산 초과 시 턴 수를 점진적으로 축소한다."""
