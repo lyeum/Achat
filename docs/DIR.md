@@ -150,7 +150,7 @@ Achat/
 ├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU)
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
-├─ Dockerfile                          ✅ CUDA 12.8 + Ubuntu 22.04 + uv 기반 (fcitx5-hangul 포함)
+├─ Dockerfile                          ✅ CUDA 12.8 + Ubuntu 24.04 + uv 기반 (ibus-hangul, libgl1, IBUS_USE_PORTAL=0)
 └─ .gitignore
 ```
 

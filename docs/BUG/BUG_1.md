@@ -3,7 +3,7 @@
 > 최초 작성: 2026-03-15 (Ubuntu 20.04 → 22.04 이전 기준)
 > 최종 갱신: 2026-03-16
 > 현재 환경: Ubuntu 24.04.3 LTS WSL2 (Windows 11, RTX 5060, 커널 6.6.87.2-microsoft-standard-WSL2)
-> 현재 목적: 한글 입력 문제 미해결 — Ubuntu 24.04 + Qt6(PySide6) 환경에서 fcitx5 IME 연동 확인 중
+> 현재 목적: 한글 입력 문제 ✅ 해결 — ibus + IBUS_USE_PORTAL=0 적용 완료. 우측 Alt(한영키) 전환은 WSLg 구조적 한계로 미지원, Ctrl+Space 사용
 
 ---
 
