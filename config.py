@@ -34,7 +34,8 @@ _CONFIGS = {
         "memory_trigger_n": 10,            # 요약 → VDB 저장 트리거 간격
         "embedding_model": "BAAI/bge-m3",
         "vdb_top_k": 2,
-        "vdb_threshold": 0.7,
+        "vdb_threshold": 0.52,  # bge-m3 한국어 특성 — 0.7은 과도하게 엄격
+                                 # 세계관 관련 질문 ~0.55, 무관 질문 ~0.48 → 0.52로 분리
     },
     "deploy": {
         "model_backend": "llama_cpp",      # GGUF CPU 추론
@@ -45,7 +46,7 @@ _CONFIGS = {
         "memory_trigger_n": 10,
         "embedding_model": "BAAI/bge-m3",
         "vdb_top_k": 2,
-        "vdb_threshold": 0.7,
+        "vdb_threshold": 0.52,
     },
 }
 
