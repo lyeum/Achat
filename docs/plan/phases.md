@@ -512,13 +512,13 @@ def handle_input(self, user_input: str, mode: str) -> str:
 ```
 
 ### 완료 기준
-- [ ] 폴더 정리: 자연어 → JSON 파싱 → 파일 이동 실행
-- [ ] 확장자 변환: 이미지 포맷 변환 동작 (Pillow)
-- [ ] 이름 변환: 패턴 규칙 적용 실행
-- [ ] 프롬프트 변환: 대화 모드와 격리된 기능 세션으로 동작
-- [ ] 로컬 검색: 인덱싱 후 FTS 쿼리 결과 반환
-- [ ] 웹 검색: DuckDuckGo 또는 SearXNG 결과 반환
-- [ ] `mode_switcher.py`에서 모드 전환 시 `agent.core`에 올바르게 전달됨
+- [x] 폴더 정리: 자연어 → JSON 파싱 → 파일 이동 실행 (`tools/folder/classifier.py`)
+- [x] 확장자 변환: 이미지 포맷 변환 동작 (Pillow) (`tools/folder/converter.py`)
+- [x] 이름 변환: 패턴 규칙 적용 실행 (`tools/folder/renamer.py`)
+- [x] 프롬프트 변환: rule-based 변환 구현, 기능 세션 격리 (`tools/prompt_converter.py`)
+- [x] 로컬 검색: SQLite FTS5 인덱싱 + MATCH 쿼리 결과 반환 (`tools/search/local_search.py`)
+- [ ] 웹 검색: DuckDuckGo 또는 SearXNG 결과 반환 ← 네트워크 의존, 보류
+- [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 구현 (도구 선택 → LLM 파싱 → execute)
 
 ---
 
