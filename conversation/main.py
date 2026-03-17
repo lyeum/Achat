@@ -22,7 +22,7 @@ from conversation.loader.world_load import load_world
 from memory.long_term import LongTermMemory
 
 # ── 기본 경로 ─────────────────────────────────────────────────────────────────
-CHARACTER_PATH = ROOT / "conversation/character/CH_haru.yaml"
+CHARACTER_PATH = ROOT / "conversation/character/CH_Haru.yaml"
 WORLD_PATH     = ROOT / "conversation/world/W_sea.yaml"
 
 

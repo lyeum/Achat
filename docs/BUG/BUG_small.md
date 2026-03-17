@@ -192,6 +192,135 @@ logger.info(f"[llm_client] 디바이스: {self._device}")
 
 ---
 
+---
+
+## BUG-07 · `config.py` / `rag/retrieve.py` — vdb_threshold 0.7 과도하게 엄격
+
+**발견**: Phase 2/3 실환경 검증 (2026-03-16)
+
+**문제**
+`vdb_threshold=0.7`로 설정 시 bge-m3 한국어 임베딩에서 세계관 관련 질문조차 threshold를 통과하지 못해
+RAG 결과가 항상 빈 리스트로 반환됨.
+
+**원인**
+bge-m3 코사인 유사도 실측값:
+- 세계관 관련 질문 (등대지기 전설): ~0.559
+- 무관한 질문 (날씨, 기억): ~0.380~0.483
+- 0.7은 양쪽 모두 걸러냄
+
+**수정**
+`config.py` dev/deploy 모두 `vdb_threshold: 0.52` 로 변경.
+0.52 기준: 관련 쿼리(~0.55+) 통과 / 무관 쿼리(~0.48-) 차단.
+
+---
+
+## BUG-08 · `rag/sources/world/*.md` — 세계관 문서 내용 불일치
+
+**발견**: Phase 3 실환경 검증 (2026-03-16)
+
+**문제**
+`place.md`, `story.md`, `culture.md`에 일반 판타지 마을 내용이 작성되어 있었음.
+`W_sea.yaml`이 바다 세계관을 지정하고 있으나 RAG 소스 문서가 불일치.
+"등대지기 전설에 대해 들어봤어?" 질문에 관련 문서가 없어 RAG 히트 0건.
+
+**수정**
+세 파일 모두 바다 마을 세계관으로 교체:
+- `place.md`: 해변/방파제/등대/항구 시장/마을 카페
+- `story.md`: 마을 역사/등대지기 전설(100년 전 노인, 폭풍 속 불빛 유지)/태풍 사건
+- `culture.md`: 생활방식/해맞이·등대축제·어부의날/사회규칙
+
+---
+
+## BUG-09 · `eval/verify_phases.py` — VDB 검증 타이밍 오류
+
+**발견**: Phase 2 검증 스크립트 초안 작성 시 (2026-03-16)
+
+**문제**
+10번째 턴에서 "내 이름 기억해?" 질문으로 VDB Layer C 삽입을 검증하려 했으나,
+같은 턴(10번째)에서 요약 저장이 실행되므로 저장 전에 VDB 쿼리가 먼저 실행됨.
+→ VDB가 비어있어 항상 0건.
+
+**수정**
+시나리오를 12턴으로 확장:
+- 1~10턴: 대화 진행 + 10번째 턴 종료 후 요약 저장
+- 11번째 턴: 세계관 질문 (RAG 검증)
+- 12번째 턴: "내 이름 기억해?" (VDB Layer C 검증 — 저장 이후)
+
+---
+
+## BUG-10 · `training/lora_train.py` — best loss 저장 없음
+
+**발견**: Phase 5 학습 완료 후 (2026-03-16)
+
+**문제**
+학습 마지막 스텝 가중치를 `adapter/`에 저장하는 구조.
+`save_total_limit=2`로 best checkpoint가 삭제될 수 있음.
+validation set 없어 과적합 감지 불가.
+
+**수정**
+`--eval_split` 옵션 추가 (기본값 0.1):
+- `train_test_split(test_size=0.1, seed=42)`로 검증셋 분리
+- `eval_strategy="steps"`, `load_best_model_at_end=True`
+- `metric_for_best_model="loss"`, `greater_is_better=False`
+- `save_total_limit=3` (best + 최근 2개 유지)
+
+---
+
+## BUG-11 · `eval/` 3개 파일 — `device_map="auto"` + PeftModel 충돌
+
+**발견**: Phase 5 실환경 평가 (2026-03-17)
+
+**문제**
+`ai_tell_checker.py`, `memory_test.py`, `speed_bench.py` 에서
+`device_map="auto"` 로 베이스 모델 로드 후 `PeftModel.from_pretrained()` 호출 시
+accelerate `get_balanced_memory()` 내부에서 `set`이 unhashable로 처리되어 TypeError 발생.
+
+**원인**
+accelerate 버전 이슈. `device_map="auto"` 상태에서 PEFT 어댑터 로드 시
+`no_split_module_classes`가 set 타입으로 전달되어 hashability 체크 실패.
+
+**수정**
+`device_map="auto"` 제거, `.to(device)` 명시 + `PeftModel.from_pretrained(..., device_map={"": device})` 로 교체.
+
+```python
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = AutoModelForCausalLM.from_pretrained(...).to(device)
+model = PeftModel.from_pretrained(model, adapter_path, device_map={"": device})
+```
+
+---
+
+## BUG-12 · `eval/` 3개 파일 — `torch_dtype` deprecated 경고
+
+**발견**: Phase 5 실환경 평가 (2026-03-17)
+
+**문제**
+`AutoModelForCausalLM.from_pretrained(torch_dtype=...)` 파라미터명이 신버전 transformers에서 deprecated.
+매 실행마다 `torch_dtype is deprecated! Use dtype instead!` 경고 출력.
+
+**수정**
+`torch_dtype=torch.bfloat16` → `dtype=torch.bfloat16` 으로 교체 (3개 파일 동일 적용).
+
+---
+
+## BUG-13 · `training/lora_train.py` — eval 중 CUDA error: unknown error
+
+**발견**: lora_haru_v4 학습 (2026-03-17)
+
+**문제**
+`eval_split=0.1` 설정 시 step 100 eval 구간에서 `torch.AcceleratorError: CUDA error: unknown error` 발생.
+학습 자체는 정상이었으나 eval forward pass 시점에 크래시.
+
+**원인**
+VRAM 8GB 환경에서 학습 중 gradient_checkpointing으로 activation을 해제하지만,
+eval 시점에는 gradient_checkpointing 비활성 → 전체 activation이 VRAM에 올라오며 초과.
+
+**대응**
+- 단기: `--eval_split 0` 으로 eval 비활성화 후 학습 진행 (best checkpoint 수동 선택)
+- 학습 완료 후 v3 실측 기준 epoch 3~4 근처 checkpoint 사용
+
+---
+
 ## 미수정 항목 (계획 미완성 / 의도적 설계)
 
 | 항목 | 이유 |

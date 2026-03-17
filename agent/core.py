@@ -15,6 +15,7 @@ from tools.folder.converter import ConverterTool
 from tools.folder.renamer import RenamerTool
 from tools.prompt_converter import PromptConverterTool
 from tools.search.local_search import LocalSearchTool
+from tools.search.web_search import WebSearchTool
 
 # 등록된 도구 목록 (name → instance)
 _TOOLS: dict[str, BaseTool] = {
@@ -25,6 +26,7 @@ _TOOLS: dict[str, BaseTool] = {
         RenamerTool(),
         PromptConverterTool(),
         LocalSearchTool(),
+        WebSearchTool(),
     ]
 }
 
@@ -35,6 +37,7 @@ _KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("이름", "rename", "renamer", "파일명"), "file_rename"),
     (("분류", "정리", "폴더"), "folder_classify"),
     (("이미지", "image", "png", "jpg", "jpeg", "webp", "bmp", "tiff"), "image_convert"),
+    (("인터넷", "웹 검색", "web", "구글", "검색해줘", "찾아봐"), "web_search"),
     (("검색", "search", "찾아", "파일 찾"), "local_search"),
 ]
 

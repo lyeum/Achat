@@ -13,11 +13,12 @@
 |---|---|---|
 | Phase 0 | 환경 설정, config.py, pyproject.toml, Dockerfile | ✅ 완료 |
 | Phase 1 | LLM 클라이언트, 세션, 캐릭터 로더, 프롬프트 빌더 | ✅ 완료 |
-| Phase 2 | Agent 코어, 메모리, 라우터, 페르소나 | ✅ 완료 |
-| Phase 3 | RAG 인덱스 / 검색 | ✅ 완료 (스텁 수준) |
+| Phase 2 | Agent 코어, 메모리, 라우터, 페르소나 + 실환경 검증 | ✅ 완료 |
+| Phase 3 | RAG 인덱스 / 검색 + 실환경 검증 | ✅ 완료 |
 | Phase 4 | UI (PySide6/QML) — 시각적 동작 확인 완료 | ✅ 완료 |
-| Phase 5 | LoRA 학습 파이프라인 | ⏳ 미착수 |
-| Phase 6 | 모델 병합 → GGUF 변환 → 배포 | ⏳ 미착수 |
+| Phase 5 | LoRA 학습 파이프라인 — v1 완료, v2 학습 중 | 🔄 진행중 |
+| Phase 6 | 모델 병합 → GGUF 변환 → 배포 | ⏳ Phase 5 완료 후 진행 |
+| Phase 7 | 기능 모드 도구 (폴더정리/검색/프롬프트 변환) | ✅ 완료 |
 
 코드는 GitHub 리포지토리가 최신 상태 기준. 새 환경에서 `git clone` 후 시작.
 
@@ -253,16 +254,26 @@ Achat/
 
 ---
 
-## 7. 다음 작업 — Phase 5 (LoRA 학습 파이프라인)
+## 7. 현재 작업 — Phase 5 v2 학습 + Phase 6 대기
 
-`docs/plan/phases.md` Phase 5 항목 참조.
+### Phase 5 완료 항목 (lora_haru_v1)
+- GPU 학습 3 epoch 완료 (loss 0.4425, RTX 5060, ~37분)
+- AI투 표현: 0건/응답 (캐릭터 말투 개선 확인)
+- 기억 정확도: 40% (목표 80% 미달 — v2 재학습 중)
+- 추론 속도: 10.3 tok/s GPU
 
-우선순위 작업:
-1. `scripts/build_dataset.py` — `training/log/*.jsonl` → `data/lora/` 변환
-2. `scripts/train_lora.py` — unsloth 기반 LoRA 파인튜닝 실행
-3. `training/log/` 에 대화 데이터 수동 수집 (`docs/MVP대화.md` § 3 참조)
+### 현재 진행 중 (lora_haru_v2)
+- `training/data` 전체 1,461건 × 3 epoch
+- **best eval loss 기반 저장** (eval_split=0.1, `load_best_model_at_end=True`)
+- 어댑터: `output/lora_haru_v2/adapter/`
 
-학습 전 최소 수집 목표: 카테고리별 30~50건.
+### Phase 5 → 6 전환 조건
+v2 학습 완료 후:
+1. `eval/memory_test.py` — 기억 정확도 80% 이상 달성 확인
+2. `scripts/merge_lora.py` — LoRA 어댑터 → HF 포맷 병합
+3. cmake 설치 완료 확인 후 `scripts/convert_to_gguf.sh` 실행
+   - llama.cpp 클론: `~/llama.cpp` (또는 임의 경로)
+   - 빌드: `cmake -B build && cmake --build build --config Release`
 
 ---
 
