@@ -1,11 +1,13 @@
 {
   "description": "training/log/ JSONL 저장 형식 정의. 각 파일은 카테고리별로 분리된다.",
   "files": {
-    "daily.jsonl":   "일상 잡담, 날씨, 근황",
-    "emotion.jsonl": "감정 표현 / 반응",
-    "advice.jsonl":  "고민 상담, 의견 요청",
-    "memory.jsonl":  "이전 대화 언급, 기억 참조",
-    "persona.jsonl": "페르소나 일관성 테스트 (무례한 입력, 경계 침범 등)"
+    "daily.jsonl":        "일상 잡담, 날씨, 근황",
+    "emotion.jsonl":      "감정 표현 / 반응",
+    "advice.jsonl":       "고민 상담, 의견 요청",
+    "memory.jsonl":       "이전 대화 언급, 기억 참조",
+    "persona.jsonl":      "페르소나 일관성 테스트 (무례한 입력, 경계 침범 등)",
+    "feedback_pos.jsonl": "사용자 칭찬·동의 — 강화 신호 (+)",
+    "feedback_neg.jsonl": "사용자 교정·지적·반복 루프 — 수정 검토 대상"
   },
 
   "fields": {
@@ -18,7 +20,8 @@
       }
     },
     "character_id":    { "type": "string", "example": "Haru" },
-    "category":        { "type": "string", "values": ["daily", "emotion", "advice", "memory", "persona"] },
+    "category":        { "type": "string", "values": ["daily", "emotion", "advice", "memory", "persona", "feedback_pos", "feedback_neg"] },
+    "logged_at":       { "type": "string", "description": "ISO 8601 자동 기록 — conversation_logger.py 수집 시각" },
     "affection":       { "type": "string", "values": ["low", "mid", "high"], "description": "대화 당시 친밀도 구간" },
     "mood":            { "type": "string", "values": ["neutral", "happy", "annoyed", "sad"] },
     "emotion_trigger": { "type": "string", "description": "대화 유발 상황 자유 기술. 예: 고민_상담, 장난, 재회" }

@@ -1,0 +1,219 @@
+"""training/log/conversation_logger.py — 대화 중 학습 데이터 자동 수집.
+
+저장 경로: training/log/{category}/YYYY-MM-DD.jsonl
+저장 시점:
+  - 유저 발화에 카테고리 키워드 포함 → 즉시 flush
+  - assistant 응답 3회 이상 동일 (반복 루프) → 즉시 flush
+  - CHUNK_SIZE 턴 도달 → flush (일상 잡담 수집용)
+  - 세션 종료 → 잔여 버퍼 flush
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+
+LOG_DIR = Path(__file__).resolve().parent
+
+_NEGATIVE = [
+    "아니야", "아니지", "그게 아니라", "반복하지마", "반복 하지마",
+    "같은 말", "틀렸어", "이해 못", "왜 그런 말", "그 말 말고",
+    "이상해", "말투", "왜그래", "왜 그래", "캐릭터", "붕괴",
+    "어색해", "안 맞아", "맞지 않아", "뭔 말이야", "무슨 말이야",
+]
+_POSITIVE = [
+    "맞아", "맞네", "잘했어", "역시", "그렇지", "고마워",
+    "기억하네", "기억했네", "잘 기억", "대단해",
+]
+_MEMORY   = [
+    "기억해", "기억나", "이름", "좋아해", "싫어해",
+    "말했잖", "했잖아", "취미", "말한 거",
+]
+_EMOTION  = [
+    "슬퍼", "화났", "기뻐", "우울", "행복",
+    "외로워", "힘들어", "무서워", "기분",
+]
+_ADVICE   = [
+    "어떻게 해", "조언", "고민이야", "해야 할까", "어떻게 생각",
+    "어떡해", "뭐가 나아",
+]
+_PERSONA  = ["AI야", "로봇이야", "프로그램이야", "가짜야", "진짜 사람"]
+
+
+def _affection_level(aff: int) -> str:
+    if aff >= 67:
+        return "high"
+    if aff >= 34:
+        return "mid"
+    return "low"
+
+
+def _has_repetition(turns: list[dict]) -> bool:
+    """최근 assistant 응답 3개 이상 동일하면 True."""
+    asst = [t["content"].strip() for t in turns if t["role"] == "assistant"]
+    return len(asst) >= 3 and len(set(asst[-3:])) == 1
+
+
+def _is_trigger(user_text: str) -> bool:
+    """단일 유저 발화에 즉시 저장 키워드가 있으면 True."""
+    all_kw = _NEGATIVE + _POSITIVE + _MEMORY + _EMOTION + _ADVICE + _PERSONA
+    return any(kw in user_text for kw in all_kw)
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _is_duplicate(messages: list[dict], cat_dir: Path, threshold: float = 0.55) -> bool:
+    """같은 카테고리의 최근 3개 항목과 Jaccard 유사도 비교.
+
+    threshold 이상이면 새 내용 없다고 판단 → True 반환.
+    """
+    today = cat_dir.parent.name  # 호출 측에서 today 파일만 체크
+    # cat_dir가 아직 없거나 파일 없으면 중복 아님
+    files = sorted(cat_dir.glob("*.jsonl")) if cat_dir.exists() else []
+    if not files:
+        return False
+
+    new_words = set(
+        w for m in messages if m["role"] == "user"
+        for w in m["content"].split()
+        if len(w) > 1
+    )
+
+    checked = 0
+    for jl in reversed(files):          # 최신 파일부터
+        lines = [l for l in jl.read_text(encoding="utf-8").splitlines() if l.strip()]
+        for line in reversed(lines):    # 최신 항목부터
+            if checked >= 3:
+                break
+            try:
+                existing = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ex_words = set(
+                w for m in existing.get("messages", []) if m["role"] == "user"
+                for w in m["content"].split()
+                if len(w) > 1
+            )
+            if _jaccard(new_words, ex_words) >= threshold:
+                return True
+            checked += 1
+        if checked >= 3:
+            break
+
+    return False
+
+
+def _classify(turns: list[dict]) -> tuple[str, str]:
+    """(category, emotion_trigger) 반환."""
+    if _has_repetition(turns):
+        return "feedback_neg", "반복_루프"
+
+    user_text = " ".join(t["content"] for t in turns if t["role"] == "user")
+
+    if any(kw in user_text for kw in _NEGATIVE):
+        return "feedback_neg", "교정_지적"
+    if any(kw in user_text for kw in _POSITIVE):
+        return "feedback_pos", "칭찬_동의"
+    if any(kw in user_text for kw in _MEMORY):
+        return "memory", "기억_참조"
+    if any(kw in user_text for kw in _EMOTION):
+        return "emotion", "감정_표현"
+    if any(kw in user_text for kw in _ADVICE):
+        return "advice", "고민_상담"
+    if any(kw in user_text for kw in _PERSONA):
+        return "persona", "페르소나_테스트"
+    return "daily", "일상_잡담"
+
+
+class ConversationLogger:
+    """대화 턴을 버퍼링해 training/log/{category}/YYYY-MM-DD.jsonl에 저장."""
+
+    CHUNK_SIZE = 8
+
+    def __init__(self, character_id: str, log_dir: Path = LOG_DIR):
+        self._char_id    = character_id
+        self._log_dir    = log_dir
+        self._buffer: list[dict] = []
+        self._last_aff   = 0
+        self._last_mood  = "neutral"
+        self._turn_start = 0   # 현재 버퍼가 시작된 절대 턴 번호
+        self._turn_total = 0   # 세션 전체 턴 수
+
+    def on_turn(
+        self,
+        user_input: str,
+        assistant_response: str,
+        mood: str,
+        affection: int,
+    ) -> None:
+        self._buffer.append({"role": "user",      "content": user_input})
+        self._buffer.append({"role": "assistant", "content": assistant_response})
+        self._last_aff  = affection
+        self._last_mood = mood
+        self._turn_total += 1
+
+        if (
+            _is_trigger(user_input)
+            or _has_repetition(self._buffer)
+            or len(self._buffer) >= self.CHUNK_SIZE * 2
+        ):
+            self._flush()
+
+    def flush_remaining(self) -> None:
+        """세션 종료 시 잔여 버퍼 저장 (최소 2턴 이상일 때)."""
+        if len(self._buffer) >= 4:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self._buffer:
+            return
+
+        category, trigger = _classify(self._buffer)
+        turn_end = self._turn_total
+        turn_range = f"{self._turn_start}-{turn_end}"
+
+        entry = {
+            "messages":        list(self._buffer),
+            "character_id":    self._char_id,
+            "category":        category,
+            "affection":       _affection_level(self._last_aff),
+            "mood":            self._last_mood,
+            "emotion_trigger": trigger,
+            "turn_range":      turn_range,
+            "logged_at":       datetime.now().isoformat(timespec="seconds"),
+            "reviewed":        False,
+        }
+
+        # 카테고리별 폴더 생성
+        cat_dir  = self._log_dir / category
+        cat_dir.mkdir(exist_ok=True)
+        today    = datetime.now().strftime("%Y-%m-%d")
+        out_file = cat_dir / f"{today}.jsonl"
+
+        # 중복 체크 — 새 내용 없으면 저장 생략
+        n_turns = len(self._buffer) // 2
+        if _is_duplicate(self._buffer, cat_dir):
+            print(
+                f"\033[90m[LOG –] {category} | {trigger} | "
+                f"turn {turn_range} — 유사 항목 존재, 생략\033[0m"
+            )
+            self._turn_start = turn_end
+            self._buffer.clear()
+            return
+
+        with out_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # 콘솔 표시
+        print(
+            f"\033[90m[LOG ✓] {category} | {trigger} | "
+            f"turn {turn_range} ({n_turns}턴) → {out_file.relative_to(self._log_dir.parent.parent)}\033[0m"
+        )
+
+        self._turn_start = turn_end
+        self._buffer.clear()
