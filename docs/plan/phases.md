@@ -387,8 +387,8 @@ python eval/speed_bench.py --backend transformers
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터 작성
 - [x] `scripts/build_dataset.py` — training/log/*.jsonl → data/lora/conversation/ 빌드 + 시스템 프롬프트 삽입 (버그 수정: TOKENS_PER_CHAR 역수 오류, relative_to 예외 처리)
 - [x] `training/dataset.py` — data/lora/**/*.jsonl 로드 + apply_chat_template + max_length 필터 (버그 수정: relative_to 예외 처리)
-- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, processing_class, warmup_steps, pin_memory 버그 수정
-- [x] `training/학습.md` — Step 0~6 실행 가이드 작성
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, --eval_split best loss 저장, --weight_decay/--lora_dropout/--max_samples 과적합 억제 옵션, epoch/완료 시 loss 그래프 PNG 자동 저장
+- [x] `training/학습.md` — 학습 루프 흐름, 실행 방법, 실시간 모니터링, 인자 전체 목록, 과적합 분석 매뉴얼
 - [x] `eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교 (F541 버그 수정)
 - [x] `eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
 - [x] `eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크

@@ -114,7 +114,7 @@ Achat/
 │
 ├─ training/                           # LoRA 파인튜닝
 │   ├─ 학습.md                        ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
-│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps, --eval_split, best loss 저장)
+│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps, --eval_split, best loss 저장, epoch/전체 완료 시 loss 그래프 PNG 자동 저장)
 │   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터)
 │   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 JSONL)
 │   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger)
@@ -160,7 +160,7 @@ Achat/
 │                                          _check_vram() CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                             ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
 ├─ config.py                           ✅ dev / deploy 환경 분기 설정
-├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정
+├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정 (matplotlib 포함)
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
 ├─ Dockerfile                          ✅ CUDA 12.8 + Ubuntu 24.04 + uv 기반 (ibus-hangul, libgl1, IBUS_USE_PORTAL=0)

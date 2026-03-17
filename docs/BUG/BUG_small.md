@@ -266,6 +266,61 @@ validation set 없어 과적합 감지 불가.
 
 ---
 
+## BUG-11 · `eval/` 3개 파일 — `device_map="auto"` + PeftModel 충돌
+
+**발견**: Phase 5 실환경 평가 (2026-03-17)
+
+**문제**
+`ai_tell_checker.py`, `memory_test.py`, `speed_bench.py` 에서
+`device_map="auto"` 로 베이스 모델 로드 후 `PeftModel.from_pretrained()` 호출 시
+accelerate `get_balanced_memory()` 내부에서 `set`이 unhashable로 처리되어 TypeError 발생.
+
+**원인**
+accelerate 버전 이슈. `device_map="auto"` 상태에서 PEFT 어댑터 로드 시
+`no_split_module_classes`가 set 타입으로 전달되어 hashability 체크 실패.
+
+**수정**
+`device_map="auto"` 제거, `.to(device)` 명시 + `PeftModel.from_pretrained(..., device_map={"": device})` 로 교체.
+
+```python
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = AutoModelForCausalLM.from_pretrained(...).to(device)
+model = PeftModel.from_pretrained(model, adapter_path, device_map={"": device})
+```
+
+---
+
+## BUG-12 · `eval/` 3개 파일 — `torch_dtype` deprecated 경고
+
+**발견**: Phase 5 실환경 평가 (2026-03-17)
+
+**문제**
+`AutoModelForCausalLM.from_pretrained(torch_dtype=...)` 파라미터명이 신버전 transformers에서 deprecated.
+매 실행마다 `torch_dtype is deprecated! Use dtype instead!` 경고 출력.
+
+**수정**
+`torch_dtype=torch.bfloat16` → `dtype=torch.bfloat16` 으로 교체 (3개 파일 동일 적용).
+
+---
+
+## BUG-13 · `training/lora_train.py` — eval 중 CUDA error: unknown error
+
+**발견**: lora_haru_v4 학습 (2026-03-17)
+
+**문제**
+`eval_split=0.1` 설정 시 step 100 eval 구간에서 `torch.AcceleratorError: CUDA error: unknown error` 발생.
+학습 자체는 정상이었으나 eval forward pass 시점에 크래시.
+
+**원인**
+VRAM 8GB 환경에서 학습 중 gradient_checkpointing으로 activation을 해제하지만,
+eval 시점에는 gradient_checkpointing 비활성 → 전체 activation이 VRAM에 올라오며 초과.
+
+**대응**
+- 단기: `--eval_split 0` 으로 eval 비활성화 후 학습 진행 (best checkpoint 수동 선택)
+- 학습 완료 후 v3 실측 기준 epoch 3~4 근처 checkpoint 사용
+
+---
+
 ## 미수정 항목 (계획 미완성 / 의도적 설계)
 
 | 항목 | 이유 |
