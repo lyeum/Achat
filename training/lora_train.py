@@ -51,7 +51,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="LoRA 파인튜닝")
     parser.add_argument("--model",       default="Qwen/Qwen2.5-3B-Instruct", help="HuggingFace 모델명")
     parser.add_argument("--data_dir",    default="data/lora",                 help="학습 데이터 루트")
-    parser.add_argument("--output_dir",  default="output/lora_v1",            help="어댑터 저장 디렉토리")
+    parser.add_argument("--output_dir",  default="training/LoRA_v1",           help="어댑터 저장 디렉토리")
     parser.add_argument("--subset",      default=None,                        help="conversation | function | None(전체)")
     parser.add_argument("--epochs",      type=int,   default=3)
     parser.add_argument("--batch_size",  type=int,   default=1)
@@ -305,6 +305,12 @@ def main():
         model.save_pretrained(str(adapter_path))
         tokenizer.save_pretrained(str(adapter_path))
         logger.info(f"어댑터 저장 완료: {adapter_path}")
+
+        # ── 체크포인트 정리 (가중치·그래프·로그 제외 삭제) ────────────────────
+        import shutil
+        for ckpt in sorted(output_dir.glob("checkpoint-*")):
+            shutil.rmtree(ckpt)
+            logger.info(f"체크포인트 삭제: {ckpt.name}")
 
 
 if __name__ == "__main__":

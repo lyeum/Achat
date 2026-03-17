@@ -212,3 +212,10 @@ output/
 chroma_verify/
 *.sqlite3
 *.bin
+
+# LoRA 학습 결과 (가중치/그래프 포함)
+training/LoRA_v*/
+
+# 대화 세션 런타임 파일 (매 실행마다 재생성)
+training/log/.session_state.json
+training/log/.monitor.log
