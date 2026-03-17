@@ -37,6 +37,7 @@ from transformers import (
     AutoTokenizer,
     DataCollatorForSeq2Seq,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
 )
 
@@ -60,9 +61,11 @@ def parse_args():
     parser.add_argument("--lora_r",      type=int,   default=16)
     parser.add_argument("--lora_alpha",  type=int,   default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
+    parser.add_argument("--weight_decay", type=float, default=0.0,            help="L2 정규화 (0.01 권장)")
     parser.add_argument("--save_steps",  type=int,   default=100)
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--eval_split",  type=float, default=0.1,             help="validation 비율 (0이면 eval 비활성)")
+    parser.add_argument("--max_samples", type=int,   default=-1,              help="학습에 사용할 최대 샘플 수 (-1=전체)")
     # 저장 및 테스트 옵션
     parser.add_argument("--no_save",     action="store_true", help="학습 후 어댑터 저장 건너뜀 (테스트용)")
     parser.add_argument("--max_steps",   type=int,   default=-1, help="최대 학습 스텝 수 (-1=에폭 기준)")
@@ -93,6 +96,60 @@ def load_model_and_tokenizer(model_name: str, use_gpu: bool):
     model.enable_input_require_grads()
 
     return model, tokenizer
+
+
+def plot_loss(log_history: list, output_dir: Path, tag: str = "") -> None:
+    """train loss / eval loss 그래프를 PNG로 저장."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib 미설치 — 그래프 생략 (pip install matplotlib)")
+        return
+
+    train_steps = [l["step"] for l in log_history if "loss" in l and "eval_loss" not in l]
+    train_loss  = [l["loss"] for l in log_history if "loss" in l and "eval_loss" not in l]
+    eval_steps  = [l["step"] for l in log_history if "eval_loss" in l]
+    eval_loss   = [l["eval_loss"] for l in log_history if "eval_loss" in l]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(train_steps, train_loss, label="train loss", color="steelblue", linewidth=1.5)
+    if eval_loss:
+        ax.plot(eval_steps, eval_loss, label="eval loss", color="tomato",
+                linewidth=1.5, marker="o", markersize=4)
+        best_idx = eval_loss.index(min(eval_loss))
+        ax.axvline(eval_steps[best_idx], color="tomato", linestyle="--", alpha=0.5,
+                   label=f"best eval {min(eval_loss):.4f} (step {eval_steps[best_idx]})")
+
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss")
+    ax.set_title(f"LoRA Training Loss{' — ' + tag if tag else ''}")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    fname = output_dir / f"loss_curve{'_' + tag if tag else ''}.png"
+    fig.savefig(fname, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"그래프 저장: {fname}")
+
+
+class LossPlotCallback(TrainerCallback):
+    """epoch 종료 및 학습 전체 종료 시 loss 그래프 저장."""
+
+    def __init__(self, output_dir: Path):
+        self._output_dir = output_dir
+        self._last_epoch = 0
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        epoch = int(state.epoch)
+        if epoch == self._last_epoch:
+            return
+        self._last_epoch = epoch
+        plot_loss(state.log_history, self._output_dir, tag=f"epoch{epoch:02d}")
+
+    def on_train_end(self, args, state, control, **kwargs):
+        plot_loss(state.log_history, self._output_dir, tag="final")
 
 
 def apply_lora(model, args) -> object:
@@ -149,7 +206,11 @@ def main():
     logger.info(f"데이터 로드: {args.data_dir} (subset={args.subset})")
     raw_ds = load_training_data(args.data_dir, tokenizer, args.max_length, args.subset)
     tokenized_ds = tokenize_dataset(raw_ds, tokenizer, args.max_length)
-    logger.info(f"전체 샘플 수: {len(tokenized_ds)}")
+    if args.max_samples > 0 and args.max_samples < len(tokenized_ds):
+        tokenized_ds = tokenized_ds.shuffle(seed=42).select(range(args.max_samples))
+        logger.info(f"샘플링 적용: {len(tokenized_ds)}건 사용 (--max_samples {args.max_samples})")
+    else:
+        logger.info(f"전체 샘플 수: {len(tokenized_ds)}")
 
     # ── Train / Eval 분리 ─────────────────────────────────────────────────────
     use_eval = args.eval_split > 0 and not args.no_save
@@ -193,6 +254,7 @@ def main():
         save_steps=args.save_steps if not args.no_save else 999999,
         save_total_limit=3 if not args.no_save else 0,
         optim="adamw_torch",
+        weight_decay=args.weight_decay,
         warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
         report_to="none",
@@ -223,6 +285,7 @@ def main():
         eval_dataset=eval_ds,
         data_collator=data_collator,
         processing_class=tokenizer,
+        callbacks=[LossPlotCallback(output_dir)],
     )
 
     logger.info("학습 시작")

@@ -53,16 +53,16 @@ def bench_transformers(model_name: str, adapter_path: str | None, max_new_tokens
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map="auto",
-    )
+    ).to(device)
     if adapter_path:
         from peft import PeftModel
         logger.info(f"어댑터 로드: {adapter_path}")
-        model = PeftModel.from_pretrained(model, adapter_path)
+        model = PeftModel.from_pretrained(model, adapter_path, device_map={"": device})
     model.eval()
 
     tok_per_sec_list = []
