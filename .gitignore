@@ -208,3 +208,7 @@ __marimo__/
 
 # LoRA 학습 출력물 (체크포인트, 어댑터)
 output/
+# ChromaDB 로컬 데이터
+chroma_verify/
+*.sqlite3
+*.bin

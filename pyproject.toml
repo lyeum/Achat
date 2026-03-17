@@ -47,6 +47,7 @@ dependencies = [
     "loguru>=0.7.0",
     "tqdm",
     "rich",
+    "matplotlib>=3.8.0",
 ]
 
 # PyTorch CUDA 12.8 빌드 인덱스 (RTX 5060 Ti / Blackwell 대응)
