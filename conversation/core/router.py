@@ -44,11 +44,14 @@ class ConversationRouter:
         self.builder = PromptBuilder(
             character, world, session, count_tokens_fn=llm.count_tokens
         )
-        self.rag = WorldRetriever(config)
+        self.rag     = WorldRetriever(config)
         self._trigger_n: int = config.get("memory_trigger_n", 10)
 
     def handle_turn(self, user_input: str, stream: bool = True) -> str:
         """user_input을 받아 캐릭터 응답 문자열을 반환한다."""
+        # 0. 장소 이동 감지 → session.location_context / act_id 업데이트
+        self._handle_location(user_input)
+
         # 1. 단기 버퍼
         short_buf = short_term.get_recent(self.session)
 
@@ -87,6 +90,34 @@ class ConversationRouter:
         return response
 
     # ── 내부 헬퍼 ──────────────────────────────────────────────────────────────
+
+    def _handle_location(self, user_input: str) -> None:
+        """이동 의도 감지 → YAML act 매칭 or 동적 장소 생성.
+
+        session.act_id / session.location_context를 업데이트한다.
+        나레이터는 비활성화 상태 — 대화 안정화 후 conversation/narrator.py 재연결.
+        """
+        from rag.world_nav import detect_move_intent, find_or_create_location
+
+        location_name = detect_move_intent(user_input, self.llm)
+        if not location_name:
+            return
+
+        # YAML 기존 acts 매칭 (location 필드 부분 일치)
+        for scenario in self.world.get("scenarios", []):
+            for act in scenario.get("acts", []):
+                if location_name in act.get("location", ""):
+                    self.session.scenario_id      = scenario["scenario_id"]
+                    self.session.act_id           = act["act_id"]
+                    self.session.location_context = None
+                    logger.info(f"[router] 장소 이동 (YAML): {act['location']}")
+                    return
+
+        # RAG 검색 or LLM 생성
+        world_desc = self.world.get("description", "")
+        desc = find_or_create_location(location_name, world_desc, self.rag, self.llm)
+        self.session.location_context = f"{location_name}\n{desc}"
+        logger.info(f"[router] 동적 장소 설정: '{location_name}'")
 
     def _run_summarizer(self) -> None:
         logger.info(

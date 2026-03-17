@@ -61,3 +61,24 @@ class WorldRetriever:
             f"{len(filtered)}개 threshold({self.threshold}) 통과"
         )
         return filtered
+
+    def add_document(self, doc_id: str, text: str, metadata: dict) -> None:
+        """ChromaDB에 문서를 동적으로 추가(upsert)한다.
+
+        컬렉션이 없으면 자동 생성 후 저장한다.
+        동일 doc_id가 이미 존재하면 덮어쓴다.
+        """
+        existing = [c.name for c in self._client.list_collections()]
+        if self._col_name not in existing:
+            col = self._client.create_collection(
+                name=self._col_name,
+                embedding_function=self._ef,
+                metadata={"hnsw:space": "cosine"},
+            )
+        else:
+            col = self._client.get_collection(
+                name=self._col_name, embedding_function=self._ef
+            )
+
+        col.upsert(ids=[doc_id], documents=[text], metadatas=[metadata])
+        logger.debug(f"[rag/retrieve] 문서 저장: {doc_id}")
