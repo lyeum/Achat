@@ -524,6 +524,75 @@ def handle_input(self, user_input: str, mode: str) -> str:
 
 ---
 
+## Phase 8 — MVP 대화 루프 & 데이터 수집 파이프라인
+
+> 목표: 실제 대화 중 자동으로 학습 데이터를 수집하고 검토하는 end-to-end 파이프라인 구축
+> 선행 조건: Phase 2 (router.py handle_turn), Phase 3 (RAG 연동)
+> 관련 문서: [docs/MVP대화.md](../MVP대화.md)
+
+### 구현 순서
+
+#### 8-1. `conversation/core/session.py` — location_context 필드 추가
+- `location_context: Optional[str] = None` — YAML act를 동적으로 덮어쓰는 장소 묘사
+
+#### 8-2. `conversation/core/prompt_build.py` — location_context 우선 처리
+- `_layer_b()` — `session.location_context` 있으면 YAML act 대신 사용
+
+#### 8-3. `rag/world_nav.py` — 장소 이동 감지 + 동적 생성
+- `detect_move_intent(user_input, llm)` — `_MOVE_TRIGGERS` 키워드 필터 → LLM 추출 (max_tokens=15)
+- `find_or_create_location(name, world_desc, retriever, llm)` — RAG 검색 → LLM 생성 → `add_document()` ChromaDB 저장
+
+#### 8-4. `rag/retrieve.py` — add_document 추가
+- `add_document(doc_id, text, metadata)` — 동적 위치 정보 ChromaDB upsert
+
+#### 8-5. `conversation/core/router.py` — _handle_location 연동
+- `_handle_location(user_input)` — detect_move_intent → YAML act 매칭 또는 find_or_create_location
+- `handle_turn()` — 서술자(Narrator) 비활성화, str 반환
+
+#### 8-6. `conversation/narrator.py` — 서술자 구현 (비활성화)
+- `Narrator` 클래스 — `describe_arrival()` / `describe_session_start()` (LLM 3~5문장)
+- 현재 비활성화 — 대화 품질 안정 후 router에서 재활성화 예정
+
+#### 8-7. `training/log/conversation_logger.py` — 대화 데이터 자동 수집
+- 카테고리 분류: `feedback_neg`, `feedback_pos`, `memory`, `emotion`, `advice`, `persona`, `daily`
+- 트리거: 키워드 매칭 즉시 flush / 반복 루프 감지 / CHUNK_SIZE=8 청크 flush / 세션 종료
+- Jaccard 중복 제거 (threshold=0.55, 최근 3항목 비교)
+- `reviewed: false` 태그 — review.py로 이중 체크
+
+#### 8-8. `training/log/monitor.py` — 세션 모니터링
+- `.session_state.json` 폴링(2초) → 카테고리별 수집 현황 + 미검토 건수 표시
+- `conversation/main.py`에서 서브프로세스로 자동 실행
+- 별도 터미널: `tail -f training/log/.monitor.log`
+
+#### 8-9. `training/log/review.py` — 미검토 항목 이중 체크 CLI
+- `y(승인) / n(재분류+이동) / d(삭제) / s(건너뜀) / q(종료)`
+- `--cat` 옵션으로 카테고리 단독 검토
+- 삭제·이동 시 줄 인덱스 오프셋 자동 보정
+
+#### 8-10. `conversation/main.py` — 통합 메인 루프
+- 세계관 RAG 자동 인덱싱 (`force=False`, 컬렉션 미존재 시만)
+- monitor 서브프로세스 자동 실행
+- 턴마다 `.session_state.json` 갱신 (turn/mood/affection/act_id/vdb_count)
+- `ConversationLogger.on_turn()` 호출 + 세션 종료 시 `flush_remaining()`
+
+### 완료 기준
+- [x] `session.location_context` — YAML act 덮어쓰기 동작
+- [x] `detect_move_intent()` — 이동 키워드 감지 후 LLM 장소 추출
+- [x] `find_or_create_location()` — RAG 기존 장소 반환 or LLM 생성 후 ChromaDB 저장
+- [x] `_handle_location()` — YAML act 매칭 우선, 없으면 동적 생성
+- [x] `add_document()` — 동적 ChromaDB upsert 구현
+- [x] `ConversationLogger` — 7개 카테고리 분류, 중복 제거, reviewed 태그
+- [x] `monitor.py` — 대화 시작 시 자동 실행, `.monitor.log` 갱신
+- [x] `review.py` — y/n/d/s/q 이중 체크, 재분류 이동, 오프셋 보정
+- [x] `main.py` — monitor 자동 실행, 세션 상태 기록, logger 통합
+- [x] `Narrator` 코드 작성 완료 (비활성화 상태)
+- [ ] (실환경 검증) 대화 10턴 후 training/log/ 카테고리별 JSONL 생성 확인
+- [ ] (실환경 검증) `review.py` 미검토 항목 승인/재분류 동작 확인
+- [ ] (실환경 검증) 장소 이동 발화 → location_context 변경 → 프롬프트 반영 확인
+- [ ] Narrator 재활성화 — 대화 품질 안정 + narration 전용 학습 데이터 확보 후
+
+---
+
 ## 전체 의존 관계
 
 ```
@@ -534,12 +603,14 @@ Phase 0 (환경/설정)
     │       ├─► Phase 2 (대화 엔진)
     │       │       │
     │       │       ├─► Phase 3 (RAG)
+    │       │       │       │
+    │       │       │       └─► Phase 8 (MVP 루프 & 데이터 수집)
     │       │       │
     │       │       └─► Phase 7 (기능 모드 도구) ← Phase 4 병렬 가능
     │       │
     │       └─► Phase 4 (플로팅 UI) ← Phase 2와 병렬 가능
     │
-    └─► Phase 5 (LoRA 학습)
+    └─► Phase 5 (LoRA 학습) ← Phase 8의 training/log/ 데이터 활용
             │
             └─► Phase 6 (GGUF 배포)
 ```
@@ -547,6 +618,7 @@ Phase 0 (환경/설정)
 - Phase 4는 `agent.chat()` 인터페이스만 있으면 Phase 2/3와 병렬 진행 가능
 - Phase 5/6는 대화 엔진 완성과 무관하게 데이터 준비 후 진행 가능
 - Phase 7은 Phase 2의 `agent/core.py` 기본 구조와 Phase 4의 `mode_switcher.py`가 있으면 진행 가능
+- Phase 8은 Phase 2/3 완료 후 진행, training/log 수집 데이터가 Phase 5 파인튜닝 입력으로 순환
 
 ---
 

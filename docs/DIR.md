@@ -27,10 +27,10 @@ Achat/
 ├─ conversation/                       # 대화 엔진 (핵심)
 │   ├─ __init__.py                    ✅ 패키지 초기화 (import 경로 확보)
 │   ├─ core/
-│   │   ├─ llm_client.py             ✅ llama_cpp + transformers 듀얼 백엔드 (스트리밍, 토큰 카운트)
-│   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly, assemble(rag_results=) — Layer B에 RAG 병합
-│   │   ├─ router.py                 ✅ `handle_turn()` — VDB + RAG 검색 → PromptBuilder → LLM → mood/affection → 요약 트리거
-│   │   └─ session.py                ✅ 세션 상태 (mood, affection, turn_count, dialogue_log)
+│   │   ├─ llm_client.py             ✅ llama_cpp + transformers 듀얼 백엔드 (LoRA 어댑터 로드, repetition_penalty=1.1, 토큰 카운트)
+│   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly — session.location_context 우선, 없으면 YAML act 사용
+│   │   ├─ router.py                 ✅ `handle_turn()` — 장소 이동 감지(_handle_location) → VDB+RAG → PromptBuilder → LLM → mood/affection → 요약
+│   │   └─ session.py                ✅ 세션 상태 (mood, affection, turn_count, dialogue_log, location_context)
 │   │
 │   ├─ loader/
 │   │   ├─ character_load.py         ✅ 캐릭터 YAML → dict (필수 필드 검증 포함)
@@ -56,7 +56,8 @@ Achat/
 │   │   ├─ M_default.json            📄 캐릭터별 기본 기억 초기값
 │   │   └─ M_instance.json           📄 세션 인스턴스 기억 템플릿
 │   │
-│   └─ main.py                        ✅ CLI 루프 진입점 (dry-run 모드 포함, ROOT sys.path 삽입)
+│   ├─ main.py                        ✅ CLI 루프 진입점 — 세계관 RAG 자동 인덱싱, monitor 서브프로세스 자동 실행, 세션 상태 .session_state.json 기록, ConversationLogger 연동
+│   └─ narrator.py                   ✅ Narrator 클래스 (비활성화) — describe_arrival / describe_session_start LLM 3~5문장 장면 묘사 (대화 품질 안정 후 재활성화 예정)
 │
 ├─ memory/                             # 메모리 관리 레이어
 │   ├─ __init__.py                    ✅ 패키지 초기화
@@ -67,7 +68,8 @@ Achat/
 ├─ rag/                                # RAG 파이프라인
 │   ├─ __init__.py                    ✅ 패키지 초기화
 │   ├─ index.py                       ✅ `index_world()` — .md 청킹(400자/overlap 50) + ChromaDB 인덱싱 (cosine space)
-│   ├─ retrieve.py                    ✅ `WorldRetriever.query()` — 매 턴 실행, threshold 0.52, 컬렉션 미존재 안전 처리
+│   ├─ retrieve.py                    ✅ `WorldRetriever.query()` — 매 턴 실행, threshold 0.52, 컬렉션 미존재 안전 처리 / `add_document()` — 동적 위치 ChromaDB upsert
+│   ├─ world_nav.py                   ✅ `detect_move_intent()` — 키워드 필터 + LLM 추출(max_tokens=15) / `find_or_create_location()` — RAG 검색 → LLM 생성 → add_document 저장
 │   └─ sources/
 │       └─ world/
 │           ├─ place.md               📄 장소 정보 (이미 존재)
@@ -116,13 +118,19 @@ Achat/
 │   ├─ 학습.md                        ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
 │   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps, --eval_split, best loss 저장, epoch/전체 완료 시 loss 그래프 PNG 자동 저장)
 │   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터)
-│   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 JSONL)
-│   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger)
-│   │   ├─ daily.jsonl                📄 일상 대화 로그 (수집 예정)
-│   │   ├─ emotion.jsonl              📄 감정 공감 로그
-│   │   ├─ advice.jsonl               📄 고민 상담 로그
-│   │   ├─ memory.jsonl               📄 기억 관련 로그
-│   │   └─ persona.jsonl              📄 페르소나 이탈 교정 로그
+│   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 폴더 + JSONL)
+│   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger/logged_at/reviewed)
+│   │   ├─ conversation_logger.py     ✅ 카테고리 자동 분류 저장 — 키워드 트리거 즉시 flush, CHUNK_SIZE=8 일상 수집, Jaccard 중복 제거(0.55), reviewed:false 태그
+│   │   ├─ monitor.py                 ✅ 세션 실시간 모니터링 — .session_state.json 폴링(2s), 카테고리별 누적 건수 + 미검토 표시, .monitor.log 기록
+│   │   ├─ review.py                  ✅ 미검토 항목 이중 체크 CLI — y(승인)/n(재분류+이동)/d(삭제)/s(건너뜀)/q(종료), --cat 옵션
+│   │   ├─ daily/YYYY-MM-DD.jsonl     📄 일상 대화 로그 (대화 중 자동 수집)
+│   │   ├─ emotion/YYYY-MM-DD.jsonl   📄 감정 공감 로그
+│   │   ├─ advice/YYYY-MM-DD.jsonl    📄 고민 상담 로그
+│   │   ├─ memory/YYYY-MM-DD.jsonl    📄 기억 관련 로그
+│   │   ├─ persona/YYYY-MM-DD.jsonl   📄 페르소나 이탈 교정 로그
+│   │   ├─ feedback_pos/YYYY-MM-DD.jsonl 📄 칭찬·동의 로그
+│   │   ├─ feedback_neg/YYYY-MM-DD.jsonl 📄 교정·지적·반복루프 로그
+│   │   └─ .session_state.json        📄 세션 상태 스냅샷 (monitor 폴링용, 런타임 생성)
 │   └─ data/                          ⚠️ 기존 데이터 위치 (README는 루트 data/lora/ 로 변경)
 │       ├─ data_gen_prompt.md         📄 학습 데이터 생성 프롬프트 가이드
 │       ├─ common/
@@ -159,7 +167,7 @@ Achat/
 │                                          _cleanup_previous() PID 파일 기반 이전 프로세스 정리
 │                                          _check_vram() CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                             ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
-├─ config.py                           ✅ dev / deploy 환경 분기 설정
+├─ config.py                           ✅ dev / deploy 환경 분기 설정 (dev: adapter_path 추가 — None이면 베이스 모델)
 ├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정 (matplotlib 포함)
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
@@ -191,7 +199,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 73 | docs/ 9개(학습.md, BUG_1.md, BUG_small.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train+eval_split, dataset, build_dataset, eval 4개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 8개, agent/router.py, agent/memory.py, conversation/utils/ 3개 |
+| ✅ 완료 | 79 | docs/ 9개(학습.md, BUG_1.md, BUG_small.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train+eval_split, dataset, build_dataset, eval 4개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 8개, agent/router.py, agent/memory.py, conversation/utils/ 3개, conversation/narrator.py(비활성), rag/world_nav.py, training/log/ 수집 파이프라인 3개(conversation_logger, monitor, review) |
 | 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl, api/server.py (스텁) |
 | 🔲 구현 예정 / 보류 | 0 | 없음 |
 | ⚠️ 정리 필요 | 0 | 없음 |

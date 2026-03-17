@@ -15,6 +15,8 @@ class ConversationSession:
     scenario_id: Optional[str] = None
     act_id: Optional[str] = None
 
+    location_context: Optional[str] = None  # 동적 장소 묘사 (YAML act 덮어쓰기)
+
     mood: str = "neutral"   # neutral / happy / annoyed / sad
     affection: int = 30     # 0~100
 

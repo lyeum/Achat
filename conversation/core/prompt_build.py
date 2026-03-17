@@ -108,7 +108,9 @@ class PromptBuilder:
         act = self._current_act()
 
         parts = [f"[세계관]\n{world_desc}"]
-        if act:
+        if self.session.location_context:
+            parts.append(f"[현재 상황]\n{self.session.location_context}")
+        elif act:
             location = act.get("location", "")
             ctx = act.get("context", "").strip()
             parts.append(f"[현재 상황 — {location}]\n{ctx}")
