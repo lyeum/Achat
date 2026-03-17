@@ -108,10 +108,10 @@ def plot_loss(log_history: list, output_dir: Path, tag: str = "") -> None:
         logger.warning("matplotlib 미설치 — 그래프 생략 (pip install matplotlib)")
         return
 
-    train_steps = [l["step"] for l in log_history if "loss" in l and "eval_loss" not in l]
-    train_loss  = [l["loss"] for l in log_history if "loss" in l and "eval_loss" not in l]
-    eval_steps  = [l["step"] for l in log_history if "eval_loss" in l]
-    eval_loss   = [l["eval_loss"] for l in log_history if "eval_loss" in l]
+    train_steps = [log["step"] for log in log_history if "loss" in log and "eval_loss" not in log]
+    train_loss  = [log["loss"] for log in log_history if "loss" in log and "eval_loss" not in log]
+    eval_steps  = [log["step"] for log in log_history if "eval_loss" in log]
+    eval_loss   = [log["eval_loss"] for log in log_history if "eval_loss" in log]
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(train_steps, train_loss, label="train loss", color="steelblue", linewidth=1.5)
