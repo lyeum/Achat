@@ -48,7 +48,11 @@ class LLMClient:
         model_name = self.cfg.get("model_name")
         if not model_name:
             raise ValueError("dev 환경에서 model_name이 설정되지 않았습니다.")
+
+        adapter_path = self.cfg.get("adapter_path")
         logger.info(f"[llm_client] transformers 로딩: {model_name}")
+        if adapter_path:
+            logger.info(f"[llm_client] LoRA 어댑터: {adapter_path}")
 
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -56,8 +60,15 @@ class LLMClient:
             model_name,
             dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
-        )
-        self._model = self._model.to(self._device)
+        ).to(self._device)
+
+        if adapter_path:
+            from peft import PeftModel  # type: ignore
+            self._model = PeftModel.from_pretrained(
+                self._model, adapter_path, device_map={"": self._device}
+            )
+            self._model.eval()
+
         logger.info(f"[llm_client] 디바이스: {self._device}")
 
     # ── 생성 ─────────────────────────────────────────────────────────────────
@@ -104,6 +115,7 @@ class LLMClient:
                 max_new_tokens=max_tokens,
                 do_sample=True,
                 temperature=0.8,
+                repetition_penalty=1.1,
                 pad_token_id=self._tokenizer.eos_token_id,
             )
         response: str = self._tokenizer.decode(
