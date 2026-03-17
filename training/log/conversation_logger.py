@@ -72,7 +72,6 @@ def _is_duplicate(messages: list[dict], cat_dir: Path, threshold: float = 0.55) 
 
     threshold 이상이면 새 내용 없다고 판단 → True 반환.
     """
-    today = cat_dir.parent.name  # 호출 측에서 today 파일만 체크
     # cat_dir가 아직 없거나 파일 없으면 중복 아님
     files = sorted(cat_dir.glob("*.jsonl")) if cat_dir.exists() else []
     if not files:
@@ -86,7 +85,7 @@ def _is_duplicate(messages: list[dict], cat_dir: Path, threshold: float = 0.55) 
 
     checked = 0
     for jl in reversed(files):          # 최신 파일부터
-        lines = [l for l in jl.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [ln for ln in jl.read_text(encoding="utf-8").splitlines() if ln.strip()]
         for line in reversed(lines):    # 최신 항목부터
             if checked >= 3:
                 break

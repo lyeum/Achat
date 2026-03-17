@@ -56,7 +56,7 @@ def _recent_entries(n: int = 6) -> list[dict]:
         f = LOG_DIR / cat / f"{today}.jsonl"
         if not f.exists():
             continue
-        lines = [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [ln for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]
         for line in lines[-2:]:
             try:
                 entries.append(json.loads(line))
