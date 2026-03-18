@@ -5,16 +5,87 @@ from __future__ import annotations
 import faulthandler
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
 faulthandler.enable()
 
-# Qt 초기화 전 ibus 입력기 환경변수 설정 (WSL2 한글 입력)
+# Qt 초기화 전 입력기 / 플랫폼 환경변수 설정 (WSL2 한글 입력)
+# WAYLAND_DISPLAY가 있으면 Qt ibus 플러그인이 portal 모드를 강제 사용하지만,
+# WSL2 환경에서 org.freedesktop.IBus.Portal은 session bus에 미등록 → input context 생성 실패
+# xcb(X11) 플랫폼을 쓰므로 WAYLAND_DISPLAY 언셋해도 화면 출력에 영향 없음
+# 주의: libxcb-cursor0 설치 필요 (sudo apt-get install -y libxcb-cursor0)
+os.environ.pop("WAYLAND_DISPLAY", None)          # portal 모드 방지 (force direct IBUS_ADDRESS)
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 os.environ.setdefault("QT_IM_MODULE", "ibus")
 os.environ.setdefault("GTK_IM_MODULE", "ibus")
 os.environ.setdefault("XMODIFIERS", "@im=ibus")
-os.environ.setdefault("IBUS_USE_PORTAL", "0")
+os.environ["IBUS_USE_PORTAL"] = "0"              # setdefault 대신 강제 오버라이드
+
+
+def _ensure_dbus_session() -> None:
+    """dbus 세션 버스가 없으면 dbus-launch로 기동하고 환경변수를 주입한다.
+    WSL2 기본 환경에는 dbus 세션이 없어 ibus가 Qt와 통신 불가.
+    """
+    if os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+        return
+    try:
+        result = subprocess.run(
+            ["dbus-launch", "--sh-syntax"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            # 예: DBUS_SESSION_BUS_ADDRESS='unix:path=...'; export DBUS_SESSION_BUS_ADDRESS;
+            if "=" in line and not line.startswith("#"):
+                key, _, rest = line.partition("=")
+                key = key.strip()
+                val = rest.split(";")[0].strip().strip("'\"")
+                if key in ("DBUS_SESSION_BUS_ADDRESS", "DBUS_SESSION_BUS_PID"):
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+
+def _ensure_ibus_hangul() -> None:
+    """ibus-daemon을 기동하고 hangul 엔진으로 설정한다.
+    ibus 미설치 환경에서는 조용히 무시.
+    """
+    import time
+    try:
+        # 1. ibus-daemon이 실행 중인지 확인
+        alive = subprocess.run(
+            ["pgrep", "-x", "ibus-daemon"],
+            capture_output=True, timeout=2,
+        ).returncode == 0
+
+        # 2. 미실행이면 기동
+        if not alive:
+            subprocess.run(
+                ["ibus-daemon", "-d", "--xim"],
+                capture_output=True, timeout=5,
+            )
+            time.sleep(1.5)  # 데몬 초기화 대기
+
+        # 3. 엔진이 hangul이 아니면 전환
+        result = subprocess.run(
+            ["ibus", "engine"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if "hangul" not in result.stdout.lower():
+            subprocess.run(
+                ["ibus", "engine", "hangul"],
+                capture_output=True, timeout=2,
+            )
+
+        # 4. Ctrl+Space를 한/영 토글 키로 등록 (기본값엔 없음 — 환경 초기화 시 유실됨)
+        subprocess.run(
+            ["gsettings", "set", "org.freedesktop.ibus.engine.hangul",
+             "switch-keys", "Hangul,Shift+space,Control+space"],
+            capture_output=True, timeout=2,
+        )
+    except Exception:
+        pass  # ibus 미설치 환경에서는 무시
 
 from loguru import logger
 
@@ -66,8 +137,43 @@ def _check_vram(min_free_mb: int = 3000) -> None:
         pass  # torch 미설치 환경(deploy)에서는 무시
 
 
+def _inject_ibus_address() -> None:
+    """IBUS_ADDRESS를 bus 파일에서 읽어 주입한다.
+    이미 설정된 경우에도 소켓 파일 존재를 검증 — stale 주소면 갱신.
+    """
+    try:
+        # 현재 값이 살아있는 소켓을 가리키는지 확인
+        current = os.environ.get("IBUS_ADDRESS", "")
+        if current:
+            socket_path = next(
+                (p[len("unix:path="):] for p in current.split(",")
+                 if p.startswith("unix:path=")),
+                None,
+            )
+            if socket_path and Path(socket_path).exists():
+                return  # 유효한 소켓 — 그대로 사용
+
+        # 소켓 없음 or IBUS_ADDRESS 미설정 → bus 파일에서 갱신
+        machine_id = Path("/etc/machine-id").read_text().strip()
+        display = os.environ.get("DISPLAY", ":0").lstrip(":").split(".")[0]
+        bus_file = Path.home() / f".config/ibus/bus/{machine_id}-unix-{display}"
+        if not bus_file.exists():
+            wl = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
+            bus_file = Path.home() / f".config/ibus/bus/{machine_id}-unix-{wl}"
+        if bus_file.exists():
+            for line in bus_file.read_text().splitlines():
+                if line.startswith("IBUS_ADDRESS="):
+                    os.environ["IBUS_ADDRESS"] = line.split("=", 1)[1]
+                    break
+    except Exception:
+        pass
+
+
 def main() -> None:
     # ── torch를 Qt보다 먼저 로드 (shared library 충돌 방지) ──────────────────
+    _ensure_dbus_session()   # dbus 세션 버스 먼저 — ibus가 dbus로 통신
+    _ensure_ibus_hangul()
+    _inject_ibus_address()
     _cleanup_previous()
     _PID_FILE.write_text(str(os.getpid()))
 

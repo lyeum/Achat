@@ -1,9 +1,9 @@
 # 인수인계 문서 — Ubuntu 24.04 환경
 
 > 최초 작성: 2026-03-15 (Ubuntu 20.04 → 22.04 이전 기준)
-> 최종 갱신: 2026-03-16
+> 최종 갱신: 2026-03-18
 > 현재 환경: Ubuntu 24.04.3 LTS WSL2 (Windows 11, RTX 5060, 커널 6.6.87.2-microsoft-standard-WSL2)
-> 현재 목적: 한글 입력 문제 ✅ 해결 — ibus + IBUS_USE_PORTAL=0 적용 완료. 우측 Alt(한영키) 전환은 WSLg 구조적 한계로 미지원, Ctrl+Space 사용
+> 현재 목적: 한글 입력 문제 **✅ 재해결 (2026-03-18)** — ibus-hangul switch-keys에 Control+space 추가로 해결
 
 ---
 
@@ -21,6 +21,91 @@
 | Phase 7 | 기능 모드 도구 (폴더정리/검색/프롬프트 변환) | ✅ 완료 |
 
 코드는 GitHub 리포지토리가 최신 상태 기준. 새 환경에서 `git clone` 후 시작.
+
+---
+
+## 0. BUG_1 재발생 조사 (2026-03-18) — 🔄 미해결
+
+### 현상
+- `eval $(dbus-launch --sh-syntax)` 방식이 PySide6 업그레이드(6.10.2) 후 다시 동작 안 함
+- 한글 입력 불가, Ctrl+Space 전환 안 됨
+
+### 환경 변화
+- PySide6 6.9.3 → 6.10.2로 업그레이드됨 (uv sync 중 자동 업그레이드 추정)
+- Ubuntu 24.04 + systemd 사용 중 → dbus 세션이 systemd user session으로 이미 관리됨
+
+### 진단에서 알아낸 사실
+
+| 항목 | 내용 |
+|---|---|
+| `DBUS_SESSION_BUS_ADDRESS` | `unix:path=/run/user/1000/bus` (systemd user session) |
+| ibus-portal 프로세스 | 실행 중이나 `org.freedesktop.IBus.Portal` 서비스 이름으로 session bus에 미등록 |
+| ibus private bus (IBUS_ADDRESS) | 접근 가능, `dbus-send CreateInputContext` 성공 확인 |
+| PySide6 6.10.2 Qt ibus plugin | `"invalid portal bus"` 오류 → 연결 실패 |
+| PySide6 6.9.3 Qt ibus plugin | `use IBus portal` + `bus connected!` → 연결 성공 |
+
+### 시도한 해결책
+
+#### 시도 1: main.py에 자동화 함수 추가
+`_ensure_dbus_session()`, `_ensure_ibus_hangul()`, `_inject_ibus_address()` 세 함수를 main.py에 추가하여 Qt 초기화 전 자동으로 dbus/ibus 환경을 구성.
+- `_inject_ibus_address()`: 기존 IBUS_ADDRESS 소켓 유효성 검증 후 stale이면 bus 파일에서 갱신
+- **결과**: dbus/ibus 기동은 되나 한글 입력 여전히 불가
+
+#### 시도 2: `eval $(dbus-launch --sh-syntax)` 문제 발견
+- Ubuntu 24.04 + systemd 환경에서 `dbus-launch --sh-syntax`를 사용하면 systemd user session과 **별개의 새 dbus 세션**이 생성됨
+- 결과적으로 `DBUS_SESSION_BUS_ADDRESS`가 새 소켓으로 덮어씌워지고 ibus(systemd session에서 실행 중)와 Qt가 통신 불가
+- `ibus engine hangul` 명령이 `"assertion 'IBUS_IS_BUS (bus)' failed"` 또는 timeout으로 실패
+- **결론**: Ubuntu 24.04 systemd 환경에서는 `dbus-launch` 사용 금지
+
+#### 시도 3: PySide6 6.9.3으로 다운그레이드
+- 6.10.2에서 `"invalid portal bus"` 오류 발생 → ibus 연결 실패
+- 6.9.3에서 Qt 로그: `use IBus portal` + `bus connected!` → 연결 성공
+- 그러나 연결이 성공해도 Ctrl+Space 한글 전환은 여전히 미동작
+
+#### 시도 4: `IBUS_ENABLE_SYNC_MODE=1`
+- ibus key event 처리를 비동기 → 동기로 강제
+- 명령: `IBUS_ENABLE_SYNC_MODE=1 ACHAT_ENV=ui_test uv run python main.py`
+- **결과**: 효과 없음
+
+#### 시도 5: `WAYLAND_DISPLAY=""` 언셋 (direct 모드 강제)
+- Qt가 `WAYLAND_DISPLAY` 설정 시 `IBUS_USE_PORTAL=0`을 무시하고 portal 모드 사용
+- `WAYLAND_DISPLAY=""`로 언셋 → Qt가 portal 대신 `IBUS_ADDRESS` 직접 연결 모드로 전환 유도
+- 명령: `IBUS_ENABLE_SYNC_MODE=1 WAYLAND_DISPLAY="" ACHAT_ENV=ui_test uv run python main.py`
+- **결과**: 효과 없음
+
+### ✅ 최종 해결 (2026-03-18)
+
+#### 근본 원인
+`QT_LOGGING_RULES="qt.qpa.input*=true"` 로 캡처한 Qt 로그에서 결정적 단서 발견:
+```
+filterEventFinished return 65 32 20 false   ← Ctrl+Space, false = ibus가 소비 안 함
+```
+ibus-hangul이 Ctrl+Space를 한/영 토글 키로 인식하지 못했다. 원인은 **ibus-hangul의 switch-keys에 Control+space가 등록되지 않았기 때문**.
+
+확인한 설정:
+```bash
+gsettings get org.freedesktop.ibus.engine.hangul on-keys      # → '' (비어있음)
+gsettings get org.freedesktop.ibus.engine.hangul switch-keys  # → 'Hangul,Shift+space'
+```
+`Hangul` 키(한국 키보드 전용)와 `Shift+space`만 등록되어 있었고 `Control+space`는 없었음.
+
+#### 해결책
+```bash
+gsettings set org.freedesktop.ibus.engine.hangul switch-keys 'Hangul,Shift+space,Control+space'
+```
+
+#### 재발 방지 — main.py 자동 적용
+`_ensure_ibus_hangul()` 함수에서 앱 시작 시 자동으로 이 설정을 보장해야 함 (환경을 새로 구성할 때마다 기본값으로 초기화될 수 있음). `main.py` 수정 필요 (TODO).
+
+#### 이번 조사에서 확정된 환경 사실
+| 항목 | 값 |
+|---|---|
+| ibus portal 서비스명 | `org.freedesktop.portal.IBus` (등록됨) |
+| ibus private bus | `/home/trusia/.cache/ibus/dbus-XXXXX` |
+| DBUS_SESSION_BUS_ADDRESS | `unix:path=/run/user/1000/bus` (systemd) |
+| PySide6 작동 버전 | **6.9.3** (6.10.2는 `invalid portal bus` 오류로 연결 실패) |
+| WAYLAND_DISPLAY 처리 | `os.environ.pop("WAYLAND_DISPLAY")` — portal 강제 방지 |
+| IBUS_USE_PORTAL | `os.environ["IBUS_USE_PORTAL"] = "0"` — 강제 오버라이드 필수 |
 
 ---
 
@@ -103,10 +188,10 @@ dconf write /desktop/ibus/general/hotkey/trigger "['Scroll_Lock']"
 | Python | 3.13.9 (conda base) |
 | uv | ✅ 설치 완료 (`~/.local/bin/uv`) |
 | 입력기 | ✅ ibus + ibus-hangul (fcitx5 → ibus로 교체) |
-| 한글 입력 | ✅ 동작 확인 완료 |
+| 한글 입력 | ✅ 동작 확인 완료 (Ctrl+Space, switch-keys 자동 설정) |
 | Dockerfile | ✅ `ubuntu24.04`, `libgl1`, `ibus`, `IBUS_USE_PORTAL=0` 반영 완료 |
 
-### 3-2. 환경 셋업 명령어 (✅ 검증 완료)
+### 3-2. 환경 셋업 명령어 (✅ 검증 완료, 2026-03-18 갱신)
 
 ```bash
 # 1. 시스템 패키지 설치
@@ -124,20 +209,14 @@ source ~/.bashrc
 cd ~/projects/Achat
 uv sync
 
-# 4. 환경변수 (~/.bashrc 하단에 추가)
-export QT_IM_MODULE=ibus
-export GTK_IM_MODULE=ibus
-export XMODIFIERS=@im=ibus
-export IBUS_USE_PORTAL=0
-
-# 5. dbus 세션 시작 + ibus 기동 + UI 실행
-eval $(dbus-launch --sh-syntax)
-ibus-daemon -d
-ibus engine hangul
-sleep 1
+# 4. 실행 (dbus/ibus/switch-keys 설정은 main.py가 자동 처리)
 ACHAT_ENV=ui_test uv run python main.py
 # Ctrl+Space — 한/영 전환
 ```
+
+> **주의 (Ubuntu 24.04 + systemd)**: `eval $(dbus-launch --sh-syntax)` 사용 금지.
+> systemd user session이 이미 dbus를 관리하므로, dbus-launch를 실행하면 별도의 세션이 생성되어 ibus 연결이 깨진다.
+> ibus-daemon 기동 및 switch-keys 설정은 `main.py`의 `_ensure_ibus_hangul()`이 자동으로 처리한다.
 
 ---
 
@@ -279,12 +358,16 @@ v2 학습 완료 후:
 
 ## 8. 환경 변수 요약
 
-| 변수 | 값 | 용도 |
-|---|---|---|
-| `ACHAT_ENV` | `dev` / `deploy` | 모델 백엔드 분기 |
-| `QT_IM_MODULE` | `ibus` | Qt 한글 입력기 |
-| `GTK_IM_MODULE` | `ibus` | GTK 한글 입력기 |
-| `XMODIFIERS` | `@im=ibus` | X11 입력기 |
-| `DISPLAY` | `:0` (WSLg 자동) | X11 디스플레이 |
-| `ACHAT_ENV` | `ui_test` | stub 모드 — LLM 로딩 없이 UI만 기동 |
-| `IBUS_USE_PORTAL=0` | `0` | WSL2 최소 환경에서 Portal 없이 ibus 직접 연결 (필수) |
+> 아래 항목 중 **main.py 자동** 표기된 것은 `main.py`가 Qt 초기화 전에 자동으로 처리하므로 수동 설정 불필요.
+
+| 변수 | 값 | 용도 | 설정 주체 |
+|---|---|---|---|
+| `ACHAT_ENV` | `dev` / `deploy` / `ui_test` | 모델 백엔드 분기 / stub 모드 | 수동 |
+| `QT_IM_MODULE` | `ibus` | Qt 한글 입력기 | main.py 자동 |
+| `GTK_IM_MODULE` | `ibus` | GTK 한글 입력기 | main.py 자동 |
+| `XMODIFIERS` | `@im=ibus` | X11 입력기 | main.py 자동 |
+| `IBUS_USE_PORTAL` | `0` | portal 모드 비활성화 (강제 오버라이드) | main.py 자동 |
+| `WAYLAND_DISPLAY` | (언셋) | portal 강제 방지 — Qt가 WAYLAND_DISPLAY 있으면 portal 강제 사용 | main.py 자동 |
+| `DISPLAY` | `:0` (WSLg 자동) | X11 디스플레이 | WSLg 자동 |
+| `IBUS_ADDRESS` | bus 파일에서 갱신 | ibus 소켓 경로 — stale 시 자동 갱신 | main.py 자동 |
+| `DBUS_SESSION_BUS_ADDRESS` | `unix:path=/run/user/1000/bus` | systemd user session dbus | systemd 자동 |
