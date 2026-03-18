@@ -172,6 +172,10 @@ Achat/
 │       └─ ci.yml                      ✅ CI — ruff 린트 + 데이터 파이프라인 검증 (push/PR 자동 실행)
 │
 ├─ main.py                             ✅ 루트 진입점 — torch 먼저 로드 후 Qt 초기화 (shared lib 충돌 방지)
+│                                          WAYLAND_DISPLAY 언셋 + IBUS_USE_PORTAL=0 강제 (portal 모드 방지)
+│                                          _ensure_dbus_session() dbus 세션 자동 확보
+│                                          _ensure_ibus_hangul() ibus-daemon 기동 + hangul 엔진 + Ctrl+Space 토글키 자동 등록
+│                                          _inject_ibus_address() IBUS_ADDRESS 소켓 유효성 검증 후 bus 파일에서 갱신
 │                                          _cleanup_previous() PID 파일 기반 이전 프로세스 정리
 │                                          _check_vram() CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                             ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)

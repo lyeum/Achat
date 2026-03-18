@@ -479,6 +479,91 @@ uv sync
 
 ---
 
+## 환경 구축 매뉴얼
+
+### 개발 환경 — Ubuntu 24.04 WSL2 (Linux + GPU)
+
+#### 1. 시스템 패키지 설치
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  # Qt6 / PySide6 런타임
+  libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+  libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+  libxcb-xinerama0 libxcb-xkb1 libegl1 libegl-mesa0 libgl1 libglib2.0-0 \
+  # D-Bus + 한글 입력기 (ibus 기반)
+  dbus-x11 ibus ibus-hangul
+```
+
+> **왜 ibus?** PySide6 번들 Qt6에는 ibus 플러그인이 내장되어 있음.
+> `fcitx5-frontend-qt6`는 시스템 Qt6 기준 빌드라 ABI 불일치로 로드 실패함.
+
+#### 2. uv 설치 (최초 1회)
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+```
+
+#### 3. 리포지토리 클론 및 의존성 설치
+```bash
+git clone <repo-url> ~/projects/Achat
+cd ~/projects/Achat
+uv sync
+```
+
+> `pyproject.toml`에 `pyside6<6.10`이 고정되어 있음.
+> PySide6 6.10.x는 WSL2 ibus 연결 실패(invalid portal bus) 버그가 있으므로 6.9.x 이하 사용.
+
+#### 4. 실행
+```bash
+# UI 테스트 (LLM 없이 UI만 기동)
+ACHAT_ENV=ui_test uv run python main.py
+
+# 개발 모드 (HuggingFace 모델 로드)
+ACHAT_ENV=dev uv run python main.py
+```
+
+> **ibus 설정은 자동 처리됨**: `main.py`가 시작 시 ibus-daemon 기동, hangul 엔진 설정,
+> `Ctrl+Space` 한/영 토글 키 등록을 자동으로 수행함. 별도 환경변수 설정 불필요.
+
+> ⚠️ **Ubuntu 24.04 주의**: `eval $(dbus-launch --sh-syntax)` 사용 금지.
+> systemd user session이 D-Bus를 관리하므로 dbus-launch를 실행하면 ibus 연결이 끊김.
+
+#### 한글 입력
+- 앱 실행 후 TextInput 클릭 → **Ctrl+Space** 로 한/영 전환
+- 우측 Alt 키는 WSLg 구조적 한계(modifier state 하드코딩)로 사용 불가
+
+---
+
+### 배포 환경 — Windows + CPU
+
+#### 1. 모델 파일 준비
+```
+Achat/
+└─ models/
+   └─ model_q4km.gguf     ← Phase 6 변환 결과물 배치
+```
+
+#### 2. uv 설치 (최초 1회)
+```powershell
+# PowerShell
+winget install --id=astral-sh.uv -e
+```
+
+#### 3. 의존성 설치
+```powershell
+copy pyproject-deploy.toml pyproject.toml
+uv sync
+```
+
+#### 4. 실행
+```powershell
+run.bat
+# 또는
+uv run python main.py
+```
+
+---
+
 ## CI
 
 GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
