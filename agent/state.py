@@ -4,12 +4,17 @@ from loguru import logger
 
 from conversation.core.session import ConversationSession
 
-# affection 변화량 기본값
-_AFF_DELTA = {
-    "happy":   +3,
-    "annoyed": -3,
-    "sad":      0,   # 슬픈 감정은 affection 중립
-    "neutral":  0,
+# affection 변화량 기본값 (캐릭터 YAML에 affection_delta 없을 때 폴백)
+_AFF_DELTA_DEFAULT = {
+    "happy":       +3,
+    "affectionate": +5,
+    "touched":     +4,
+    "curious":     +1,
+    "neutral":      0,
+    "sad":          0,
+    "embarrassed": -1,
+    "annoyed":     -3,
+    "angry":       -5,
 }
 
 
@@ -17,9 +22,8 @@ def update_mood(session: ConversationSession, user_input: str, character: dict) 
     """user_input의 키워드를 기반으로 mood를 갱신하고 새 mood를 반환한다.
 
     character['state']['mood_triggers'] 구조:
-        happy:   [...keyword list...]
-        annoyed: [...keyword list...]
-        sad:     [...keyword list...]
+        mood_name: [...keyword list...]
+    YAML에 정의된 순서대로 우선순위 적용 (먼저 매칭된 mood 채택).
     """
     triggers: dict = character.get("state", {}).get("mood_triggers", {})
     new_mood = "neutral"
@@ -35,12 +39,17 @@ def update_mood(session: ConversationSession, user_input: str, character: dict) 
     return new_mood
 
 
-def update_affection(session: ConversationSession, mood: str) -> int:
+def update_affection(session: ConversationSession, mood: str, character: dict | None = None) -> int:
     """현재 mood에 따라 affection을 증감하고 새 affection 값을 반환한다.
 
+    캐릭터 YAML의 state.affection_delta가 있으면 우선 적용, 없으면 기본값 사용.
     affection은 0~100 범위로 클램핑된다.
     """
-    delta = _AFF_DELTA.get(mood, 0)
+    char_delta: dict = {}
+    if character:
+        char_delta = character.get("state", {}).get("affection_delta", {})
+
+    delta = char_delta.get(mood, _AFF_DELTA_DEFAULT.get(mood, 0))
     if delta == 0:
         return session.affection
 

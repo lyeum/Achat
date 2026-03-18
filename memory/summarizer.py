@@ -9,8 +9,16 @@ from conversation.core.session import ConversationSession
 from memory.long_term import LongTermMemory
 
 # 중요도 판정 키워드 (M_schema.json importance_rules 기준)
-_HIGH_KEYWORDS = ["이름", "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워"]
-_MID_KEYWORDS  = ["좋아", "싫어", "취미", "매일", "항상", "자주", "기억"]
+_HIGH_KEYWORDS = [
+    "이름", "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워",
+    "기억해줘", "잊지마", "중요해", "말해줄게", "비밀", "처음으로",
+]
+_MID_KEYWORDS  = [
+    "좋아", "싫어", "취미", "매일", "항상", "자주", "기억",
+    "날짜", "내일", "세션", "욕", "화났", "슬퍼", "기분", "감정",
+    "말했잖", "저번에", "그때", "아까", "다음에", "또 올게",
+    "피드백", "고쳐", "이상해", "말투", "캐릭터",
+]
 
 
 def check_trigger(session: ConversationSession, trigger_n: int) -> bool:
@@ -47,7 +55,7 @@ def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
         },
         {"role": "user", "content": history_text},
     ]
-    summary = llm.generate(messages, stream=False, max_tokens=150)
+    summary = llm.generate(messages, stream=False, max_tokens=250)
     logger.debug(f"[summarizer] 요약 생성: {summary[:60]}...")
     return summary
 
@@ -60,7 +68,7 @@ def score_importance(summary: str) -> float:
     - mid (0.5~0.8): 감정적 사건, 취향/선호도, 반복 화제
     - low (<0.5)   : 일상 잡담 → 저장 안 함
     """
-    score = 0.3  # 기본값 (low)
+    score = 0.5  # 기본값 — 키워드 없어도 일단 저장
     for kw in _HIGH_KEYWORDS:
         if kw in summary:
             score = max(score, 0.85)

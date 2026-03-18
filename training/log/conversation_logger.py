@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -18,25 +19,26 @@ LOG_DIR = Path(__file__).resolve().parent
 
 _NEGATIVE = [
     "아니야", "아니지", "그게 아니라", "반복하지마", "반복 하지마",
-    "같은 말", "틀렸어", "이해 못", "왜 그런 말", "그 말 말고",
-    "이상해", "말투", "왜그래", "왜 그래", "캐릭터", "붕괴",
-    "어색해", "안 맞아", "맞지 않아", "뭔 말이야", "무슨 말이야",
+    "같은 말", "틀렸", "이해 못", "왜 그런 말", "그 말 말고",
+    "이상하", "말투", "왜그래", "왜 그래", "캐릭터", "붕괴",
+    "어색하", "안 맞아", "맞지 않아", "뭔 말이야", "무슨 말이야",
+    "한국어로", "다시 말해", "제대로", "왜 이러", "그게 무슨",
 ]
 _POSITIVE = [
-    "맞아", "맞네", "잘했어", "역시", "그렇지", "고마워",
-    "기억하네", "기억했네", "잘 기억", "대단해",
+    "맞아", "맞네", "잘했", "역시", "그렇지", "고마워",
+    "기억하네", "기억했", "잘 기억", "대단하", "좋았어", "좋네",
 ]
 _MEMORY   = [
-    "기억해", "기억나", "이름", "좋아해", "싫어해",
-    "말했잖", "했잖아", "취미", "말한 거",
+    "기억해", "기억나", "이름", "좋아하", "싫어하",
+    "말했잖", "했잖아", "취미", "말한 거", "저번에", "전에 말",
 ]
 _EMOTION  = [
-    "슬퍼", "화났", "기뻐", "우울", "행복",
-    "외로워", "힘들어", "무서워", "기분",
+    "슬프", "화나", "기쁘", "우울", "행복",
+    "외롭", "힘들", "무섭", "기분", "속상", "답답",
 ]
 _ADVICE   = [
     "어떻게 해", "조언", "고민이야", "해야 할까", "어떻게 생각",
-    "어떡해", "뭐가 나아",
+    "어떡해", "뭐가 나아", "어떻게 하면", "뭐가 좋",
 ]
 _PERSONA  = ["AI야", "로봇이야", "프로그램이야", "가짜야", "진짜 사람"]
 
@@ -137,6 +139,7 @@ class ConversationLogger:
     def __init__(self, character_id: str, log_dir: Path = LOG_DIR):
         self._char_id    = character_id
         self._log_dir    = log_dir
+        self._session_id = uuid.uuid4().hex[:8]
         self._buffer: list[dict] = []
         self._last_aff   = 0
         self._last_mood  = "neutral"
@@ -191,8 +194,7 @@ class ConversationLogger:
         # 카테고리별 폴더 생성
         cat_dir  = self._log_dir / category
         cat_dir.mkdir(exist_ok=True)
-        today    = datetime.now().strftime("%Y-%m-%d")
-        out_file = cat_dir / f"{today}.jsonl"
+        out_file = cat_dir / f"{self._session_id}.jsonl"
 
         # 중복 체크 — 새 내용 없으면 저장 생략
         n_turns = len(self._buffer) // 2

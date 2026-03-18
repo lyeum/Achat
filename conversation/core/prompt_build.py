@@ -13,11 +13,31 @@ BUDGET = {
     "generation": 512,
 }
 
-# affection tier → Layer A에 삽입될 응답 톤 지시문
-_TONE: dict[str, str] = {
+# affection tier → Layer A 기본 톤 지시문 (캐릭터 YAML에 tone_guide 없을 때 폴백)
+_TONE_DEFAULT: dict[str, str] = {
+    "stranger":     "처음 만난 사이. 대화를 짧게 끊으려 하고 개인적인 반응을 거의 하지 않는다.",
+    "acquaintance": "기본 대화는 가능하지만 경계가 있다. 개인적인 이야기는 아직 조심스럽다.",
+    "familiar":     "조금 편해진 상태. 가끔 관심이 묻어나오지만 여전히 담담하다.",
+    "friendly":     "자연스럽게 대화한다. 배려가 짧은 말 속에 드러나기 시작한다.",
+    "close":        "배려가 자연스럽게 드러난다. 솔직한 반응을 자주 보인다.",
+    "intimate":     "깊은 신뢰 상태. 감정을 짧게라도 솔직하게 표현한다.",
+    # 구버전 호환
     "low":  "상대에게 아직 경계심을 갖고 있다. 단답형으로 짧게 말하고 가드를 높게 유지한다.",
     "mid":  "보통 상태다. 가끔 솔직한 반응을 보이기도 한다.",
     "high": "마음이 조금 열렸다. 응답이 조금 길어지고 부드러워진다.",
+}
+
+# mood → 추가 행동 힌트
+_MOOD_HINT: dict[str, str] = {
+    "happy":        "기분이 좋은 상태다. 반응이 약간 빨라지고 말이 조금 더 나온다.",
+    "affectionate": "상대에게 마음이 기울어 있다. 배려가 말 속에 묻어난다.",
+    "touched":      "뭔가 마음에 닿은 상태다. 말이 잠시 느려지거나 짧아질 수 있다.",
+    "curious":      "궁금한 것이 생겼다. 짧게 되묻거나 관심을 드러낸다.",
+    "sad":          "마음이 조금 가라앉아 있다. 말수가 줄고 반응이 느려진다.",
+    "embarrassed":  "당황하거나 어색한 상태다. 말이 짧아지거나 화제를 돌리기도 한다.",
+    "annoyed":      "짜증이 난 상태다. 반응이 더 퉁명스럽고 짧아진다.",
+    "angry":        "화가 난 상태다. 말이 차갑고 날카로워진다.",
+    "neutral":      "",
 }
 
 
@@ -84,7 +104,45 @@ class PromptBuilder:
         c = self.character
         rules = "\n".join(f"- {r}" for r in c.get("rules", []))
         tier = self._affection_tier()
-        tone = _TONE.get(tier, _TONE["mid"])
+
+        # 톤: 캐릭터 YAML tone_guide 우선, 없으면 기본값
+        tone_guide: dict = c.get("state", {}).get("tone_guide", {})
+        tone = tone_guide.get(tier) or _TONE_DEFAULT.get(tier, _TONE_DEFAULT["mid"])
+
+        # mood 힌트
+        mood_hint = _MOOD_HINT.get(self.session.mood, "")
+
+        # 대화 수위 파라미터
+        conv = c.get("conversation", {})
+        conv_lines = []
+        if "response_length" in conv:
+            lvl = conv["response_length"].get(tier, conv["response_length"].get("mid", 0.5))
+            if lvl <= 0.3:
+                conv_lines.append("응답을 매우 짧게 유지한다 (1~2문장 이내).")
+            elif lvl <= 0.6:
+                conv_lines.append("응답 길이는 보통 수준으로 유지한다.")
+            else:
+                conv_lines.append("응답이 자연스럽게 조금 길어질 수 있다.")
+        if "openness" in conv:
+            lvl = conv["openness"].get(tier, conv["openness"].get("mid", 0.4))
+            if lvl <= 0.2:
+                conv_lines.append("자신의 감정이나 생각을 거의 드러내지 않는다.")
+            elif lvl <= 0.5:
+                conv_lines.append("간간이 자신의 생각을 짧게 내비친다.")
+            else:
+                conv_lines.append("비교적 솔직하게 자신의 생각을 표현한다.")
+        if "directness" in conv:
+            lvl = conv["directness"]
+            if lvl <= 0.3:
+                conv_lines.append("하고 싶은 말을 돌려서 표현한다.")
+            elif lvl >= 0.7:
+                conv_lines.append("하고 싶은 말을 직접적으로 표현한다.")
+
+        state_parts = [f"mood: {self.session.mood}  /  affection tier: {tier}", tone]
+        if mood_hint:
+            state_parts.append(mood_hint)
+        if conv_lines:
+            state_parts.append("\n".join(conv_lines))
 
         return "\n".join([
             f"너의 이름은 {c['name']}이다.",
@@ -93,7 +151,7 @@ class PromptBuilder:
             "",
             f"[말투 규칙]\n{c.get('speech_style', '').strip()}",
             "",
-            f"[현재 감정 상태]\nmood: {self.session.mood}  /  affection tier: {tier}\n{tone}",
+            f"[현재 감정 상태]\n" + "\n".join(state_parts),
             "",
             f"[금지 규칙]\n{rules}",
         ])

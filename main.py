@@ -10,6 +10,11 @@ from pathlib import Path
 
 faulthandler.enable()
 
+# Qt 초기화 전 ibus 입력기 환경변수 설정 (WSL2 한글 입력)
+os.environ.setdefault("QT_IM_MODULE", "ibus")
+os.environ.setdefault("GTK_IM_MODULE", "ibus")
+os.environ.setdefault("XMODIFIERS", "@im=ibus")
+os.environ.setdefault("IBUS_USE_PORTAL", "0")
 
 from loguru import logger
 

@@ -74,7 +74,7 @@ class ConversationRouter:
 
         # 6. mood / affection 업데이트 (사용자 입력 기준)
         new_mood = state_mod.update_mood(self.session, user_input, self.character)
-        state_mod.update_affection(self.session, new_mood)
+        state_mod.update_affection(self.session, new_mood, self.character)
 
         # 7. 세션 기록
         self.session.add_turn(user_input, response)
