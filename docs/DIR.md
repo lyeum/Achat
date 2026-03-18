@@ -19,7 +19,9 @@ Achat/
 │   ├─ 학습후보.md                    ✅ 학습 실험 설계 (Phase 5~6 참조)
 │   ├─ MVP대화.md                     ✅ MVP 실행 명령어 + 대화 로그 수집/검토 매뉴얼
 │   ├─ plan/
-│   │   └─ phases.md                  ✅ Phase 0~7 실행 계획서
+│   │   ├─ phases.md                  ✅ Phase 0~7 실행 계획서
+│   │   ├─ training_개선.md           ✅ EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획
+│   │   └─ UI설계.md                  ✅ QML + PySide6 UI 설계 상세
 │   └─ BUG/
 │       ├─ BUG_1.md                   ✅ 인수인계 문서 (환경 셋업, 해결된 이슈 기록)
 │       └─ BUG_small.md               ✅ 소규모 버그 수정 기록 (Phase 7 이후)
@@ -45,6 +47,7 @@ Achat/
 │   ├─ character/
 │   │   ├─ CH_schema.json            📄 캐릭터 YAML 필드 스키마
 │   │   ├─ CH_Haru.yaml              ✅ 예시 캐릭터 (speech_style, memory_voice, state 완료)
+│   │   ├─ CH_Seonjae.yaml           ✅ 예시 캐릭터 (6단계 affection_thresholds, affection_delta, 8종 mood_triggers)
 │   │   └─ CH_default.yaml           📄 기본 캐릭터
 │   │
 │   ├─ world/
@@ -80,7 +83,7 @@ Achat/
 │   ├─ __init__.py                    ✅ 패키지 초기화
 │   ├─ core.py                        ✅ `Agent` 클래스 — 컴포넌트 초기화 + `chat()` / `handle_input(mode)` 모드 분기
 │   ├─ persona.py                     ✅ `load_persona()` / `swap_persona()` 핫스왑
-│   ├─ state.py                       ✅ mood_triggers 키워드 매칭, affection ±3 증감
+│   ├─ state.py                       ✅ mood_triggers 키워드 매칭, affection 증감 (캐릭터 YAML affection_delta 우선, 폴백 기본값)
 │   ├─ router.py                      ✅ `CommandRouter` — 슬래시 명령어 감지/파싱 (/캐릭터변경, /초기화, /상태 등)
 │   └─ memory.py                      ✅ memory/ 패키지 re-export (LongTermMemory, get_recent, summarizer 함수)
 │
@@ -116,23 +119,23 @@ Achat/
 │
 ├─ training/                           # LoRA 파인튜닝
 │   ├─ 학습.md                        ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
-│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps, --eval_split, best loss 저장, epoch/전체 완료 시 loss 그래프 PNG 자동 저장)
-│   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터)
+│   ├─ lora_train.py                  ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps, --eval_split, best loss 저장, epoch/전체 완료 시 loss 그래프 PNG 자동 저장, v7~: assistant 토큰 마스킹)
+│   ├─ dataset.py                     ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터, 파일별 비율 유지 stratified sampling)
 │   ├─ log/                           # MVP 대화 로그 수집 (카테고리별 폴더 + JSONL)
 │   │   ├─ _schema.json               ✅ 로그 포맷 명세 (messages/character_id/category/affection/mood/emotion_trigger/logged_at/reviewed)
 │   │   ├─ conversation_logger.py     ✅ 카테고리 자동 분류 저장 — 키워드 트리거 즉시 flush, CHUNK_SIZE=8 일상 수집, Jaccard 중복 제거(0.55), reviewed:false 태그
 │   │   ├─ monitor.py                 ✅ 세션 실시간 모니터링 — .session_state.json 폴링(2s), 카테고리별 누적 건수 + 미검토 표시, .monitor.log 기록
 │   │   ├─ review.py                  ✅ 미검토 항목 이중 체크 CLI — y(승인)/n(재분류+이동)/d(삭제)/s(건너뜀)/q(종료), --cat 옵션
-│   │   ├─ daily/YYYY-MM-DD.jsonl     📄 일상 대화 로그 (대화 중 자동 수집)
-│   │   ├─ emotion/YYYY-MM-DD.jsonl   📄 감정 공감 로그
-│   │   ├─ advice/YYYY-MM-DD.jsonl    📄 고민 상담 로그
-│   │   ├─ memory/YYYY-MM-DD.jsonl    📄 기억 관련 로그
-│   │   ├─ persona/YYYY-MM-DD.jsonl   📄 페르소나 이탈 교정 로그
-│   │   ├─ feedback_pos/YYYY-MM-DD.jsonl 📄 칭찬·동의 로그
-│   │   ├─ feedback_neg/YYYY-MM-DD.jsonl 📄 교정·지적·반복루프 로그
+│   │   ├─ daily/{session_id}.jsonl   📄 일상 대화 로그 (대화 중 자동 수집, 파일명 = 세션 ID 8자리)
+│   │   ├─ emotion/{session_id}.jsonl 📄 감정 공감 로그
+│   │   ├─ advice/{session_id}.jsonl  📄 고민 상담 로그
+│   │   ├─ memory/{session_id}.jsonl  📄 기억 관련 로그
+│   │   ├─ persona/{session_id}.jsonl 📄 페르소나 이탈 교정 로그
+│   │   ├─ feedback_pos/{session_id}.jsonl 📄 칭찬·동의 로그
+│   │   ├─ feedback_neg/{session_id}.jsonl 📄 교정·지적·반복루프 로그
 │   │   └─ .session_state.json        📄 세션 상태 스냅샷 (monitor 폴링용, 런타임 생성)
-│   └─ data/                          ⚠️ 기존 데이터 위치 (README는 루트 data/lora/ 로 변경)
-│       ├─ data_gen_prompt.md         📄 학습 데이터 생성 프롬프트 가이드
+│   └─ data/                          # 학습 데이터 (총 2,167건, 26개 파일)
+│       ├─ affection/                 📄 친밀도 단계별 데이터 (6단계: stranger~intimate)
 │       ├─ common/
 │       │   ├─ memory_ref.jsonl       📄 기억 참조 학습 데이터
 │       │   ├─ ai_tell_removal.jsonl  📄 AI 투 표현 제거 학습 데이터
@@ -144,6 +147,11 @@ Achat/
 │   └─ lora/
 │       ├─ conversation/              🔲 training/log 빌드 후 생성 (scripts/build_dataset.py)
 │       └─ function/                  ✅ folder_organize / prompt_convert / search 예시 JSONL
+│
+├─ output/                             # LoRA 어댑터 출력 (학습 결과, .gitignore 처리)
+│   ├─ LoRA_v5/adapter/               📄 LoRA v5 어댑터 (eval best: 0.514)
+│   ├─ LoRA_v6/adapter/               📄 LoRA v6 어댑터 (eval best: 0.7198, 전체 토큰 loss)
+│   └─ LoRA_v7/adapter/               ✅ 현재 적용 중 — assistant 마스킹 학습 (eval best: 1.687, assistant-only loss)
 │
 ├─ scripts/                            # 변환 스크립트
 │   ├─ build_dataset.py               ✅ training/log/*.jsonl → data/lora/conversation/ 빌드
@@ -167,7 +175,7 @@ Achat/
 │                                          _cleanup_previous() PID 파일 기반 이전 프로세스 정리
 │                                          _check_vram() CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                             ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
-├─ config.py                           ✅ dev / deploy 환경 분기 설정 (dev: adapter_path 추가 — None이면 베이스 모델)
+├─ config.py                           ✅ dev / deploy 환경 분기 설정 (dev: adapter_path="./output/LoRA_v7/adapter" — None이면 베이스 모델)
 ├─ pyproject.toml                      ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정 (matplotlib 포함)
 ├─ pyproject-deploy.toml               ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                             ✅ uv lock 파일 (dev 기준)
@@ -199,7 +207,7 @@ Achat/
 
 | 상태 | 수 | 항목 |
 |---|---|---|
-| ✅ 완료 | 79 | docs/ 9개(학습.md, BUG_1.md, BUG_small.md 포함), CH_Haru.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train+eval_split, dataset, build_dataset, eval 4개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 8개, agent/router.py, agent/memory.py, conversation/utils/ 3개, conversation/narrator.py(비활성), rag/world_nav.py, training/log/ 수집 파이프라인 3개(conversation_logger, monitor, review) |
-| 📄 데이터/설정 | 20+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터, training/log/ 카테고리별 .jsonl, api/server.py (스텁) |
+| ✅ 완료 | 82 | docs/ 11개(학습.md, BUG_1.md, BUG_small.md, training_개선.md, UI설계.md 포함), CH_Haru.yaml, CH_Seonjae.yaml, M_schema.json, rag/sources/ 3개, Phase 1~4 구현 파일, main.py, Dockerfile, Phase 5 (lora_train+eval_split+assistant마스킹, dataset+stratified, build_dataset, eval 4개, data/lora/function 3개), Phase 6 스크립트 3개, ci.yml, run.bat, .gitignore, Phase 7 tools/ 8개, agent/router.py, agent/memory.py, conversation/utils/ 3개, conversation/narrator.py(비활성), rag/world_nav.py, training/log/ 수집 파이프라인 3개(conversation_logger, monitor, review), output/LoRA_v5~v7 |
+| 📄 데이터/설정 | 25+ | .yaml/.json 스키마, training/data/ 하위 .jsonl 학습 데이터(2,167건/26파일), training/log/ 카테고리별 .jsonl, api/server.py (스텁) |
 | 🔲 구현 예정 / 보류 | 0 | 없음 |
 | ⚠️ 정리 필요 | 0 | 없음 |

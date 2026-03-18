@@ -156,14 +156,18 @@ def get_recent(dialogue_log: list, n: int = 5) -> list:
 
 #### 2-4. `agent/state.py`
 ```python
-AFFECTION_TIERS = {"low": (0,30), "mid": (31,70), "high": (71,100)}
+# 친밀도 6단계 (CH_*.yaml state.affection_thresholds 기준)
+# stranger / acquaintance / familiar / friendly / close / intimate
 
 def update_mood(session, response_text: str, character: dict) -> str:
-    # character['state']['mood_triggers'] 패턴 매칭
+    # character['state']['mood_triggers'] 패턴 매칭 (8종: affectionate/touched/happy/curious/sad/embarrassed/annoyed/angry)
     ...
 
-def update_affection(session, delta: int):
+def update_affection(session, mood: str, character: dict | None = None) -> int:
+    # character['state']['affection_delta'][mood] 우선 적용, 없으면 기본값 폴백
+    # 0~100 클램핑
     session.affection = max(0, min(100, session.affection + delta))
+    return session.affection
 ```
 
 #### 2-5. `agent/persona.py`
@@ -387,18 +391,20 @@ python eval/speed_bench.py --backend transformers
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터 작성
 - [x] `scripts/build_dataset.py` — training/log/*.jsonl → data/lora/conversation/ 빌드 + 시스템 프롬프트 삽입 (버그 수정: TOKENS_PER_CHAR 역수 오류, relative_to 예외 처리)
 - [x] `training/dataset.py` — data/lora/**/*.jsonl 로드 + apply_chat_template + max_length 필터 (버그 수정: relative_to 예외 처리)
-- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, --eval_split best loss 저장, --weight_decay/--lora_dropout/--max_samples 과적합 억제 옵션, epoch/완료 시 loss 그래프 PNG 자동 저장
-- [x] `training/학습.md` — 학습 루프 흐름, 실행 방법, 실시간 모니터링, 인자 전체 목록, 과적합 분석 매뉴얼
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, --eval_split best loss 저장, --weight_decay/--lora_dropout/--max_samples 과적합 억제 옵션, epoch/완료 시 loss 그래프 PNG 자동 저장, v7~: assistant 토큰 마스킹 (system/user -100, assistant 구간만 loss)
+- [x] `training/학습.md` — 학습 루프 흐름, 실행 방법, 실시간 모니터링, 인자 전체 목록, 과적합 분석 매뉴얼, 학습 구조 리뷰, 개선안 (EWC/카테고리 가중치/KL 보류)
+- [x] `docs/plan/training_개선.md` — EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획 (상세 설계)
 - [x] `eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교 (F541 버그 수정)
 - [x] `eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
 - [x] `eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
 - [x] CPU 파이프라인 smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
-- [x] (실행 검증) GPU에서 `lora_train.py` OOM 없이 3 epoch 완료 (loss 0.4425, 36.6분)
+- [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 전체 2,167건 중 max_samples=-1, assistant masking, eval best 1.687)
+  - ⚠️ v7 이후 loss는 assistant-only 기준 — v6 이전(전체 토큰 loss)과 직접 비교 불가
 - [x] (실행 검증) `ai_tell_checker.py` — AI투 0건, 캐릭터 말투 개선 확인
-- [x] (실행 검증) `memory_test.py` — 40% (2/5), 목표 미달 (memory_ref 데이터 보강 필요)
-- [x] (실행 검증) `speed_bench.py` — 10.3 tok/s GPU, 목표 8+ 달성
+- [x] (실행 검증) `memory_test.py` — 5/5 통과
+- [x] (실행 검증) `speed_bench.py` — GPU 추론 속도 확인
 - [ ] 기능 모드 JSON 출력 정확도 확인 (data/lora/function 데이터로 별도 평가 필요)
-- [ ] 최종 채택 모델 1개 결정 (기억 정확도 개선 후 재평가 권장 — 학습후보.md 4-4 참조)
+- [ ] 최종 채택 모델 결정 — LoRA_v8 이후 재평가 (EWC + 카테고리 가중치 적용 예정, docs/plan/training_개선.md 참조)
 
 ---
 

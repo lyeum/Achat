@@ -58,10 +58,11 @@
   Qwen2.5-3B-Instruct (HuggingFace)
         │
         ▼
-  QLoRA 파인튜닝 (peft + bitsandbytes)
-  - 4-bit base + LoRA adapter (rank 16~32)
-  - gradient_checkpointing=True, batch_size=1
+  LoRA 파인튜닝 (peft, bfloat16 풀 파라미터)
+  - bfloat16 base + LoRA adapter (rank 16) ← BitsAndBytes 미사용 (Blackwell SM 10.x 미지원)
+  - gradient_checkpointing=True, batch_size=1, grad_accum=8
   - max_seq_length=512 (한국어 토큰 밀도 고려)
+  - assistant 토큰 마스킹 — system/user 구간은 loss 제외 (v7~)
   - 캐릭터 말투 / 감정 반응 / 한국어 일관성
   - 기능 모드용 자연어 → JSON 파라미터 추출 예시 포함
         │
@@ -187,7 +188,8 @@ Achat/
 │   ├─ 대화품질.md                # Phase 1~3 상세 설계
 │   ├─ 학습후보.md                # Phase 5~6 학습 실험 설계
 │   └─ plan/
-│       └─ phases.md              # Phase 0~7 실행 계획서
+│       ├─ phases.md              # Phase 0~7 실행 계획서
+│       └─ training_개선.md       # EWC / 카테고리 가중치 / assistant 마스킹 구현 계획
 │
 ├─ conversation/                   # 대화 엔진 (핵심)
 │   ├─ core/
@@ -205,7 +207,9 @@ Achat/
 │   │   └─ M_instance.json
 │   ├─ character/                  # 캐릭터 설정 파일
 │   │   ├─ CH_schema.json
-│   │   └─ CH_haru.yaml
+│   │   ├─ CH_Haru.yaml
+│   │   ├─ CH_Seonjae.yaml
+│   │   └─ CH_default.yaml
 │   ├─ world/                      # 세계관 설정 파일
 │   │   ├─ W_schema.json
 │   │   └─ W_sea.yaml
@@ -256,12 +260,22 @@ Achat/
 │       └─ web_search.py          # 인터넷 검색 (DuckDuckGo / SearXNG)
 │
 ├─ training/                       # LoRA 파인튜닝
-│   ├─ lora_train.py
-│   └─ dataset.py
+│   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, GPU/CPU 자동 전환)
+│   ├─ dataset.py                 # 데이터셋 로더 (ChatML, stratified sampling)
+│   ├─ 학습.md                    # 학습 가이드 (구조 분석, 실행법, 개선안)
+│   ├─ data/                      # 학습 데이터 (2,167건, 26파일)
+│   │   ├─ affection/             # 친밀도 단계별 (6단계: stranger~intimate)
+│   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow
+│   │   ├─ personality/           # 5종 성격별
+│   │   └─ speech_style/          # 말투 조합
+│   └─ log/                       # MVP 대화 로그 수집 (카테고리별 JSONL)
+│
+├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
+│   └─ LoRA_v7/adapter/           # 현재 적용 중 (eval best 1.687, assistant-only loss)
 │
 ├─ data/
-│   └─ lora/                      # QLoRA 파인튜닝 학습 데이터
-│       ├─ conversation/           # 대화 모드용 캐릭터 대화 데이터
+│   └─ lora/
+│       ├─ conversation/           # training/log 빌드 후 생성 (scripts/build_dataset.py)
 │       └─ function/               # 기능 모드용 자연어 → JSON 파라미터 추출 예시
 │
 ├─ scripts/                        # 변환 스크립트
@@ -286,7 +300,7 @@ Achat/
 
 | 단계 | 실현 가능성 | 비고 |
 |---|---|---|
-| QLoRA 파인튜닝 (3B) | ✅ 가능 | 8GB VRAM 내 동작, gradient_checkpointing 필수 |
+| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v7 학습 완료 |
 | LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
 | GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
 | Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
@@ -298,7 +312,7 @@ Achat/
 | 로컬 검색 도구 | ✅ 가능 | SQLite FTS5 또는 whoosh |
 | 인터넷 검색 도구 | ⚠️ API 의존 | DuckDuckGo 비공식 or SearXNG 셀프호스팅 권장 |
 | JSON 파라미터 추출 (3B) | ⚠️ 주의 | 파인튜닝 데이터에 기능 모드 예시 필수 포함 |
-| RTX 5060 Ti BnB | ⚠️ 주의 | `bitsandbytes >= 0.44` + `CUDA 12.8+` 필수 |
+| RTX 5060 Ti BnB | ✅ 미사용 | Blackwell SM 10.x 호환 이슈로 BitsAndBytes 대신 bfloat16 풀 파라미터 채택 |
 
 ---
 
@@ -333,7 +347,7 @@ Achat/
 > 상세 구현: [대화품질.md](대화품질.md) — 7계층 아키텍처, session/state/memory 구현 계획
 
 - [x] `agent/persona.py` — 캐릭터 YAML 로딩 및 핫스왑 (`load_persona`, `swap_persona`)
-- [x] `agent/state.py` — mood_triggers 키워드 매칭, affection ±3 증감 (0~100 클램핑)
+- [x] `agent/state.py` — mood_triggers 키워드 매칭 (8종), affection 증감 (캐릭터 YAML affection_delta 우선)
 - [x] `agent/core.py` — 전체 컴포넌트 초기화 + 대화 모드 진입점 `chat()`
 - [x] `memory/short_term.py` — `get_recent()` 슬라이딩 윈도우
 - [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.7, importance ≥ 0.5 필터)
@@ -375,12 +389,12 @@ Achat/
 - [x] `data/lora/conversation/` — 빌드 대상 디렉토리 생성
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터
 - [x] `scripts/build_dataset.py` — training/log → data/lora/conversation 빌드 (시스템 프롬프트 자동 삽입)
-- [x] `training/dataset.py` — 두 데이터셋 혼합 로더 (apply_chat_template + max_length 필터)
-- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환)
-- [x] `training/학습.md` — Step 0~6 실행 가이드 (GPU/CPU 옵션, OOM 대응, 평가 포함)
+- [x] `training/dataset.py` — 데이터셋 로더 (apply_chat_template, stratified sampling)
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환), v7~: assistant 토큰 마스킹
+- [x] `training/학습.md` — 학습 구조 리뷰, 실행 가이드, 개선안 (EWC/카테고리 가중치)
 - [x] `eval/ai_tell_checker.py` / `eval/memory_test.py` / `eval/speed_bench.py` 구현
 - [x] CPU smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
-- [ ] (실행 검증) GPU 3 epoch 완료 및 평가 결과 기록
+- [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 2,167건, assistant masking, eval best 1.687)
 
 ---
 
@@ -482,8 +496,8 @@ GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
 
 - **LoRA 병합 RAM**: 3B FP16 병합에 ~6GB 소모. 실행 전 브라우저/기타 프로세스 종료 필수.
   OOM 발생 시 `low_cpu_mem_usage=True`, `device_map="cpu"` 옵션 사용.
-- **RTX 5060 Ti BitsAndBytes**: `bitsandbytes >= 0.44.0` + `CUDA 12.8+` 조합 필수.
-  확인: `python -c "import bitsandbytes as bnb; print(bnb.__version__)"`
+- **RTX 5060 Ti BitsAndBytes**: Blackwell SM 10.x 4-bit 양자화 미지원 → **bfloat16 풀 파라미터 + LoRA 방식** 채택.
+  VRAM ~10GB 사용. OOM 시 `--max_length 256` 또는 `--grad_accum 16`.
 - **한국어 토큰 비용**: 영어 대비 2~3배 소모. 컨텍스트 패킹 시 반드시 반영.
 - **CPU 추론 속도**: 3B Q4_K_M 기준 8~15 tok/s. 스트리밍 출력으로 체감 속도 보완.
 - **ChromaDB 로컬 저장 경로**: 개발/배포 환경 각각 경로 분리 필요.
