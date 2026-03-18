@@ -5,9 +5,9 @@ lora_train.py — PeFT LoRA 파인튜닝 스크립트
   # GPU 전체 학습
   python training/lora_train.py \\
     --model Qwen/Qwen2.5-3B-Instruct \\
-    --data_dir data/lora \\
-    --output_dir output/lora_haru_v1 \\
-    --epochs 3
+    --data_dir training/data \\
+    --output_dir output/LoRA_v7 \\
+    --epochs 6
 
   # CPU 파이프라인 테스트 (저장 없이 5스텝만)
   python training/lora_train.py \\
@@ -51,7 +51,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="LoRA 파인튜닝")
     parser.add_argument("--model",       default="Qwen/Qwen2.5-3B-Instruct", help="HuggingFace 모델명")
     parser.add_argument("--data_dir",    default="data/lora",                 help="학습 데이터 루트")
-    parser.add_argument("--output_dir",  default="training/LoRA_v1",           help="어댑터 저장 디렉토리")
+    parser.add_argument("--output_dir",  default="output/LoRA_v7",              help="어댑터 저장 디렉토리 (output/ 하위 경로)")
     parser.add_argument("--subset",      default=None,                        help="conversation | function | None(전체)")
     parser.add_argument("--epochs",      type=int,   default=3)
     parser.add_argument("--batch_size",  type=int,   default=1)
@@ -171,6 +171,29 @@ def apply_lora(model, args) -> object:
 
 
 def tokenize_dataset(dataset, tokenizer, max_length: int):
+    # assistant 응답 구간만 loss 계산 — 시스템·유저 토큰은 -100 마스킹
+    # Qwen2.5 ChatML: <|im_start|>assistant\n ... <|im_end|>
+    _asst_start = tokenizer.encode("<|im_start|>assistant\n", add_special_tokens=False)
+    _im_end_id  = tokenizer.encode("<|im_end|>", add_special_tokens=False)[0]
+    _s = len(_asst_start)
+
+    def _mask_labels(ids: list[int]) -> list[int]:
+        """assistant 응답 구간(im_end 포함)만 labels 활성화, 나머지는 -100."""
+        labels = [-100] * len(ids)
+        i = 0
+        while i < len(ids):
+            if ids[i : i + _s] == _asst_start:
+                i += _s  # <|im_start|>assistant\n 건너뜀
+                while i < len(ids):
+                    labels[i] = ids[i]
+                    if ids[i] == _im_end_id:
+                        i += 1
+                        break
+                    i += 1
+            else:
+                i += 1
+        return labels
+
     def tokenize(examples):
         result = tokenizer(
             examples["text"],
@@ -178,7 +201,7 @@ def tokenize_dataset(dataset, tokenizer, max_length: int):
             max_length=max_length,
             padding=False,
         )
-        result["labels"] = result["input_ids"].copy()
+        result["labels"] = [_mask_labels(ids) for ids in result["input_ids"]]
         return result
 
     return dataset.map(
@@ -204,13 +227,9 @@ def main():
 
     # ── 데이터셋 ───────────────────────────────────────────────────────────────
     logger.info(f"데이터 로드: {args.data_dir} (subset={args.subset})")
-    raw_ds = load_training_data(args.data_dir, tokenizer, args.max_length, args.subset)
+    raw_ds = load_training_data(args.data_dir, tokenizer, args.max_length, args.subset, args.max_samples)
     tokenized_ds = tokenize_dataset(raw_ds, tokenizer, args.max_length)
-    if args.max_samples > 0 and args.max_samples < len(tokenized_ds):
-        tokenized_ds = tokenized_ds.shuffle(seed=42).select(range(args.max_samples))
-        logger.info(f"샘플링 적용: {len(tokenized_ds)}건 사용 (--max_samples {args.max_samples})")
-    else:
-        logger.info(f"전체 샘플 수: {len(tokenized_ds)}")
+    logger.info(f"최종 학습 샘플 수: {len(tokenized_ds)}")
 
     # ── Train / Eval 분리 ─────────────────────────────────────────────────────
     use_eval = args.eval_split > 0 and not args.no_save

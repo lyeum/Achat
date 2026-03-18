@@ -13,6 +13,7 @@ dataset.py — data/lora/ JSONL → HuggingFace Dataset (ChatML 포맷)
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 from typing import Optional
@@ -26,33 +27,60 @@ sys.path.insert(0, str(ROOT))
 DEFAULT_MAX_LENGTH = 512
 
 
-def load_jsonl_files(data_dir: Path) -> list[dict]:
-    """data_dir 하위 모든 .jsonl 파일을 재귀적으로 읽어 리스트 반환."""
-    records = []
+def load_jsonl_files(
+    data_dir: Path,
+    max_samples: int = -1,
+    seed: int = 42,
+) -> list[dict]:
+    """data_dir 하위 모든 .jsonl 파일을 재귀적으로 읽어 리스트 반환.
+
+    max_samples > 0 이면 파일별 비율을 유지하는 stratified sampling 적용.
+    """
+    per_file: list[tuple[Path, list[dict]]] = []
     files = sorted(data_dir.rglob("*.jsonl"))
     if not files:
         logger.warning(f"JSONL 파일 없음: {data_dir}")
-        return records
+        return []
 
+    total = 0
     for path in files:
-        count = 0
+        file_records = []
         with open(path, encoding="utf-8") as f:
             for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line or line.startswith("//"):
                     continue
                 try:
-                    records.append(json.loads(line))
-                    count += 1
+                    file_records.append(json.loads(line))
                 except json.JSONDecodeError as e:
                     logger.warning(f"{path.name}:{lineno} JSON 파싱 실패: {e}")
-        try:
-            display_path = path.relative_to(ROOT)
-        except ValueError:
-            display_path = path
-        logger.debug(f"  로드: {display_path} ({count}건)")
+        per_file.append((path, file_records))
+        total += len(file_records)
 
-    logger.info(f"총 {len(records)}건 로드 ({len(files)}개 파일)")
+    if max_samples > 0 and max_samples < total:
+        rng = random.Random(seed)
+        records = []
+        for path, file_records in per_file:
+            quota = max(1, round(max_samples * len(file_records) / total))
+            sampled = rng.sample(file_records, min(quota, len(file_records)))
+            try:
+                display_path = path.relative_to(ROOT)
+            except ValueError:
+                display_path = path
+            logger.debug(f"  로드: {display_path} ({len(file_records)}건 → {len(sampled)}건 샘플링)")
+            records.extend(sampled)
+        logger.info(f"총 {len(records)}건 로드 — stratified sampling {max_samples}건 기준 ({len(files)}개 파일)")
+    else:
+        records = []
+        for path, file_records in per_file:
+            try:
+                display_path = path.relative_to(ROOT)
+            except ValueError:
+                display_path = path
+            logger.debug(f"  로드: {display_path} ({len(file_records)}건)")
+            records.extend(file_records)
+        logger.info(f"총 {len(records)}건 로드 ({len(files)}개 파일)")
+
     return records
 
 
@@ -100,6 +128,7 @@ def load_training_data(
     tokenizer,
     max_length: int = DEFAULT_MAX_LENGTH,
     subset: Optional[str] = None,
+    max_samples: int = -1,
 ) -> Dataset:
     """
     data_dir 하위 JSONL → HuggingFace Dataset 반환.
@@ -109,12 +138,13 @@ def load_training_data(
         tokenizer: HuggingFace tokenizer (apply_chat_template 지원)
         max_length: 최대 토큰 수. 초과 샘플 필터링.
         subset: "conversation" | "function" | None(전체)
+        max_samples: 파일별 비율 유지 stratified sampling (-1=전체)
     """
     base = ROOT / data_dir
     if subset:
         base = base / subset
 
-    records = load_jsonl_files(base)
+    records = load_jsonl_files(base, max_samples=max_samples)
     if not records:
         raise ValueError(f"로드된 데이터 없음: {base}")
 
