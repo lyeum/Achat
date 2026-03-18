@@ -9,10 +9,8 @@
 #                    libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
 #                    libxcb-xinerama0 libxcb-xkb1 libegl1 libegl-mesa0 libgl1 libglib2.0-0
 #
-# 실행 전 환경변수:
-#   export QT_IM_MODULE=ibus GTK_IM_MODULE=ibus XMODIFIERS=@im=ibus IBUS_USE_PORTAL=0
-#   eval $(dbus-launch --sh-syntax)
-#   ibus-daemon -d && ibus engine hangul
+# 실행: uv run python main.py  (dbus/ibus 기동 및 Ctrl+Space 토글 키 등록은 main.py가 자동 처리)
+# ⚠️  Ubuntu 24.04 + systemd: eval $(dbus-launch --sh-syntax) 사용 금지 — ibus 연결 파괴됨
 
 [project]
 name = "achat"
@@ -31,18 +29,14 @@ dependencies = [
     "torch",
     "torchvision",
     "torchaudio",
-
     # ── 임베딩 / VDB ────────────────────────────────────────
     "sentence-transformers>=3.0.0",   # bge-m3 로컬 임베딩
     "chromadb>=0.5.0",                # 장기 메모리 + RAG VDB
-
     # ── 데이터 처리 ─────────────────────────────────────────
     "PyYAML>=6.0",
     "numpy",
-
     # ── UI ──────────────────────────────────────────────────
-    "PySide6>=6.7.0",
-
+    "pyside6<6.10",
     # ── 유틸리티 ────────────────────────────────────────────
     "loguru>=0.7.0",
     "tqdm",
