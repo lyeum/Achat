@@ -18,9 +18,9 @@ faulthandler.enable()
 # 주의: libxcb-cursor0 설치 필요 (sudo apt-get install -y libxcb-cursor0)
 os.environ.pop("WAYLAND_DISPLAY", None)          # portal 모드 방지 (force direct IBUS_ADDRESS)
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-os.environ.setdefault("QT_IM_MODULE", "ibus")
-os.environ.setdefault("GTK_IM_MODULE", "ibus")
-os.environ.setdefault("XMODIFIERS", "@im=ibus")
+os.environ["QT_IM_MODULE"] = "ibus"
+os.environ["GTK_IM_MODULE"] = "ibus"
+os.environ["XMODIFIERS"] = "@im=ibus"
 os.environ["IBUS_USE_PORTAL"] = "0"              # setdefault 대신 강제 오버라이드
 
 
@@ -49,25 +49,49 @@ def _ensure_dbus_session() -> None:
 
 def _ensure_ibus_hangul() -> None:
     """ibus-daemon을 기동하고 hangul 엔진으로 설정한다.
+    bus 파일 PID와 실행 중인 daemon PID가 다르면 재시작해 fresh bus 파일을 확보한다.
     ibus 미설치 환경에서는 조용히 무시.
     """
     import time
     try:
-        # 1. ibus-daemon이 실행 중인지 확인
-        alive = subprocess.run(
+        # 1. 실행 중인 ibus-daemon PID 확인
+        pgrep = subprocess.run(
             ["pgrep", "-x", "ibus-daemon"],
-            capture_output=True, timeout=2,
-        ).returncode == 0
+            capture_output=True, text=True, timeout=2,
+        )
+        running_pid = int(pgrep.stdout.strip()) if pgrep.returncode == 0 else None
 
-        # 2. 미실행이면 기동
-        if not alive:
+        # 2. bus 파일의 PID 확인
+        machine_id = Path("/etc/machine-id").read_text().strip()
+        display = os.environ.get("DISPLAY", ":0").lstrip(":").split(".")[0]
+        bus_file = Path.home() / f".config/ibus/bus/{machine_id}-unix-{display}"
+        if not bus_file.exists():
+            wl = "wayland-0"  # WAYLAND_DISPLAY는 이미 언셋됨
+            bus_file = Path.home() / f".config/ibus/bus/{machine_id}-unix-{wl}"
+
+        bus_pid = None
+        if bus_file.exists():
+            for line in bus_file.read_text().splitlines():
+                if line.startswith("IBUS_DAEMON_PID="):
+                    try:
+                        bus_pid = int(line.split("=", 1)[1])
+                    except ValueError:
+                        pass
+                    break
+
+        # 3. 실행 중 daemon이 없거나 bus 파일 PID와 불일치(stale) → 재시작
+        need_restart = (running_pid is None) or (bus_pid != running_pid)
+        if need_restart:
+            if running_pid is not None:
+                subprocess.run(["kill", str(running_pid)], capture_output=True, timeout=2)
+                time.sleep(0.5)
             subprocess.run(
                 ["ibus-daemon", "-d", "--xim"],
                 capture_output=True, timeout=5,
             )
-            time.sleep(1.5)  # 데몬 초기화 대기
+            time.sleep(1.5)  # 데몬 초기화 + bus 파일 기록 대기
 
-        # 3. 엔진이 hangul이 아니면 전환
+        # 4. 엔진이 hangul이 아니면 전환
         result = subprocess.run(
             ["ibus", "engine"],
             capture_output=True, text=True, timeout=2,
@@ -78,7 +102,7 @@ def _ensure_ibus_hangul() -> None:
                 capture_output=True, timeout=2,
             )
 
-        # 4. Ctrl+Space를 한/영 토글 키로 등록 (기본값엔 없음 — 환경 초기화 시 유실됨)
+        # 5. Ctrl+Space를 한/영 토글 키로 등록 (기본값엔 없음 — 환경 초기화 시 유실됨)
         subprocess.run(
             ["gsettings", "set", "org.freedesktop.ibus.engine.hangul",
              "switch-keys", "Hangul,Shift+space,Control+space"],
@@ -172,8 +196,8 @@ def _inject_ibus_address() -> None:
 def main() -> None:
     # ── torch를 Qt보다 먼저 로드 (shared library 충돌 방지) ──────────────────
     _ensure_dbus_session()   # dbus 세션 버스 먼저 — ibus가 dbus로 통신
-    _ensure_ibus_hangul()
-    _inject_ibus_address()
+    _ensure_ibus_hangul()    # daemon 정상화 + bus 파일 갱신 (stale PID면 재시작)
+    _inject_ibus_address()   # 갱신된 bus 파일에서 IBUS_ADDRESS 주입
     _cleanup_previous()
     _PID_FILE.write_text(str(os.getpid()))
 
