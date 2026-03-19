@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from pathlib import Path
+
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
 from ui_ux.chat_panel import LLMWorker
+
+_ASSETS = Path(__file__).resolve().parent / "assets"
 
 
 class ChatBridge(QObject):
@@ -13,19 +17,23 @@ class ChatBridge(QObject):
     QML에서는 context property 'bridge'로 접근한다.
 
     Signals (Python → QML):
-        messageAdded(role, content) : 새 메시지 추가 (role: "user" | "assistant")
-        statusChanged(status)       : "thinking" | "ready"
-        characterNameChanged(name)  : 캐릭터 이름 변경
+        messageAdded(role, content)  : 새 메시지 추가 (role: "user" | "assistant")
+        statusChanged(status)        : "thinking" | "ready"
+        characterNameChanged(name)   : 캐릭터 이름 변경
+        backgroundChanged(url)       : act 변경 시 배경 이미지 URL (없으면 "")
+        moodChanged(mood)            : mood 변경 시 감정 상태 문자열
 
     Slots (QML → Python):
-        sendMessage(text)           : 사용자 메시지 전송
-        snapToEdge(x, y, w, h)     : 화면 모서리 스냅 좌표 계산
-        changeCharacter(char_id)    : 캐릭터 핫스왑
+        sendMessage(text)            : 사용자 메시지 전송
+        snapToEdge(x, y, w, h)      : 화면 모서리 스냅 좌표 계산
+        changeCharacter(char_id)     : 캐릭터 핫스왑
     """
 
-    messageAdded        = Signal(str, str)   # role, content
-    statusChanged       = Signal(str)        # "thinking" | "ready"
+    messageAdded         = Signal(str, str)   # role, content
+    statusChanged        = Signal(str)        # "thinking" | "ready"
     characterNameChanged = Signal(str)
+    backgroundChanged    = Signal(str)        # file URL or ""
+    moodChanged          = Signal(str)        # neutral | happy | annoyed | sad
 
     def __init__(self, agent):
         super().__init__()
@@ -33,11 +41,54 @@ class ChatBridge(QObject):
         self._worker: LLMWorker | None = None
         self._character_name: str = agent.character.get("name", "")
 
+        # 초기 배경/mood 상태
+        self._current_bg: str = self._build_bg_url()
+        self._current_mood: str = self._read_mood()
+
     # ── Property ──────────────────────────────────────────────────────────────
 
     @Property(str, notify=characterNameChanged)
     def characterName(self) -> str:
         return self._character_name
+
+    @Property(str, notify=backgroundChanged)
+    def currentBackground(self) -> str:
+        return self._current_bg
+
+    @Property(str, notify=moodChanged)
+    def currentMood(self) -> str:
+        return self._current_mood
+
+    # ── 내부 헬퍼 ────────────────────────────────────────────────────────────
+
+    def _build_bg_url(self) -> str:
+        """현재 session의 act_id에 맞는 배경 이미지 file URL을 반환한다.
+        파일이 없거나 stub 모드면 빈 문자열을 반환한다.
+        """
+        session = getattr(self._agent, "session", None)
+        world   = getattr(self._agent, "world", {})
+        world_id = world.get("world_id", "")
+        act_id   = session.act_id if session else None
+        if not (world_id and act_id):
+            return ""
+        path = _ASSETS / "backgrounds" / world_id / f"{act_id}.png"
+        return QUrl.fromLocalFile(str(path)).toString() if path.exists() else ""
+
+    def _read_mood(self) -> str:
+        session = getattr(self._agent, "session", None)
+        return session.mood if session else "neutral"
+
+    def _sync_state(self) -> None:
+        """응답 후 act/mood 변화를 감지하고 변경 시 시그널을 emit한다."""
+        new_bg = self._build_bg_url()
+        if new_bg != self._current_bg:
+            self._current_bg = new_bg
+            self.backgroundChanged.emit(new_bg)
+
+        new_mood = self._read_mood()
+        if new_mood != self._current_mood:
+            self._current_mood = new_mood
+            self.moodChanged.emit(new_mood)
 
     # ── Slots (QML → Python) ──────────────────────────────────────────────────
 
@@ -118,6 +169,7 @@ class ChatBridge(QObject):
 
     def _on_response(self, response: str) -> None:
         self.messageAdded.emit("assistant", response)
+        self._sync_state()
 
     def _on_error(self, msg: str) -> None:
         self.messageAdded.emit("system", f"[오류] {msg}")

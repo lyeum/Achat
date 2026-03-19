@@ -9,6 +9,8 @@ Window {
     // ── 크기 / 상태 ─────────────────────────────────────────────────────────
     property bool isBubble: false
     property string currentMode: "chat"   // "chat" | "function"
+    property string backgroundImageUrl: bridge ? bridge.currentBackground : ""
+    property string currentMood: bridge ? bridge.currentMood : "neutral"
 
     width:  isBubble ? 72  : 360
     height: isBubble ? 72  : 520
@@ -71,6 +73,14 @@ Window {
 
         function onCharacterNameChanged(name) {
             // 바인딩 대신 직접 할당하지 않음 — charNameLabel.text 바인딩이 처리
+        }
+
+        function onBackgroundChanged(url) {
+            root.backgroundImageUrl = url
+        }
+
+        function onMoodChanged(mood) {
+            root.currentMood = mood
         }
     }
 
@@ -203,32 +213,48 @@ Window {
             }
 
             // 채팅 영역
-            ListView {
-                id: chatList
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                spacing: 4
-                bottomMargin: 8
-                topMargin: 8
-                leftMargin: 4
-                rightMargin: 4
 
-                model: messageModel
-
-                delegate: ChatBubble {
-                    width: chatList.width - 8
-                    role: model.role
-                    content: model.content
-                    fontFamily: koreanFont.font.family
+                // act별 배경 이미지 (이미지가 없으면 숨김 — 기존 다크 배경 유지)
+                Image {
+                    id: bgImage
+                    anchors.fill: parent
+                    source: root.backgroundImageUrl
+                    fillMode: Image.PreserveAspectCrop
+                    visible: root.backgroundImageUrl !== ""
+                    opacity: 0.35
+                    Behavior on opacity { NumberAnimation { duration: 400 } }
+                    Behavior on source  { } // source 변경 시 즉시 교체
                 }
 
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                    contentItem: Rectangle {
-                        implicitWidth: 4
-                        radius: 2
-                        color: "#555"
+                ListView {
+                    id: chatList
+                    anchors.fill: parent
+                    clip: true
+                    spacing: 4
+                    bottomMargin: 8
+                    topMargin: 8
+                    leftMargin: 4
+                    rightMargin: 4
+
+                    model: messageModel
+
+                    delegate: ChatBubble {
+                        width: chatList.width - 8
+                        role: model.role
+                        content: model.content
+                        fontFamily: koreanFont.font.family
+                    }
+
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle {
+                            implicitWidth: 4
+                            radius: 2
+                            color: "#555"
+                        }
                     }
                 }
             }
