@@ -265,10 +265,19 @@ ui_ux/assets/
 ## 8. 구현 순서 (권장)
 
 ```
-1단계 — 배경 이미지 연동
-  - backgroundChanged 시그널 추가 (bridge.py)
-  - main.qml 채팅 영역에 Image 레이어 추가
-  - act 변경 감지 → 시그널 emit (router.py or agent/core.py)
+1단계 — 배경 이미지 연동 ✅ 완료 (2026-03-19)
+  - backgroundChanged / moodChanged 시그널 + Property 추가 (bridge.py)
+  - main.qml 채팅 영역을 Item으로 감싸고 배경 Image 레이어 추가
+  - _sync_state()로 응답 후 act/mood 변화 감지 → 시그널 emit
+  - ruff exclude에 **/*.qml 추가 (pyproject.toml)
+
+  구현 파일:
+    ui_ux/bridge.py        — backgroundChanged, moodChanged 시그널 / currentBackground, currentMood Property / _sync_state()
+    ui_ux/qml/main.qml     — backgroundImageUrl, currentMood 프로퍼티 / Image 레이어 (opacity 0.35, PreserveAspectCrop)
+    pyproject.toml         — ruff exclude에 **/*.qml 추가
+
+  에셋 배치 경로 (이미지 준비되면 넣으면 바로 반영):
+    ui_ux/assets/backgrounds/{world_id}/{act_id}.png
 
 2단계 — PIP 마스코트 모드
   - main.qml 주황 버튼 동작 변경 (isBubble → pip 모드)
