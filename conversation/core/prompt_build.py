@@ -151,7 +151,7 @@ class PromptBuilder:
             "",
             f"[말투 규칙]\n{c.get('speech_style', '').strip()}",
             "",
-            f"[현재 감정 상태]\n" + "\n".join(state_parts),
+            "[현재 감정 상태]\n" + "\n".join(state_parts),
             "",
             f"[금지 규칙]\n{rules}",
         ])
