@@ -531,6 +531,8 @@ ACHAT_ENV=dev uv run python main.py
 #### 한글 입력
 - 앱 실행 후 TextInput 클릭 → **Ctrl+Space** 로 한/영 전환
 - 우측 Alt 키는 WSLg 구조적 한계(modifier state 하드코딩)로 사용 불가
+- 한글 입력이 안 될 경우 `~/.bashrc`에 `QT_IM_MODULE=fcitx` 잔재가 있는지 확인
+  (main.py가 강제 override하므로 앱 재실행으로 해결됨 — docs/BUG/BUG_1.md 참조)
 
 ---
 
@@ -585,6 +587,12 @@ GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
   VRAM ~10GB 사용. OOM 시 `--max_length 256` 또는 `--grad_accum 16`.
 - **한국어 토큰 비용**: 영어 대비 2~3배 소모. 컨텍스트 패킹 시 반드시 반영.
 - **CPU 추론 속도**: 3B Q4_K_M 기준 8~15 tok/s. 스트리밍 출력으로 체감 속도 보완.
+- **fcitx 잔재 주의**: 이전에 fcitx를 사용했던 환경이라면 `~/.bashrc`에 `QT_IM_MODULE=fcitx`가 남아 있을 수 있음.
+  fcitx가 설치되지 않은 상태에서 이 값이 남으면 한글 입력이 완전히 차단됨.
+  main.py가 강제 override하므로 앱 내에서는 동작하나, 근본 원인 제거 권장:
+  ```bash
+  grep -n "fcitx\|IM_MODULE" ~/.bashrc ~/.profile 2>/dev/null
+  ```
 - **ChromaDB 로컬 저장 경로**: 개발/배포 환경 각각 경로 분리 필요.
 - **1.5B 폴백 기준**: 병합 OOM, BnB 호환 이슈, 학습 VRAM 부족 중 하나라도 발생 시 전환.
 - **JSON 파라미터 추출 안정성**: 3B 기반 모델은 파인튜닝 없이 JSON 출력이 불안정할 수 있음.

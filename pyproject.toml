@@ -7,7 +7,12 @@
 # Qt6 / PySide6 런타임:
 #   sudo apt install libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0
 #                    libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
-#                    libxcb-xinerama0 libxcb-xkb1 libegl1 libegl-mesa0 libgl1 libglib2.0-0
+#                    libxcb-xinerama0 libxcb-xkb1 libegl1 libegl-mesa0 libgl1
+#                    libglib2.0-0  # Ubuntu 24.04에서는 libglib2.0-0t64 로 대체됨 — 무시 가능
+#
+# ⚠️  fcitx 잔재 제거 필수: ~/.bashrc 에 QT_IM_MODULE=fcitx / GTK_IM_MODULE=fcitx 가 있으면
+#     ibus 연결 실패. main.py가 강제 override하지만 근본 원인은 .bashrc 정리 권장:
+#     grep -n "fcitx\|IM_MODULE" ~/.bashrc ~/.profile 2>/dev/null
 #
 # 실행: uv run python main.py  (dbus/ibus 기동 및 Ctrl+Space 토글 키 등록은 main.py가 자동 처리)
 # ⚠️  Ubuntu 24.04 + systemd: eval $(dbus-launch --sh-syntax) 사용 금지 — ibus 연결 파괴됨

@@ -24,6 +24,45 @@
 
 ---
 
+## 0. BUG_1 3차 재발 (2026-03-19, CPU 환경) — ✅ 해결
+
+### 현상
+- 한글 입력 불가, Ctrl+Space 전환 안 됨 (GPU 환경에서는 동작했던 설정 그대로 적용)
+
+### 근본 원인 (2가지)
+
+**원인 1 — `QT_IM_MODULE=fcitx` 잔재 (결정적)**
+- 이전 fcitx 설정이 `~/.bashrc`에 남아 있어 `QT_IM_MODULE=fcitx`로 설정된 상태
+- main.py가 `os.environ.setdefault("QT_IM_MODULE", "ibus")`를 사용 중 → 이미 설정된 값은 override 안 됨
+- fcitx는 설치되어 있지 않아 입력이 완전히 차단됨
+- **해결**: `setdefault` → 강제 대입(`os.environ["QT_IM_MODULE"] = "ibus"`)으로 변경
+
+**원인 2 — ibus bus 파일 PID 불일치 (stale)**
+- bus 파일의 `IBUS_DAEMON_PID`와 실제 실행 중인 daemon PID가 달라 IBUS_ADDRESS가 stale
+- `_ensure_ibus_hangul()`이 daemon이 "살아있다"고 판단해 재시작하지 않음
+- `ibus engine hangul` 설정 명령이 stale 소켓으로 전송 → 실패 (조용히 무시됨)
+- **해결**: `_ensure_ibus_hangul()`에 PID 일치 여부 확인 추가, 불일치 시 kill + 재시작
+
+**원인 3 — 함수 실행 순서 오류**
+- 기존 순서: `_ensure_ibus_hangul()` → `_inject_ibus_address()`
+- `_inject_ibus_address()`가 나중에 실행되어 daemon 재시작 후 갱신된 bus 파일을 못 읽음
+- **해결**: `_ensure_ibus_hangul()` (daemon 정상화) → `_inject_ibus_address()` (갱신된 bus 파일 읽기) 순으로 변경
+
+### 수정 파일
+- `main.py`:
+  - `QT_IM_MODULE`, `GTK_IM_MODULE`, `XMODIFIERS` → `setdefault` → 강제 대입
+  - `_ensure_ibus_hangul()`: bus 파일 PID vs 실행 PID 비교, 불일치 시 kill + 재시작
+  - 실행 순서: `_ensure_ibus_hangul()` → `_inject_ibus_address()`
+
+### 재발 방지
+- `.bashrc`에 fcitx 관련 설정(`QT_IM_MODULE=fcitx` 등)이 있으면 제거 권장:
+  ```bash
+  grep -n "fcitx\|IM_MODULE" ~/.bashrc ~/.profile 2>/dev/null
+  ```
+- main.py가 강제 override하므로 제거 안 해도 동작하나, 환경 오염 원인이 됨
+
+---
+
 ## 0. BUG_1 재발생 조사 (2026-03-18) — 🔄 미해결
 
 ### 현상
