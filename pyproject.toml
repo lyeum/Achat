@@ -71,4 +71,4 @@ ignore = [
     "F401",   # 미사용 import (모듈 __init__.py에서 허용)
     "E402",   # sys.path.insert 이후 로컬 모듈 import — 프로젝트 루트 설정 패턴
 ]
-exclude = ["training/data/**", "data/**"]
+exclude = ["training/data/**", "data/**", "**/*.qml"]
