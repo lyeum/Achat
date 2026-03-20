@@ -1,0 +1,364 @@
+# VDB — 벡터 데이터베이스 구조 및 운용 가이드
+
+> 엔진: ChromaDB PersistentClient (`chroma_dev/`)
+> 임베딩: BAAI/bge-m3 (SentenceTransformer)
+> 유사도 공간: cosine (`hnsw:space=cosine`)
+> threshold 계산: `distance ≤ 1.0 - threshold` (distance=0: 동일, 1: 직교)
+
+---
+
+## 0. VDB 구성
+
+### 0-1. 물리 저장 구조
+
+ChromaDB는 벡터만 저장하는 게 아니라 **원본 텍스트·메타데이터·벡터를 분리 저장**한다.
+
+```
+chroma_dev/
+├─ chroma.sqlite3        ← 원본 텍스트(document) + 메타데이터 (SQLite)
+└─ {uuid}/
+   └─ data_level0.bin   ← 벡터 임베딩 (HNSW 인덱스 바이너리)
+```
+
+- **SQLite**: 텍스트 원본, id, metadata 저장. 사람이 읽을 수 있는 형태.
+- **HNSW 바이너리**: float 벡터 배열. 빠른 근사 최근접 이웃 탐색(ANN)용.
+
+### 0-2. 검색 동작 원리
+
+벡터는 검색 키로만 사용하고, 실제 반환값은 SQLite의 원본 텍스트다.
+
+```
+쿼리 텍스트
+    → bge-m3 임베딩 → float 벡터
+    → HNSW 인덱스에서 cosine 거리 계산
+    → 거리 ≤ cutoff(=1 - threshold)인 항목의 id 추출
+    → SQLite에서 id 기준 원본 document·metadata 반환
+```
+
+### 0-3. 갱신 방식
+
+VDB 갱신은 **항목 단위 upsert**다. 스냅샷 교체 방식이 아니다.
+
+| 상황 | 내부 동작 |
+|---|---|
+| 기억 저장 (summarizer) | `col.upsert(id=mem_xxx_...)` — id 없으면 추가, 있으면 덮어씀 |
+| 동적 장소 추가 (world_nav) | `col.upsert(id=loc_장소명)` — 동일 |
+| sources 수정 후 재인덱싱 | 예외적으로 컬렉션 삭제 후 전체 `col.add()` (`force=True`일 때만) |
+
+### 0-4. 세션 종료와 데이터 영속성
+
+**세션이 종료돼도 VDB 데이터는 사라지지 않는다.**
+
+`PersistentClient`는 `upsert()` / `add()` 호출 시점에 즉시 디스크(`chroma_dev/`)에 기록한다.
+인메모리 DB가 아니므로 프로세스가 종료되거나 재시작해도 기존 기억·세계관 데이터가 그대로 유지된다.
+
+---
+
+## 1. 주의사항
+
+### 1-1. `force=True` 삭제 범위
+
+`force=True`로 재인덱싱할 때 삭제되는 것은 **`world_knowledge` 컬렉션 하나뿐**이다.
+`{char_id}_memory`(장기 기억)는 전혀 건드리지 않는다.
+
+```python
+client.delete_collection("world_knowledge")  # 이것만 삭제
+# haru_memory, seonjae_memory 등 기억 컬렉션은 그대로
+```
+
+### 1-2. 동적 생성 장소는 `force=True` 시 사라진다
+
+대화 중 LLM이 생성한 장소(`source: "generated"`)는 `sources/*.md`에 기록되지 않는다.
+`world_knowledge` 컬렉션 안에만 존재하므로 `force=True` 재인덱싱 시 함께 삭제된다.
+
+동적 장소를 영구 보존하려면 재인덱싱 전에 아래 순서로 처리한다:
+
+```python
+# 1. 동적 생성 장소 목록 확인
+col_w = client.get_collection("world_knowledge")
+generated = col_w.get(where={"source": {"$eq": "generated"}})
+# generated["documents"], generated["metadatas"] 확인
+
+# 2. 필요한 항목을 rag/sources/world/place.md에 수동으로 추가
+
+# 3. force=True 재인덱싱
+```
+
+### 1-3. ChromaDB metadata 타입 제약
+
+ChromaDB metadata 값은 `str / int / float / bool`만 허용한다.
+`list` 타입은 저장 불가 — `tags` 필드가 쉼표 직렬화(`"이름,취미,바다"`)로 저장되는 이유가 이것이다.
+
+```python
+# long_term.py store() 내부
+flat_meta = {
+    "tags": ",".join(meta.get("tags", [])),  # list → str 변환
+    ...
+}
+```
+
+### 1-4. threshold 기본값 vs 실제 적용값
+
+코드 기본값과 실제 설정값이 다르다.
+
+| 위치 | 값 |
+|---|---|
+| `long_term.py` / `retrieve.py` 코드 기본값 | `0.7` |
+| `M_schema.json` retrieval_config | `0.7` |
+| **실제 `config.py` 적용값** | **`0.52`** |
+
+`config.py`의 `vdb_threshold: 0.52`가 우선 적용된다. M_schema.json의 값은 참조용 문서일 뿐 코드가 직접 읽지 않는다.
+
+---
+
+## 2. 컬렉션 구조
+
+VDB 안에 두 개의 독립 컬렉션이 존재한다.
+
+| 컬렉션명 | 역할 | 저장 주체 | 검색 주체 |
+|---|---|---|---|
+| `{char_id}_memory` | 캐릭터별 장기 기억 | `memory/summarizer.py` | `memory/long_term.py` |
+| `world_knowledge` | 세계관·장소 지식 | `rag/index.py`, `rag/world_nav.py` | `rag/retrieve.py` |
+
+---
+
+## 3. `{char_id}_memory` — 장기 기억 컬렉션
+
+### 2-1. 저장 데이터 스키마 (`conversation/memory_act/M_schema.json`)
+
+```
+{
+  "id":      "mem_haru_a3f2c1b0",        ← mem_{char_id}_{uuid8}
+  "content": "사용자 이름은 민준. 바다를 좋아한다고 했다.",
+  "metadata": {
+    "character_id": "Haru",
+    "session_id":   "...",
+    "turn_range":   "10-20",             ← 요약 대상 턴 범위
+    "importance":   0.85,               ← 0.5 미만은 저장 안 함
+    "tags":         "이름,취미,바다",    ← list → 쉼표 직렬화 (ChromaDB 제약)
+    "location":     "beach",
+    "timestamp":    "2025-01-18T09:30:00Z"
+  }
+}
+```
+
+### 2-2. 중요도 기준 (`summarizer.score_importance`)
+
+| 등급 | 점수 범위 | 저장 여부 | 트리거 키워드 예시 |
+|---|---|---|---|
+| high | 0.85 | ✅ | 이름, 약속, 비밀, 미안, 기억해줘, 고마워 |
+| mid  | 0.60 | ✅ | 취미, 감정, 슬퍼, 저번에, 다음에, 피드백 |
+| low  | 0.50 | ✅ (기본값) | 키워드 없음 — 기본 0.5로 저장 |
+| 미달 | < 0.50 | ❌ | (현재 로직상 0.5 미만 도달 경로 없음) |
+
+> 현재 `score_importance()`는 키워드 없으면 기본 0.5를 반환하므로 사실상 모든 요약이 저장됨.
+> 의도적 저장 억제가 필요하면 기본값을 0.5 미만으로 낮춰야 한다.
+
+### 2-3. 저장 흐름
+
+```
+매 턴 종료 후 (conversation/core/router.py handle_turn)
+    │
+    └─ summarizer.check_trigger(session, trigger_n=10)
+           session.turn_count % 10 == 0 이면 True
+               │
+               ├─ summarizer.summarize()
+               │      최근 20개 메시지 → LLM (max_tokens=250)
+               │      "사용자에 대해 알게 된 정보 중심, 객관적으로 1~3문장"
+               │
+               ├─ summarizer.score_importance(summary)
+               │      키워드 매칭 → 0.5 / 0.60 / 0.85
+               │
+               └─ summarizer.write_to_vdb()
+                      score ≥ 0.5 → long_term.store() → ChromaDB upsert
+```
+
+### 2-4. 검색 흐름
+
+```
+매 턴 시작 (handle_turn 2번)
+    │
+    └─ long_term.query(user_input, character_id)
+           ChromaDB query(n_results=2, where={importance: {$gte: 0.5}})
+           distance ≤ 1.0 - 0.52 = 0.48 필터
+               │
+               └─ Layer C (장기 기억 150토큰) 로 PromptBuilder에 전달
+```
+
+---
+
+## 4. `world_knowledge` — 세계관·장소 컬렉션
+
+### 3-1. 초기 인덱싱 (sources/*.md → VDB)
+
+```
+conversation/main.py 시작 시 자동 실행 (force=False)
+    │
+    └─ rag/index.index_world(world_dir, force=False)
+           컬렉션 이미 있으면 → 스킵
+           없으면:
+             rag/sources/world/*.md 파일 읽기
+             → _chunk_text(size=400, overlap=50) 분할
+             → ChromaDB add(ids, documents, metadatas)
+                 id 형식: {파일명_without_ext}_{chunk_index:03d}
+                          예: place_000, culture_001, story_002
+                 metadata: {source: "place.md", chunk_index: 0}
+```
+
+현재 `sources/world/` 파일:
+
+| 파일 | 내용 |
+|---|---|
+| `place.md` | 주요 장소 (beach/breakwater/lighthouse/항구시장/카페) |
+| `culture.md` | 마을 문화 및 풍습 |
+| `story.md` | 배경 스토리 (마을 역사, 등대지기 전설) |
+
+### 3-2. 검색 흐름
+
+```
+매 턴 시작 (handle_turn 3번)
+    │
+    └─ WorldRetriever.query(user_input)
+           ChromaDB query(n_results=2)
+           distance ≤ 0.48 필터
+               │
+               └─ Layer B (세계관+act 200토큰) 로 PromptBuilder에 전달
+```
+
+### 3-3. 동적 장소 생성 흐름 ⚠️
+
+대화 중 유저가 sources에 없는 장소로 이동을 요청할 경우:
+
+```
+유저: "카페 가자"
+    │
+    └─ router._handle_location(user_input)
+           rag/world_nav.detect_move_intent()
+             키워드 필터("가자" 포함) → 통과
+             LLM 추출(max_tokens=15): "카페"
+               │
+               ├─ YAML acts 매칭 시도 (location 필드 부분 일치)
+               │      → 없으면 다음 단계
+               │
+               └─ find_or_create_location("카페", world_desc, retriever, llm)
+                      WorldRetriever.query("카페")
+                        → RAG 히트 있으면 → 기존 묘사 반환 (끝)
+                        → 히트 없으면:
+                            LLM 생성 (max_tokens=200)
+                            "세계관 배경 + '카페' 묘사, 150자 내외 산문"
+                                │
+                                └─ retriever.add_document(
+                                       doc_id="loc_카페",
+                                       text="[카페] {묘사}",
+                                       metadata={source: "generated", location: "카페"}
+                                   )
+                                   → ChromaDB world_knowledge에 upsert
+                                   → session.location_context = "카페\n{묘사}"
+```
+
+**주의: 동적 생성 장소는 `sources/*.md`에 반영되지 않는다.**
+
+- ChromaDB에만 저장되므로 `force=True`로 재인덱싱하면 사라짐
+- `metadata.source = "generated"`으로 구분 가능
+- 영구 보존이 필요하면 수동으로 `sources/world/place.md`에 추가 후 재인덱싱
+
+---
+
+## 5. sources/*.md 수정 및 재인덱싱
+
+세계관 원본 문서를 수정하고 VDB에 반영하는 방법:
+
+```bash
+# 1. sources 파일 편집
+vim rag/sources/world/place.md
+
+# 2. 강제 재인덱싱
+uv run python -c "
+from config import get_config
+from pathlib import Path
+from rag.index import index_world
+
+cfg = get_config()
+index_world(
+    world_dir=Path('rag/sources/world'),
+    chroma_path=cfg['chroma_path'],
+    embedding_model=cfg.get('embedding_model', 'BAAI/bge-m3'),
+    force=True,   # 기존 컬렉션 삭제 후 재인덱싱
+)
+print('재인덱싱 완료')
+"
+```
+
+> `force=True`는 기존 `world_knowledge` 컬렉션을 통째로 삭제하므로
+> **동적 생성 장소도 함께 사라진다.** 필요시 사전에 sources에 병합할 것.
+
+---
+
+## 6. VDB 직접 조회·수정 명령어
+
+### 장기 기억 조회
+
+```python
+import chromadb
+
+client = chromadb.PersistentClient(path="./chroma_dev")
+col = client.get_collection("haru_memory")
+
+# 전체 조회
+col.get()
+
+# 중요도 높은 기억만
+col.get(where={"importance": {"$gte": 0.8}})
+
+# 특정 세션 기억
+col.get(where={"session_id": {"$eq": "세션ID"}})
+```
+
+### 장기 기억 수정·삭제
+
+```python
+# 내용 수정 (id 필요)
+col.update(ids=["mem_haru_a3f2c1b0"], documents=["수정된 요약 내용"])
+
+# 단건 삭제
+col.delete(ids=["mem_haru_a3f2c1b0"])
+
+# 중요도 낮은 항목 일괄 삭제
+col.delete(where={"importance": {"$lt": 0.6}})
+```
+
+### 세계관 컬렉션 조회
+
+```python
+col_w = client.get_collection("world_knowledge")
+
+# 전체 청크 확인
+col_w.get()
+
+# 동적 생성 장소만 확인
+col_w.get(where={"source": {"$eq": "generated"}})
+```
+
+### 컬렉션 목록 확인
+
+```python
+[c.name for c in client.list_collections()]
+# → ['haru_memory', 'world_knowledge']  등
+```
+
+---
+
+## 7. 관련 파일 요약
+
+| 파일 | 역할 |
+|---|---|
+| `memory/long_term.py` | ChromaDB store/query (장기 기억) |
+| `memory/short_term.py` | 슬라이딩 윈도우 단기 버퍼 (VDB 미사용) |
+| `memory/summarizer.py` | N턴 요약 → 중요도 scoring → VDB 저장 |
+| `rag/index.py` | sources/*.md → world_knowledge 인덱싱 |
+| `rag/retrieve.py` | world_knowledge 시맨틱 검색 + 동적 upsert |
+| `rag/world_nav.py` | 이동 의도 감지 → 동적 장소 생성·저장 |
+| `conversation/core/router.py` | 한 턴 전체 흐름 조율 (VDB·RAG 모두 여기서 호출) |
+| `conversation/memory_act/M_schema.json` | 기억 항목 스키마 + 중요도 규칙 |
+| `chroma_dev/` | ChromaDB 런타임 데이터 (gitignore 권장) |
+| `rag/sources/world/` | 세계관 원본 문서 (인덱싱 소스) |
