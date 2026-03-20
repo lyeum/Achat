@@ -44,11 +44,11 @@ Achat/
 │   ├─ plan/
 │   │   ├─ phases.md                  ✅ Phase 0~7 실행 계획서
 │   │   ├─ training_개선.md           ✅ EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획
-│   │   ├─ UI설계.md                  ✅ QML + PySide6 UI 설계 상세 (1~6단계 구현 완료)
+│   │   ├─ UI설계-clear.md             ✅ QML + PySide6 UI 설계 상세 (1~6단계 구현 완료)
 │   │   └─ UI_테스트.md               ✅ UI 전체 수동 테스트 체크리스트 + 자동 테스트 실행 가이드
 │   └─ BUG/
-│       ├─ BUG_1.md                   ✅ 인수인계 문서 (환경 셋업, 해결된 이슈 기록)
-│       └─ BUG_small.md               ✅ 소규모 버그 수정 기록
+│       ├─ BUG_1-clear.md              ✅ 인수인계 문서 (환경 셋업, 해결된 이슈 기록)
+│       └─ BUG_small-clear.md          ✅ 소규모 버그 수정 기록
 │
 ├─ agent/
 │   ├─ __init__.py                    ✅ 패키지 초기화
