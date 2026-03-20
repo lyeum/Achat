@@ -37,15 +37,24 @@
 
 ### 배경 이미지
 
-- act별로 이미지가 있는 경우에만 표시, 없으면 기존 다크 배경 유지
-- 이미지 경로: `ui_ux/assets/backgrounds/{world_id}/{act_id}.png`
-- act 변경 시 `backgroundChanged(path)` 시그널로 QML에 전달
+- **표시 조건**: 현재 act의 `location` 값과 일치하는 이미지 파일이 존재할 때만 표시. 파일이 없으면 다크 배경 유지.
+- **이미지 경로**: `ui_ux/assets/background/{world_id}/{location}.png`
+  - `{location}`: YAML act의 `location` 필드값 (예: `beach`, `breakwater`)
+  - 같은 장소를 배경으로 하는 여러 act는 동일한 이미지를 공유함
+- act 변경 시 `backgroundChanged(url)` 시그널로 QML에 전달 (파일 없으면 빈 문자열)
+
+> **⚠️ 구현 주의**: `ConversationSession`은 `act_id`만 저장하고 `location`은 저장하지 않음.
+> `bridge.py::_build_bg_url()`이 현재 `act_id`를 파일명으로 사용하고 있으므로,
+> `location` 기준으로 동작하려면 world YAML에서 act_id → location을 역참조하는 로직이 필요함.
+
+> **현재 에셋 상태**: `background/Robby.png` (seaside_world 바닷가 마을 배경)는
+> `background/seaside_world/{location}.png` 경로로 이동/복사해야 반영됨.
 
 ### 설정 패널 (≡ 버튼 → 슬라이드인)
 
 - **캐릭터 변경**: `conversation/character/` 내 YAML 목록 표시 → 선택 시 핫스왑
 - **세계관 / 시나리오 선택**: `conversation/world/` 내 YAML 목록 표시 → act 선택 포함
-- **커스터마이징**: 캐릭터 외형 및 감정 효과 설정 (섹션 4 참조)
+- **커스터마이징**: 캐릭터 파츠 구성 설정 (섹션 4 참조)
 
 ---
 
@@ -57,7 +66,7 @@
 
 ```
 ┌────┐
-│ 🎭 │  ← 50×50, 커스터마이징된 캐릭터 아이콘
+│ 🎭 │  ← 50×50, 캐릭터 아이콘 (icons/{id}/{id}.png) + 감정 오버레이
 └────┘
 ```
 
@@ -79,7 +88,7 @@
 └────┘
 ```
 
-- 말풍선 위치: 아이콘 기준 위쪽 또는 왼쪽 (화면 경계 감지 후 자동 조정)
+- 말풍선 위치: 아이콘 기준 위쪽 (위로 확장)
 - 입력 후 전송 시 말풍선 유지하며 대화 지속
 - 일정 시간(기본 5초) 입력 없으면 말풍선 자동 닫힘
 
@@ -113,141 +122,175 @@ QML에서 `z` 값 + `clip: false`로 구현.
 
 ---
 
+### 아이콘 구성 (캐릭터당 기본 에셋)
+
+캐릭터 하나는 아래 이미지 세트로 구성된다. 개발자가 기본 제공하며, **사용자도 직접 등록 가능**.
+
+| 파일 | 내용 | 규격 |
+|---|---|---|
+| `{CharId}.png` | 전신샷 기본 아이콘 | `128 × 160 px` |
+| `emotion/neutral.png` | 감정 오버레이 — 무표정 | `128 × 160 px` (머리 영역 기준) |
+| `emotion/happy.png` | 감정 오버레이 — 기쁨 | 동일 |
+| `emotion/affectionate.png` | 감정 오버레이 — 애정 | 동일 |
+| `emotion/touched.png` | 감정 오버레이 — 감동 | 동일 |
+| `emotion/curious.png` | 감정 오버레이 — 호기심 | 동일 |
+| `emotion/sad.png` | 감정 오버레이 — 슬픔 | 동일 |
+| `emotion/embarrassed.png` | 감정 오버레이 — 당황 | 동일 |
+| `emotion/annoyed.png` | 감정 오버레이 — 짜증 | 동일 |
+| `emotion/angry.png` | 감정 오버레이 — 분노 | 동일 |
+
+> 감정 오버레이는 전신 이미지(`{CharId}.png`) 위에 얼굴 레이어로 얹히는 구조.
+> 개발자가 기본 에셋을 제공할 예정이며, 사용자가 직접 이미지를 등록해 교체하는 것도 가능.
+> 파일이 없으면 오버레이 없이 기본 아이콘만 표시.
+
+---
+
 ### 레이어 합성 구조
 
 아래 순서대로 위에 쌓임 (숫자 높을수록 앞에 표시).
 
 | 순서 | 레이어 | 경로 | 제공 방식 |
 |---|---|---|---|
-| 9 | 감정 효과 오버레이 | `effects/{mood}/overlay.png` | **개발자 제공** (기본) / 🧑 사용자 교체 가능 |
-| 8 | 악세서리 | `parts/accessory/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 7 | 앞머리 | `parts/hair_front/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 6 | 옷 | `parts/outfit/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 5 | 입 | `parts/mouth/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 4 | 눈썹 | `parts/eyebrow/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 3 | 눈 | `parts/eye/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 2 | 뒷머리 | `parts/hair_back/*.png` | **개발자 제공** / 🧑 사용자 선택 |
-| 1 | 얼굴형 + 몸통 베이스 | `parts/body/*.png` | **개발자 제공** / 🧑 사용자 선택 |
+| 7 | 감정 오버레이 | `icons/{CharId}/emotion/{mood}.png` | 개발자 기본 제공 / 🧑 사용자 교체 가능 |
+| 6 | 입 | `characters/mouth/*.png` | 개발자 제공 / 🧑 사용자 선택 |
+| 5 | 눈 | `characters/eye/*.png` | 개발자 제공 / 🧑 사용자 선택 |
+| 4 | 헤어 | `characters/hair/*.png` | 개발자 제공 / 🧑 사용자 선택 |
+| 3 | 의상 | `characters/cloth/*.png` | 개발자 제공 / 🧑 사용자 선택 |
+| 2 | 베이스 (얼굴+몸통) | `characters/base/*.png` | 개발자 제공 / 🧑 사용자 선택 |
+| 1 | 기본 아이콘 | `icons/{CharId}/{CharId}.png` | 개발자 기본 제공 / 🧑 사용자 등록 가능 |
 
-> 🧑 표시 항목은 커스터마이징 UI에서 사용자가 선택/교체 가능.
-> 선택하지 않으면 개발자 제공 default 적용.
-
----
-
-### 베이스 캐릭터 — 입력 방식 (선택)
-
-| 방식 | 설명 | 비고 |
-|---|---|---|
-| 파츠 조합 | 위 레이어 목록에서 파츠별 선택 | 개발자 제공 파츠 풀 사용 |
-| 🧑 PNG 직접 업로드 | 사용자가 `128 × 160 px` 이미지를 업로드 | 파츠 레이어 1~8을 단일 이미지로 대체. 감정 효과(레이어 9)는 그대로 얹힘 |
-
-- 저장 경로: `ui_ux/assets/characters/custom/base.png`
-- 파츠 선택 저장: `ui_ux/assets/characters/custom/parts.json`
-
-```json
-{
-  "body":       "body_01.png",
-  "hair_back":  "hair_back_02.png",
-  "eye":        "eye_03.png",
-  "eyebrow":    "eyebrow_01.png",
-  "mouth":      "mouth_02.png",
-  "outfit":     "outfit_01.png",
-  "hair_front": "hair_front_02.png",
-  "accessory":  null
-}
-```
-> `null`이면 해당 파츠 생략.
+> **레이어 우선순위**: 기본 아이콘(`icons/{id}/{id}.png`)이 로드되면 레이어 2~6(파츠 합성)은 건너뛰고 아이콘 위에 감정 오버레이(레이어 7)만 얹힘.
+> 기본 아이콘이 없으면 파츠 레이어 2~6을 순서대로 합성하고 감정 오버레이를 얹음.
+> **파츠 커스터마이징은 아이콘이 있어도 없어도 사용 가능하지만, 아이콘이 있는 경우 파츠는 무시됨.**
 
 ---
 
-### 감정 효과 — 입력 방식
+### 파츠 선택 — 커스터마이징 UI
 
-- mood 상태: `neutral` / `happy` / `annoyed` / `sad`
-- 기존 `agent/state.py`의 mood 값과 연동
-- 캔버스 규격: 동일 `128 × 160 px` 투명 PNG
-- 주로 머리 영역(`128 × 80 px`) 안에 표정/이펙트 배치
-
-| 항목 | 기본값 | 사용자 입력 |
-|---|---|---|
-| neutral 효과 | 개발자 제공 | 🧑 `128×160 px` PNG 업로드로 교체 가능 |
-| happy 효과 | 개발자 제공 | 🧑 동일 |
-| annoyed 효과 | 개발자 제공 | 🧑 동일 |
-| sad 효과 | 개발자 제공 | 🧑 동일 |
-
-- 커스텀 설정 저장: `ui_ux/assets/characters/custom/effects.json`
+- **CustomizationPanel**: 전체 오버레이 모달 (z:20)
+- 파츠 5종(base/hair/eye/mouth/cloth) 가로 스크롤 선택 버튼 (재클릭 시 선택 해제)
+- 저장 시 `saved(partsJson)` 시그널 emit
+- 파츠 선택 저장 경로: `ui_ux/assets/icons/{CharId}/parts.json`
 
 ```json
 {
-  "neutral": null,
-  "happy":   "custom_happy.png",
-  "annoyed": null,
-  "sad":     null
+  "base":  "base_01.png",
+  "hair":  "hair_02.png",
+  "eye":   "eye_03.png",
+  "mouth": "mouth_01.png",
+  "cloth": "cloth_02.png"
 }
 ```
-> `null`이면 개발자 제공 default 사용.
+> 해당 파츠를 선택하지 않으면 키 자체가 없음 (null 아님).
+
+---
+
+### 감정 오버레이
+
+mood 상태는 `agent/state.py::update_mood()`가 **사용자 입력 키워드**와 캐릭터 YAML의 `mood_triggers`를 매칭해 결정한다. 매 턴 LLM 응답 생성 후 자동 갱신.
+
+| mood | 한국어 | 트리거 키워드 예시 (CH_Haru 기준) |
+|---|---|---|
+| `neutral` | 무표정 | (기본값 — 매칭 없을 때) |
+| `happy` | 기쁨 | 좋아, 재밌어, 웃겨, 기뻐, 행복해 |
+| `affectionate` | 애정 | 좋아해, 보고 싶어, 곁에 있어줘 |
+| `touched` | 감동 | 고마워, 감동, 울컥, 따뜻하다 |
+| `curious` | 호기심 | 궁금해, 어떻게 생각해, 왜 그래, 알려줘 |
+| `sad` | 슬픔 | 슬퍼, 힘들어, 외로워, 우울해, 눈물 |
+| `embarrassed` | 당황 | 당황, 어색해, 갑자기 왜, 부끄 |
+| `annoyed` | 짜증 | 짜증, 싫어, 그만해, 됐어 |
+| `angry` | 분노 | 화났어, 열받아, 진짜 왜, 미치겠다 |
+
+- 캔버스 규격: `128 × 160 px` 투명 PNG (머리 영역에 표정 이미지 배치)
+- 경로: `ui_ux/assets/icons/{CharId}/emotion/{mood}.png`
+- 개발자가 캐릭터별 기본 에셋을 배치하며, 사용자도 직접 이미지를 등록해 교체 가능.
+- 파일이 없으면 오버레이 없이 기본 아이콘/파츠만 표시 (에러 없이 생략).
+- mood 변경은 affection 수치 변동도 연쇄 트리거함 (`update_affection()`).
 
 ---
 
 ## 5. Bridge 변경사항
 
-### 추가 Signal (Python → QML)
+### Signal (Python → QML)
 
 | 시그널 | 인자 | 용도 |
 |---|---|---|
-| `backgroundChanged` | `path: str` | act 변경 시 배경 이미지 경로 전달 |
-| `moodChanged` | `mood: str` | mood 변경 시 감정 효과 레이어 교체 |
+| `messageAdded` | `role: str, content: str` | 새 메시지 추가 |
+| `statusChanged` | `status: str` | `"thinking"` \| `"ready"` |
+| `characterNameChanged` | `name: str` | 캐릭터 이름 변경 |
+| `backgroundChanged` | `url: str` | act 변경 시 배경 이미지 file URL (장소 이미지 없으면 `""`) |
+| `moodChanged` | `mood: str` | mood 변경 시 감정 상태 문자열 |
 
-### 추가 Slot (QML → Python)
+### Property (Python → QML)
+
+| 프로퍼티 | 타입 | 용도 |
+|---|---|---|
+| `characterName` | `str` | 현재 캐릭터 이름 |
+| `characterId` | `str` | 현재 캐릭터 ID (폴더명 기준) |
+| `currentBackground` | `str` | 현재 배경 이미지 file URL |
+| `currentMood` | `str` | 현재 mood 문자열 |
+
+### Slot (QML → Python)
 
 | 슬롯 | 인자 | 반환 | 용도 |
 |---|---|---|---|
-| `getCharacterList` | — | `list[str]` | 사용 가능한 캐릭터 ID 목록 |
-| `getWorldList` | — | `list[dict]` | 세계관 및 시나리오 목록 |
-| `changeWorld` | `world_id, scenario_id` | — | 세계관 / 시나리오 전환 |
-| `saveCustomization` | `json_data: str` | — | 커스터마이징 설정 저장 |
-| `loadCustomization` | — | `str` | 커스터마이징 설정 불러오기 |
+| `sendMessage` | `text: str` | — | 사용자 메시지 전송 |
+| `snapToEdge` | `x, y, w, h: int` | `list[int]` | PIP 모서리 스냅 좌표 계산 |
+| `getCharacterList` | — | `str` (JSON) | `[{id, name}, ...]` 목록 |
+| `getWorldList` | — | `str` (JSON) | `[{world_id, description, scenarios}, ...]` 목록 |
+| `changeCharacter` | `char_id: str` | — | 캐릭터 핫스왑 |
+| `changeWorld` | `world_id, scenario_id, act_id: str` | — | 세계관 / act 전환 → `_build_bg_url()`이 location 역참조 후 배경 갱신 |
+| `loadCustomization` | — | `str` (JSON) | `{parts, icon_url, char_id}` 반환 |
+| `saveCustomization` | `json_data: str` | — | `{parts}` → `icons/{char_id}/parts.json` 저장 |
+| `getAllPartsList` | — | `str` (JSON) | `{base, hair, eye, mouth, cloth}` 파일 목록 |
 
 ---
 
 ## 6. 에셋 디렉토리 구조
 
-> 🧑 = 사용자가 직접 제공하는 파일이 저장되는 경로
+> 🧑 = 사용자 커스터마이징 결과가 저장되는 경로
 > 그 외 = 개발자가 사전 제작하여 제공
 
 ```
 ui_ux/assets/
-├─ backgrounds/
+├─ background/                       ← 개발자 제공, 장소별 배경 이미지
 │   └─ {world_id}/
-│       └─ {act_id}.png              ← 개발자 제공, act별 배경 이미지
-│                                       (없으면 다크 배경 유지)
+│       └─ {location}.png           ← YAML act의 location 필드값이 파일명
+│                                      (없으면 다크 배경 유지)
 │
-├─ characters/
-│   ├─ parts/                        ← 개발자 제공 파츠 풀 (128×160 px PNG)
-│   │   ├─ body/
-│   │   │   └─ body_01.png, ...
-│   │   ├─ hair_back/
-│   │   ├─ eye/
-│   │   ├─ eyebrow/
-│   │   ├─ mouth/
-│   │   ├─ outfit/
-│   │   ├─ hair_front/
-│   │   └─ accessory/
-│   │
-│   └─ custom/                       ← 🧑 사용자 커스터마이징 저장 경로
-│       ├─ base.png                  ← 🧑 PNG 직접 업로드 시 저장 (128×160 px)
-│       ├─ parts.json                ← 파츠 조합 선택 저장
-│       └─ effects.json             ← mood별 커스텀 효과 선택 저장
+│   예시 (seaside_world):
+│       background/seaside_world/beach.png       ← act_1 (location: beach)
+│       background/seaside_world/breakwater.png  ← act_2 (location: breakwater)
 │
-├─ effects/                          ← 개발자 제공 기본 감정 효과 (128×160 px PNG)
-│   ├─ neutral/overlay.png
-│   ├─ happy/overlay.png
-│   ├─ annoyed/overlay.png
-│   ├─ sad/overlay.png
-│   └─ custom/                       ← 🧑 사용자가 업로드한 커스텀 효과 이미지
-│       └─ *.png
+├─ characters/                       ← 개발자 제공 파츠 풀 (128×160 px PNG)
+│   ├─ base/
+│   │   └─ base_01.png, ...
+│   ├─ hair/
+│   ├─ eye/
+│   ├─ mouth/
+│   └─ cloth/
 │
-└─ icons/                            ← 앱 아이콘
+└─ icons/                            ← 캐릭터별 완성 이미지 + 감정 오버레이
+    └─ {CharId}/
+        ├─ {CharId}.png             ← 완성된 캐릭터 기본 아이콘 (개발자/사용자 제공)
+        ├─ parts.json               ← 🧑 사용자 파츠 선택 저장 (커스터마이징 결과)
+        └─ emotion/
+            ├─ neutral.png          ← 개발자 기본 제공 / 🧑 사용자 교체 가능 (현재 비어있음)
+            ├─ happy.png
+            ├─ affectionate.png
+            ├─ touched.png
+            ├─ curious.png
+            ├─ sad.png
+            ├─ embarrassed.png
+            ├─ annoyed.png
+            └─ angry.png
 ```
+
+> ⚠️ 설계 초안 대비 변경사항:
+> - `backgrounds/` → `background/` (단수형)
+> - `characters/parts/{8타입}/` → `characters/{5타입}/` (`parts/` 중간 디렉토리 없음)
+> - `characters/custom/` 경로 제거 → 사용자 커스터마이징 결과는 `icons/{CharId}/parts.json`에 저장
+> - `effects/{mood}/overlay.png` 경로 제거 → 감정 오버레이는 `icons/{CharId}/emotion/{mood}.png`
 
 ---
 
@@ -257,12 +300,12 @@ ui_ux/assets/
 |---|---|
 | `ui_ux/qml/PipWindow.qml` | PIP 마스코트 모드 (아이콘 + 말풍선) |
 | `ui_ux/qml/SettingsPanel.qml` | 슬라이드인 설정 패널 |
-| `ui_ux/qml/CustomizationPanel.qml` | 커스터마이징 편집 UI |
+| `ui_ux/qml/CustomizationPanel.qml` | 커스터마이징 편집 UI (파츠 선택) |
 | `ui_ux/qml/CharacterDisplay.qml` | 레이어 합성 캐릭터 표시 컴포넌트 |
 
 ---
 
-## 8. 구현 순서 (권장)
+## 8. 구현 순서
 
 ```
 1단계 — 배경 이미지 연동 ✅ 완료 (2026-03-19)
@@ -277,19 +320,137 @@ ui_ux/assets/
     pyproject.toml         — ruff exclude에 **/*.qml 추가
 
   에셋 배치 경로 (이미지 준비되면 넣으면 바로 반영):
-    ui_ux/assets/backgrounds/{world_id}/{act_id}.png
+    ui_ux/assets/background/{world_id}/{act_id}.png
 
-2단계 — PIP 마스코트 모드
-  - main.qml 주황 버튼 동작 변경 (isBubble → pip 모드)
-  - PipWindow.qml 구현 (아이콘 + 말풍선 팝업)
-  - moodChanged 시그널 연동
+2단계 — PIP 마스코트 모드 ✅ 완료 (2026-03-20)
+  - PipWindow.qml 신규 구현
+      · 50×50 캐릭터 아이콘 (characterId 기반 icons/{id}/{id}.png + 감정 오버레이)
+      · 에셋 없으면 mood별 이모지 플레이스홀더
+      · 말풍선: 메시지 4줄 + 입력창 + 전송 버튼 + 풀창복귀(주황) 버튼 + 꼬리 삼각형
+      · 5초 자동 닫힘 타이머
+      · 클릭으로 말풍선 토글 / assistant 응답 시 자동 표시
+  - main.qml 변경
+      · isBubble 크기: 50×50 (말풍선 시 240×190으로 동적 확장)
+      · y + height 동시 NumberAnimation (yAnim/heightAnim) — Behavior 단독 사용 시 아이콘 들뜨는 버그 수정
+      · bubbleOpen 바인딩 루프 제거: onPipBubbleOpenChanged에서 단방향 동기화
+      · inputReady 프로퍼티 도입 (풀창/PIP 공유)
+      · 컨테이너 color transparent + clip false (PIP 투명 배경)
+  - qmldir에 PipWindow 1.0 등록
 
-3단계 — 설정 패널
-  - SettingsPanel.qml 구현
-  - getCharacterList / getWorldList / changeWorld 슬롯 추가 (bridge.py)
+  구현 파일:
+    ui_ux/qml/PipWindow.qml   — PIP 마스코트 컴포넌트 (신규)
+    ui_ux/qml/main.qml        — PIP 모드 통합, 크기/위치 로직, 바인딩 루프 수정
+    ui_ux/qml/qmldir          — PipWindow 등록
 
-4단계 — 커스터마이징
-  - CharacterDisplay.qml 구현 (레이어 합성)
-  - CustomizationPanel.qml 구현
-  - saveCustomization / loadCustomization 슬롯 추가 (bridge.py)
+  테스트 체크리스트:
+    docs/plan/UI_테스트.md     — 1단계 + 2단계 항목 포함
+
+3단계 — 설정 패널 ✅ 완료 (2026-03-20)
+  - SettingsPanel.qml 신규 구현
+      · 오른쪽 슬라이드인 오버레이 (z:10, 딤 배경 클릭으로 닫기)
+      · 캐릭터 섹션: getCharacterList() 결과로 버튼 목록 → 클릭 시 changeCharacter
+      · 시나리오 섹션: getWorldList() 결과를 flat 배열로 가공 → act 버튼 → 클릭 시 changeWorld
+        (중첩 Repeater parent scope 버그 방지를 위해 flat model 사용)
+      · inline component(SectionLabel, SettingsButton)로 재사용 구조
+  - bridge.py 슬롯 추가
+      · getCharacterList() → conversation/character/CH_*.yaml 스캔, JSON 반환
+      · getWorldList()     → conversation/world/W_*.yaml 스캔, JSON 반환
+      · changeWorld(world_id, scenario_id, act_id) → world/session/router 교체
+  - main.qml 변경
+      · settingsOpen / charListJson / worldListJson 프로퍼티 추가
+      · 타이틀바에 ≡ 버튼 추가 (클릭 시 목록 갱신 후 패널 오픈)
+      · SettingsPanel 인스턴스 컨테이너 안 z:10 오버레이로 배치
+  - qmldir에 SettingsPanel 1.0 등록
+
+  구현 파일:
+    ui_ux/qml/SettingsPanel.qml  — 설정 패널 컴포넌트 (신규)
+    ui_ux/qml/main.qml           — ≡ 버튼, SettingsPanel 연동
+    ui_ux/qml/qmldir             — SettingsPanel 등록
+    ui_ux/bridge.py              — getCharacterList / getWorldList / changeWorld 슬롯
+
+4단계 — 커스터마이징 ✅ 완료 (2026-03-20)
+  - CharacterDisplay.qml 신규 구현
+      · characterId 기반 icons/{id}/{id}.png 로드 → 성공 시 파츠 합성 생략
+      · 파츠 합성: base → cloth → hair → eye → mouth (5레이어)
+      · 감정 오버레이: icons/{id}/emotion/{mood}.png (파일 없으면 생략)
+      · 파츠/아이콘 모두 없을 때 mood별 이모지 플레이스홀더
+  - CustomizationPanel.qml 신규 구현
+      · 전체 오버레이 모달 (z:20)
+      · 파츠 5종(base/hair/eye/mouth/cloth) 가로 스크롤 선택 버튼 (재클릭 시 해제)
+      · 감정 효과 탭 없음 (개발자 전용 — UI에서 제외)
+      · 저장 시 saved(partsJson) 시그널 emit
+      · ListView delegate에서 ListView.view.outerKey / outerSelected 사용
+        (delegate 내 parent scope 버그 방지)
+  - bridge.py 슬롯 추가
+      · loadCustomization()     → {parts, icon_url, char_id} JSON 반환
+                                   저장 경로: icons/{char_id}/parts.json
+      · saveCustomization(json) → {parts} → icons/{char_id}/parts.json 저장
+      · getAllPartsList()        → {base, hair, eye, mouth, cloth} 파일 목록 반환
+                                   스캔 경로: characters/{type}/*.png
+      · characterId Property    → bridge.characterId로 QML에서 직접 접근 가능
+  - main.qml 변경
+      · customizationOpen / customPartsJson / allPartsListJson 프로퍼티
+        (초안의 customEffectsJson / customBasePngUrl 제거)
+      · Component.onCompleted에서 loadCustomization() 초기 로드 (bridge null 가드 포함)
+      · CharacterDisplay: 채팅 영역 Item 안 z:2, bottomMargin:-40 (입력창 40px 오버랩)
+        characterId: bridge ? bridge.characterId : "" 바인딩
+      · PipWindow: characterId: bridge ? bridge.characterId : "" 바인딩
+      · CustomizationPanel onSaved: saved(partsJson) 단일 인자로 변경
+  - qmldir에 CharacterDisplay, CustomizationPanel 등록
+
+  구현 파일:
+    ui_ux/qml/CharacterDisplay.qml    — 레이어 합성 캐릭터 (신규)
+    ui_ux/qml/CustomizationPanel.qml  — 커스터마이징 편집 UI (신규)
+    ui_ux/qml/SettingsPanel.qml       — 커스터마이징 버튼 추가
+    ui_ux/qml/main.qml                — CharacterDisplay/CustomizationPanel 연동
+    ui_ux/qml/qmldir                  — 신규 컴포넌트 등록
+    ui_ux/bridge.py                   — loadCustomization / saveCustomization / getAllPartsList / characterId 슬롯
+
+  에셋 배치 경로:
+    ui_ux/assets/characters/{base|hair|eye|mouth|cloth}/*.png   ← 개발자 파츠 풀
+    ui_ux/assets/icons/{CharId}/{CharId}.png                    ← 완성 캐릭터 이미지
+    ui_ux/assets/icons/{CharId}/emotion/{mood}.png              ← 감정 오버레이 (차후 추가)
+    ui_ux/assets/background/{world_id}/{location}.png           ← 배경 이미지 (location 기반)
+
+5단계 — 배경 이미지 location 기반 전환 ✅ 완료 (2026-03-20)
+  현황:
+    - bridge.py::_build_bg_url()이 session.act_id를 파일명으로 사용 중
+      → background/{world_id}/{act_id}.png 탐색 (예: act_1.png)
+    - 설계 기준은 location 값이 파일명 (예: beach.png, breakwater.png)
+    - ConversationSession에 location 필드 없음 → YAML 역참조 필요
+
+  구현 내용:
+    - bridge.py::_build_bg_url() 수정
+        · world YAML을 로드해 현재 act_id에 해당하는 location 필드 조회
+        · world_load.py의 load_world() + get_act() 헬퍼 활용
+        · 경로: background/{world_id}/{location}.png
+        · location이 없는 act이거나 파일이 없으면 빈 문자열 반환
+
+  구현 파일:
+    ui_ux/bridge.py  — _build_bg_url() 수정 (act_id → location 역참조)
+
+  에셋 준비 (코드 수정 후 이미지 배치):
+    ui_ux/assets/background/seaside_world/beach.png       ← act_1 (location: beach)
+    ui_ux/assets/background/seaside_world/breakwater.png  ← act_2 (location: breakwater)
+
+6단계 — mood 8종 전체 대응 ✅ 완료 (2026-03-20)
+  현황:
+    - CharacterDisplay.qml, PipWindow.qml 이모지 플레이스홀더가 4종만 처리
+      (neutral / happy / annoyed / sad)
+    - 실제 mood는 8종 (neutral / happy / affectionate / touched / curious /
+      sad / embarrassed / annoyed / angry)
+    - session.py mood 주석도 4종으로 기재되어 있어 불일치
+
+  구현 내용:
+    - CharacterDisplay.qml 플레이스홀더 Text 블록 수정
+        · affectionate → 🥰  touched → 🥹  curious → 🤔
+        · embarrassed → 😳  angry → 😠
+    - PipWindow.qml 플레이스홀더 Text 블록 동일하게 수정
+    - session.py mood 주석 8종으로 업데이트
+      neutral / happy / affectionate / touched / curious / sad / embarrassed / annoyed / angry
+
+  구현 파일:
+    ui_ux/qml/CharacterDisplay.qml  — 이모지 플레이스홀더 8종
+    ui_ux/qml/PipWindow.qml         — 이모지 플레이스홀더 8종
+    conversation/core/session.py    — mood 주석 정비
 ```

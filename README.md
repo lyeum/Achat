@@ -261,8 +261,14 @@ Achat/
 │
 ├─ training/                       # LoRA 파인튜닝
 │   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, GPU/CPU 자동 전환)
+│   ├─ train_monitor.py           # 학습 모니터링 래퍼 — 과적합 감지 시 조기 종료 + VRAM 해제
 │   ├─ dataset.py                 # 데이터셋 로더 (ChatML, stratified sampling)
 │   ├─ 학습.md                    # 학습 가이드 (구조 분석, 실행법, 개선안)
+│   ├─ eval/                      # 학습 결과 검증 스크립트
+│   │   ├─ ai_tell_checker.py     # AI투 표현 패턴 측정 (학습 후 자동 실행)
+│   │   ├─ memory_test.py         # 기억 유지 정확도 (5케이스, 자동 실행)
+│   │   ├─ speed_bench.py         # 추론 속도 벤치마크 (수동)
+│   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 12턴 (수동)
 │   ├─ data/                      # 학습 데이터 (2,167건, 26파일)
 │   │   ├─ affection/             # 친밀도 단계별 (6단계: stranger~intimate)
 │   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow
@@ -271,7 +277,7 @@ Achat/
 │   └─ log/                       # MVP 대화 로그 수집 (카테고리별 JSONL)
 │
 ├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
-│   └─ LoRA_v7/adapter/           # 현재 적용 중 (eval best 1.687, assistant-only loss)
+│   └─ lora_v1/checkpoint-1/      # ⚠️ 실제 저장 경로 (config.py는 LoRA_v7/adapter 참조 — 불일치)
 │
 ├─ data/
 │   └─ lora/
@@ -282,10 +288,6 @@ Achat/
 │   ├─ merge_lora.py              # LoRA 병합
 │   └─ convert_to_gguf.sh         # GGUF 변환 + 양자화
 │
-├─ eval/                           # 평가 스크립트 (Phase 5 이후)
-│   ├─ ai_tell_checker.py         # 이질감 자동 감지
-│   ├─ memory_test.py             # 메모리 정확도 측정
-│   └─ speed_bench.py             # 추론 속도 벤치마크
 │
 ├─ main.py                         # 진입점
 ├─ config.py                       # 환경 설정 (dev / deploy 분기)
@@ -300,7 +302,7 @@ Achat/
 
 | 단계 | 실현 가능성 | 비고 |
 |---|---|---|
-| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v7 학습 완료 |
+| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, lora_v1 학습 완료 (LoRA_v7 진행 중) |
 | LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
 | GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
 | Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
@@ -392,7 +394,8 @@ Achat/
 - [x] `training/dataset.py` — 데이터셋 로더 (apply_chat_template, stratified sampling)
 - [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환), v7~: assistant 토큰 마스킹
 - [x] `training/학습.md` — 학습 구조 리뷰, 실행 가이드, 개선안 (EWC/카테고리 가중치)
-- [x] `eval/ai_tell_checker.py` / `eval/memory_test.py` / `eval/speed_bench.py` 구현
+- [x] `training/eval/ai_tell_checker.py` / `training/eval/memory_test.py` / `training/eval/speed_bench.py` / `training/eval/verify_phases.py` 구현 (구 `eval/` 폴더에서 `training/eval/`로 이동)
+- [x] `training/train_monitor.py` — 과적합 모니터링 + 조기 종료 + VRAM 해제 래퍼 구현
 - [x] CPU smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
 - [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 2,167건, assistant masking, eval best 1.687)
 
@@ -421,7 +424,7 @@ Achat/
 - [x] `tools/folder/renamer.py` — 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
 - [x] `tools/prompt_converter.py` — 프롬프트 변환 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형)
 - [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적)
-- [ ] `tools/search/web_search.py` — DuckDuckGo / SearXNG 연동 ← 네트워크 의존, 보류
+- [x] `tools/search/web_search.py` — DuckDuckGo Instant Answer API 연동 구현
 - [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 + 키워드 기반 도구 선택
 
 ---
@@ -435,9 +438,9 @@ Achat/
 | VRAM | 8GB | 3B QLoRA 학습 가능, gradient_checkpointing 필수 |
 | 시스템 RAM | 8GB | LoRA 병합 시 타이트 (다른 프로세스 종료 권장) |
 | OS | Linux | — |
-| CUDA | **12.8+** | RTX 50 시리즈 BitsAndBytes 대응 버전 |
+| CUDA | **12.8+** | RTX 50 시리즈 대응 버전 |
 | Python | 3.10+ | 3.11 권장 |
-| bitsandbytes | **>=0.44.0** | Blackwell SM 10.x 지원 버전 |
+| bitsandbytes | 미사용 | Blackwell SM 10.x 미지원 — bfloat16 풀 파라미터로 대체 |
 
 ### 배포 환경 (추론)
 | 항목 | 최소 | 권장 |
@@ -584,7 +587,7 @@ GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
 - **LoRA 병합 RAM**: 3B FP16 병합에 ~6GB 소모. 실행 전 브라우저/기타 프로세스 종료 필수.
   OOM 발생 시 `low_cpu_mem_usage=True`, `device_map="cpu"` 옵션 사용.
 - **RTX 5060 Ti BitsAndBytes**: Blackwell SM 10.x 4-bit 양자화 미지원 → **bfloat16 풀 파라미터 + LoRA 방식** 채택.
-  VRAM ~10GB 사용. OOM 시 `--max_length 256` 또는 `--grad_accum 16`.
+  학습 중 VRAM ~7.7GB(≈96%) 사용. OOM 시 `--max_length 256` 또는 `--grad_accum 16`.
 - **한국어 토큰 비용**: 영어 대비 2~3배 소모. 컨텍스트 패킹 시 반드시 반영.
 - **CPU 추론 속도**: 3B Q4_K_M 기준 8~15 tok/s. 스트리밍 출력으로 체감 속도 보완.
 - **fcitx 잔재 주의**: 이전에 fcitx를 사용했던 환경이라면 `~/.bashrc`에 `QT_IM_MODULE=fcitx`가 남아 있을 수 있음.
