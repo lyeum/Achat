@@ -14,8 +14,8 @@
 ### 작업 목록
 
 #### 0-1. `pyproject.toml` 작성 (Linux + GPU 환경, uv 기반) ✅
-주요 의존성: transformers, peft, bitsandbytes>=0.44.0 (Blackwell 대응), accelerate,
-sentence-transformers (bge-m3), chromadb, PyYAML, loguru, tqdm, rich, datasets
+주요 의존성: transformers, peft, bitsandbytes 미사용 (Blackwell SM 10.x 미지원), accelerate,
+sentence-transformers (bge-m3), chromadb, PyYAML, loguru, tqdm, rich, datasets, pytest (dev)
 PyTorch CUDA 12.8 빌드는 `[tool.uv.sources]` 설정으로 자동 처리.
 
 #### 0-2. `pyproject-deploy.toml` 작성 (Windows + CPU 환경, uv 기반) ✅
@@ -144,7 +144,7 @@ def get_recent(dialogue_log: list, n: int = 5) -> list:
 - 임베딩: `SentenceTransformer("BAAI/bge-m3")`
 - `store(entry: dict)` — M_schema.json 구조 준수
 - `query(text: str, character_id: str) -> list`
-  - 유사도 < 0.7 → 빈 리스트 반환
+  - 유사도 < 0.52 → 빈 리스트 반환
   - `where={"importance": {"$gte": 0.5}}` 필터
   - top-2 반환
 
@@ -222,7 +222,7 @@ return response
 #### 3-2. `rag/retrieve.py`
 - `WorldRetriever(config)` 클래스 — `query(text: str) -> list[str]`
   - bge-m3 임베딩 → ChromaDB 검색
-  - 유사도 < 0.7 → 빈 리스트 반환
+  - 유사도 < 0.52 → 빈 리스트 반환
   - 컬렉션 미존재(인덱싱 전) → 빈 리스트 반환 (안전 처리)
   - **키워드 트리거 방식 사용 안 함** — 매 턴 실행
 
@@ -267,8 +267,10 @@ main.py
 
 #### 4-1. `ui_ux/bridge.py` — Python↔QML 브리지
 - `ChatBridge(QObject)` — QML context property `bridge`로 등록
-- Signal (Python→QML): `messageAdded(role, content)`, `statusChanged(status)`, `characterNameChanged(name)`
-- Slot (QML→Python): `sendMessage(text)`, `snapToEdge(x,y,w,h) -> list`, `changeCharacter(id)`
+- Signal: `messageAdded` / `statusChanged` / `characterNameChanged` / `backgroundChanged` / `moodChanged`
+- Slot: `sendMessage` / `snapToEdge` / `changeCharacter` / `changeWorld`
+       `loadCustomization` / `saveCustomization` / `getAllPartsList`
+- `_build_bg_url()`: act_id → location 역참조 후 `{location}.png` 탐색
 
 #### 4-2. `ui_ux/chat_panel.py` — LLMWorker
 - `LLMWorker(QThread)` — `agent.chat(stream=False)` 비동기 실행
@@ -292,12 +294,28 @@ main.py
 #### 4-5. `ui_ux/qml/ChatBubble.qml` — 말풍선 컴포넌트
 - `role` 프로퍼티로 좌/우 정렬 및 색상 분기
 
+#### 4-5-1. `ui_ux/qml/PipWindow.qml` — PIP 마스코트 모드
+- 50×50 아이콘 + 위로 확장 말풍선, mood 이모지 플레이스홀더
+- 5초 자동 닫힘 / expandRequested 시그널
+
+#### 4-5-2. `ui_ux/qml/SettingsPanel.qml` — 설정 패널
+- 캐릭터·세계관·act 선택, 커스터마이징 열기 버튼
+- z:10 오른쪽 슬라이드인
+
+#### 4-5-3. `ui_ux/qml/CharacterDisplay.qml` — 캐릭터 표시
+- 레이어 합성: icons/{id}/{id}.png 우선 → 없으면 5레이어 파츠 합성
+- 감정 오버레이: icons/{id}/emotion/{mood}.png
+
+#### 4-5-4. `ui_ux/qml/CustomizationPanel.qml` — 커스터마이징 패널
+- 파츠 5종(base/hair/eye/mouth/cloth) 가로 스크롤
+- delegate scope 버그 방지 (outerKey/outerSelected 패턴)
+
 #### 4-6. `ui_ux/tray.py` — 시스템 트레이
 - 열기/숨기기, 캐릭터 변경(`bridge.changeCharacter()`), 종료
 
 #### 4-7. `ui_ux/qml/Style.qml` — 디자인 토큰 (추가)
 - `pragma Singleton` — 색상(bgWindow/Bubble/User/Assistant), 폰트 패밀리/크기, 간격/반지름, 애니메이션 ms, 불투명도, 기본 크기 상수
-- `qmldir`에 `singleton Style 1.0 Style.qml` 등록
+- `qmldir`에 Style / ChatBubble / PipWindow / SettingsPanel / CharacterDisplay / CustomizationPanel 등록
 
 #### 4-8. `ui_ux/assets/` — 에셋 디렉토리 (추가)
 - `icons/` — 앱 아이콘 PNG (tray.py `_make_default_icon()` fallback 교체용)
@@ -312,7 +330,9 @@ main.py
 - [x] `mode_switcher.py` 제거 — QML 모드 전환 버튼으로 대체
 - [x] (WSL2 dev 검증) 플로팅 윈도우 표시, 전체 창 드래그, 대화 동작 확인
 - [x] (WSL2 dev 검증) 메시지 전송 → LLMWorker 비동기 응답 → ListView 추가
-- [ ] (미해결) 한글 입력 — Ubuntu 22.04 + fcitx5-hangul 필요 (현재 20.04)
+- [x] 한글 입력 해결 — Ubuntu 24.04 + ibus-hangul, Ctrl+Space 자동 등록 (BUG_1-clear.md 참조)
+- [x] `PipWindow.qml` / `SettingsPanel.qml` / `CharacterDisplay.qml` / `CustomizationPanel.qml` 구현
+- [x] 자동화 테스트 79건 (test_bridge_slots.py 26건 + test_ui_structure.py 53건) 전부 통과
 - [ ] (미검증) hover 투명도 전환, 버블 축소/확장 애니메이션 (Windows 배포 환경)
 
 ### WSL2 dev 환경 실행 이슈 및 해결
@@ -322,7 +342,7 @@ main.py
 | 한글 폰트 깨짐 | Malgun Gothic이 Linux에 없음 | `FontLoader`로 Windows 폰트 직접 로드 |
 | 버튼 안 먹힘 | 전체 창 MouseArea가 이벤트 가로챔 | `DragHandler + startSystemMove()`로 교체 |
 | 창 안 보임 | `Qt.Tool` 플래그 + opacity 0.25 | Tool 제거, `Component.onCompleted` 위치 설정 |
-| 한글 입력 불가 | Ubuntu 20.04에 fcitx5-hangul 없음 | Ubuntu 22.04 필요 |
+| 한글 입력 불가 | ibus switch-keys에 Control+space 미등록 | main.py `_ensure_ibus_hangul()`이 자동 등록 — BUG_1-clear.md 참조 |
 
 ---
 
@@ -376,11 +396,16 @@ def load_training_data(data_dir: str, model_name: str, tokenizer):
 
 #### 5-4. 평가 실행 (eval/)
 ```bash
-python eval/ai_tell_checker.py
-python eval/memory_test.py
-python eval/speed_bench.py --backend transformers
+python training/eval/ai_tell_checker.py
+python training/eval/memory_test.py
+python training/eval/speed_bench.py --backend transformers
 ```
 - 학습후보.md 섹션 4-3 양식으로 결과 기록
+
+#### 5-5-1. `training/train_monitor.py` — 학습 모니터링 래퍼
+- 학습 명령어를 받아 subprocess로 lora_train.py 실행
+- trainer_state.json 폴링 → 과적합 감지 시 SIGTERM + VRAM 해제
+- 출력: 학습 상황 / 종료 조건 / 입력 명령어 (7-9절 참조)
 
 #### 5-5. `training/학습.md`
 - Step 0 (사전 확인) ~ Step 6 (기존 데이터 직접 학습) 단계별 실행 가이드
@@ -394,9 +419,12 @@ python eval/speed_bench.py --backend transformers
 - [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, --eval_split best loss 저장, --weight_decay/--lora_dropout/--max_samples 과적합 억제 옵션, epoch/완료 시 loss 그래프 PNG 자동 저장, v7~: assistant 토큰 마스킹 (system/user -100, assistant 구간만 loss)
 - [x] `training/학습.md` — 학습 루프 흐름, 실행 방법, 실시간 모니터링, 인자 전체 목록, 과적합 분석 매뉴얼, 학습 구조 리뷰, 개선안 (EWC/카테고리 가중치/KL 보류)
 - [x] `docs/plan/training_개선.md` — EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획 (상세 설계)
-- [x] `eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교 (F541 버그 수정)
-- [x] `eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
-- [x] `eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
+- [x] `training/eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교 (F541 버그 수정)
+- [x] `training/eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
+- [x] `training/eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
+- [x] `training/eval/verify_phases.py` — Phase 2/3 실환경 검증 (12턴 자동 대화, 수동 실행)
+- [x] `training/train_monitor.py` — 과적합 조기 종료 + VRAM 해제 래퍼 구현
+- [x] `training/lora_train.py` — VRAM 완전 해제 블록 + `--skip_eval` 인자 추가, training/eval/ 자동 실행
 - [x] CPU 파이프라인 smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
 - [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 전체 2,167건 중 max_samples=-1, assistant masking, eval best 1.687)
   - ⚠️ v7 이후 loss는 assistant-only 기준 — v6 이전(전체 토큰 loss)과 직접 비교 불가
@@ -453,7 +481,7 @@ python eval/speed_bench.py --backend transformers
 ## Phase 7 — 기능 모드 도구 구현
 
 > 목표: 폴더 정리 / 프롬프트 변환 / 검색엔진 마이크로서비스 구현 + agent/core 연동
-> 선행 조건: Phase 2 (`agent/core.py` 기본 구조), Phase 4 (`mode_switcher.py` UI)
+> 선행 조건: Phase 2 (`agent/core.py` 기본 구조 및 기능 모드 분기)
 > 참고: Phase 5 학습 데이터의 기능 모드 JSON 예시와 연동
 
 ### 구현 순서
@@ -623,7 +651,7 @@ Phase 0 (환경/설정)
 
 - Phase 4는 `agent.chat()` 인터페이스만 있으면 Phase 2/3와 병렬 진행 가능
 - Phase 5/6는 대화 엔진 완성과 무관하게 데이터 준비 후 진행 가능
-- Phase 7은 Phase 2의 `agent/core.py` 기본 구조와 Phase 4의 `mode_switcher.py`가 있으면 진행 가능
+- Phase 7은 Phase 2의 `agent/core.py` 기본 구조가 있으면 진행 가능 (Phase 4와 병렬 진행 완료)
 - Phase 8은 Phase 2/3 완료 후 진행, training/log 수집 데이터가 Phase 5 파인튜닝 입력으로 순환
 
 ---

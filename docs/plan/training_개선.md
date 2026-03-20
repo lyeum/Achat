@@ -1,7 +1,20 @@
 # 학습 개선 구현 계획
 
 > 참조: [training/학습.md](../../training/학습.md) § 7. 학습 개선안
-> 우선순위: 7-2 EWC → 7-3 카테고리 가중치 → 7-1 Loss 마스킹 → 7-4 KL (보류)
+>
+> | 항목 | 상태 |
+> |---|---|
+> | 7-1 Assistant 토큰 마스킹 | ✅ 완료 (lora_train.py v7~) |
+> | 7-2 EWC 다단계 연속 학습 | 🔲 미구현 — `training/ewc.py` 신설 필요 |
+> | 7-3 카테고리 가중치 샘플링 | 🔲 미구현 — `dataset.py` 수정 필요 |
+> | 7-4 KL Divergence 규제 | ⏸ 보류 — DPO 파이프라인 구축 후 검토 |
+> | 7-5 VRAM 절감 기법 | 📄 문서화 완료 — 적용 실험 대기 |
+> | 7-6 스케줄러 전략 (WSD 등) | 📄 문서화 완료 — 적용 실험 대기 |
+> | 7-7 데이터 구성 전략 | ✅ 실측 기반 권장 설정 확정 |
+> | 7-8 캐릭터 챗봇 실무 접근법 | 📄 문서화 완료 (SFT→DPO, ORPO, Curriculum) |
+> | 7-9 학습 모니터링 조기 종료 | ✅ 완료 (`training/train_monitor.py`) |
+>
+> **다음 구현 우선순위: 7-2 EWC → 7-3 카테고리 가중치**
 
 ---
 
@@ -162,52 +175,20 @@ raw_ds = load_training_data(..., category_weights=category_weights)
 
 ## 3. ~~Assistant 토큰 마스킹~~ ✅ 완료 (lora_train.py v7~)
 
-### 3-1. 마스킹 방식
+### 구현 결과
+
+`lora_train.py`의 `tokenize_dataset()` 내 `_mask_labels()` 함수로 구현 완료.
 
 ```
 Qwen2.5 ChatML 포맷 기준:
-  <|im_start|>system\n...<|im_end|>\n
-  <|im_start|>user\n...<|im_end|>\n
-  <|im_start|>assistant\n[여기만 학습]<|im_end|>\n
-
-labels 처리:
-  - 전 구간 기본값: -100 (loss 계산 제외)
-  - <|im_start|>assistant\n 이후 ~ <|im_end|> 이전 구간만 input_ids 값으로 세팅
-  - 멀티턴 대화 시 각 assistant 구간 반복 적용
+  <|im_start|>system\n...<|im_end|>\n  → labels = -100 (loss 제외)
+  <|im_start|>user\n...<|im_end|>\n    → labels = -100 (loss 제외)
+  <|im_start|>assistant\n[여기만 학습]<|im_end|>\n  → labels = input_ids
 ```
 
-### 3-2. 구현 위치
-
-`dataset.py`의 `apply_chat_template` 또는 `lora_train.py`의 `tokenize_dataset`에서 처리.
-
-```python
-def mask_non_assistant_labels(input_ids: list[int], tokenizer) -> list[int]:
-    """assistant 응답 구간만 labels 활성화, 나머지는 -100."""
-    labels = [-100] * len(input_ids)
-    # assistant 시작 토큰 시퀀스 찾기
-    # Qwen2.5: "<|im_start|>assistant\n" = tokenizer.encode("<|im_start|>assistant\n")
-    asst_start_ids = tokenizer.encode("<|im_start|>assistant\n", add_special_tokens=False)
-    end_id = tokenizer.encode("<|im_end|>", add_special_tokens=False)[0]
-
-    i = 0
-    while i < len(input_ids):
-        # assistant 시작 위치 탐색
-        if input_ids[i:i+len(asst_start_ids)] == asst_start_ids:
-            i += len(asst_start_ids)
-            # <|im_end|> 전까지 labels 활성화
-            while i < len(input_ids) and input_ids[i] != end_id:
-                labels[i] = input_ids[i]
-                i += 1
-        else:
-            i += 1
-    return labels
-```
-
-### 3-3. `lora_train.py` 인자 추가
-
-```
---mask_non_assistant  store_true  False  assistant 외 구간 labels=-100 마스킹
-```
+- `--mask_non_assistant` 인자 불필요 — **v7부터 기본 적용**
+- 멀티턴 대화에서도 각 assistant 구간 반복 적용
+- 효과: 응답 품질 직접 최적화 + 과적합 억제. 단, loss 스케일이 v6 이전과 달라짐 (학습.md §5 참조)
 
 ---
 
@@ -224,7 +205,7 @@ def mask_non_assistant_labels(input_ids: list[int], tokenizer) -> list[int]:
          --out output/LoRA_vN
 
 [3단계 — eval 테스트로 약점 파악]
-  eval/ai_tell_checker.py, memory_test.py, 직접 대화 테스트
+  training/eval/ai_tell_checker.py, training/eval/memory_test.py, 직접 대화 테스트
   → "affection 응답이 단조로움", "memory_ref 반응이 약함" 등 확인
 
 [4단계 — vN+1 학습 (EWC + 카테고리 가중치)]
@@ -243,8 +224,9 @@ def mask_non_assistant_labels(input_ids: list[int], tokenizer) -> list[int]:
 
 ## 5. 파일별 변경 요약
 
-| 파일 | 변경 내용 |
-|---|---|
-| `training/ewc.py` | **신설** — Fisher 계산 CLI + `EWCPenalty` 클래스 |
-| `training/lora_train.py` | `EWCTrainer` 클래스 추가, `--ewc_*`, `--category_weights`, `--mask_non_assistant` 인자 추가 |
-| `training/dataset.py` | `load_jsonl_files` / `load_training_data`에 `category_weights` 파라미터 추가, `mask_non_assistant_labels` 함수 추가 |
+| 파일 | 상태 | 변경 내용 |
+|---|---|---|
+| `training/lora_train.py` | ✅ 일부 완료 | assistant 토큰 마스킹(`_mask_labels`), VRAM 해제 블록, `--skip_eval`, `--ewc_*` / `--category_weights` 인자 **추가 예정** |
+| `training/ewc.py` | 🔲 미구현 | **신설** — Fisher 계산 CLI + `EWCPenalty` 클래스 |
+| `training/dataset.py` | 🔲 미구현 | `load_jsonl_files` / `load_training_data`에 `category_weights` 파라미터 추가 |
+| `training/train_monitor.py` | ✅ 완료 | 학습 모니터링 래퍼 — 과적합 조기 종료 + VRAM 해제 |
