@@ -4,8 +4,8 @@ memory_test.py — 기억 유지 정확도 측정
 멀티턴 대화에서 앞서 언급된 정보를 나중에 올바르게 참조하는지 테스트.
 
 사용법:
-  python eval/memory_test.py --model Qwen/Qwen2.5-3B-Instruct
-  python eval/memory_test.py --model Qwen/Qwen2.5-3B-Instruct --adapter output/lora_haru_v1/adapter
+  python training/eval/memory_test.py --model Qwen/Qwen2.5-3B-Instruct
+  python training/eval/memory_test.py --model Qwen/Qwen2.5-3B-Instruct --adapter output/lora_haru_v1/adapter
 """
 
 import argparse
@@ -15,7 +15,7 @@ from pathlib import Path
 import torch
 from loguru import logger
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 SYSTEM_PROMPT = (

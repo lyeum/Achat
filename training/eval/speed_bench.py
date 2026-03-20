@@ -3,13 +3,13 @@ speed_bench.py — GPU/CPU 추론 속도 벤치마크 (토큰/초)
 
 사용법:
   # transformers 백엔드 (GPU)
-  python eval/speed_bench.py --backend transformers --model Qwen/Qwen2.5-3B-Instruct
+  python training/eval/speed_bench.py --backend transformers --model Qwen/Qwen2.5-3B-Instruct
 
   # llama_cpp 백엔드 (CPU, GGUF 필요)
-  python eval/speed_bench.py --backend llama_cpp --model_path models/model_q4km.gguf
+  python training/eval/speed_bench.py --backend llama_cpp --model_path models/model_q4km.gguf
 
   # LoRA 어댑터 포함
-  python eval/speed_bench.py --backend transformers \\
+  python training/eval/speed_bench.py --backend transformers \\
     --model Qwen/Qwen2.5-3B-Instruct \\
     --adapter output/lora_haru_v1/adapter
 """
@@ -21,7 +21,7 @@ from pathlib import Path
 
 from loguru import logger
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 BENCH_PROMPTS = [
