@@ -1,4 +1,4 @@
-"""eval/verify_phases.py — Phase 2/3 실환경 검증 스크립트.
+"""training/eval/verify_phases.py — Phase 2/3 실환경 검증 스크립트.
 
 10턴 자동 대화 후 다음 항목을 확인한다:
   1. ChromaDB 요약 저장 (10턴 트리거)
@@ -8,8 +8,8 @@
   5. 무관한 질문 시 RAG 결과 미삽입
 
 실행:
-    uv run python eval/verify_phases.py
-    uv run python eval/verify_phases.py --adapter output/lora_haru_v1/adapter
+    uv run python training/eval/verify_phases.py
+    uv run python training/eval/verify_phases.py --adapter output/lora_haru_v1/adapter
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -184,8 +184,6 @@ def run_verification() -> dict[str, bool]:
     checks["[Phase2] 10턴 후 ChromaDB 요약 저장"] = chroma_stored
 
     # 2. 기억 참조 질문(12번째 턴, 10턴 저장 이후) VDB 히트 확인
-    # "내 이름 기억해?"는 의미적으로 저장된 요약("민준이 바다를 좋아하고...")과
-    # cosine 유사도가 낮을 수 있으므로, VDB에 항목이 존재하는지로도 검증.
     mem_turn = results[11]  # "내 이름 기억해?" — turn 12
     vdb_has_items = long_term._collection(character["id"]).count() > 0
     checks["[Phase2] 기억 참조 질문 VDB Layer C 삽입"] = (

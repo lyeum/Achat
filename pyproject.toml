@@ -72,3 +72,8 @@ ignore = [
     "E402",   # sys.path.insert 이후 로컬 모듈 import — 프로젝트 루트 설정 패턴
 ]
 exclude = ["training/data/**", "data/**", "**/*.qml"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

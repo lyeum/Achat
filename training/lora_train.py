@@ -69,6 +69,7 @@ def parse_args():
     # 저장 및 테스트 옵션
     parser.add_argument("--no_save",     action="store_true", help="학습 후 어댑터 저장 건너뜀 (테스트용)")
     parser.add_argument("--max_steps",   type=int,   default=-1, help="최대 학습 스텝 수 (-1=에폭 기준)")
+    parser.add_argument("--skip_eval",   action="store_true", help="학습 후 자동 평가 건너뜀")
     return parser.parse_args()
 
 
@@ -330,6 +331,43 @@ def main():
         for ckpt in sorted(output_dir.glob("checkpoint-*")):
             shutil.rmtree(ckpt)
             logger.info(f"체크포인트 삭제: {ckpt.name}")
+
+        # ── 학습 후 자동 평가 ────────────────────────────────────────────────
+        if not args.skip_eval:
+            import gc
+            import subprocess
+
+            # 평가 전 VRAM 완전 해제 (학습 중 ~96% 점유)
+            # trainer, model, tokenizer를 모두 명시적으로 해제한 뒤 평가 프로세스를 시작한다.
+            logger.info("VRAM 해제 중 — 학습 모델 언로드")
+            trainer.model = None
+            del trainer
+            del model
+            del tokenizer
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                free_gb = torch.cuda.mem_get_info()[0] / 1024**3
+                logger.info(f"VRAM 해제 완료 — 여유 VRAM: {free_gb:.1f} GB")
+
+            eval_dir = ROOT / "training" / "eval"
+            eval_scripts = [
+                (eval_dir / "ai_tell_checker.py", ["--adapter", str(adapter_path)]),
+                (eval_dir / "memory_test.py",     ["--adapter", str(adapter_path)]),
+            ]
+            for script, extra_args in eval_scripts:
+                if not script.exists():
+                    logger.warning(f"평가 스크립트 없음 — 건너뜀: {script}")
+                    continue
+                logger.info(f"자동 평가 실행: {script.name}")
+                result = subprocess.run(
+                    [sys.executable, str(script)] + extra_args,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"평가 종료 코드 {result.returncode}: {script.name}")
+        else:
+            logger.info("--skip_eval: 자동 평가 건너뜀")
 
 
 if __name__ == "__main__":
