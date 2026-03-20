@@ -7,13 +7,28 @@ Window {
     id: root
 
     // ── 크기 / 상태 ─────────────────────────────────────────────────────────
-    property bool isBubble: false
-    property string currentMode: "chat"   // "chat" | "function"
+    property bool   isBubble:          false   // false=풀창, true=PIP 모드
+    property bool   pipBubbleOpen:     false   // PIP 말풍선 표시 여부
+    property string currentMode:       "chat"  // "chat" | "function"
     property string backgroundImageUrl: bridge ? bridge.currentBackground : ""
-    property string currentMood: bridge ? bridge.currentMood : "neutral"
+    property string currentMood:       bridge ? bridge.currentMood : "neutral"
+    property bool   inputReady:        true    // 전송 가능 여부
+    property bool   settingsOpen:      false   // 설정 패널 표시 여부
+    property string charListJson:      "[]"    // getCharacterList() 캐시
+    property string worldListJson:     "[]"    // getWorldList() 캐시
 
-    width:  isBubble ? 72  : 360
-    height: isBubble ? 72  : 520
+    // 커스터마이징
+    property bool   customizationOpen: false
+    property string customPartsJson:   "{}"
+    property string allPartsListJson:  "{}"
+
+    // PIP 모드 진입 시 아이콘 하단 Y 좌표 보존 (말풍선이 위로 펼쳐지도록)
+    property int pipAnchorY: 0
+
+    // 창 크기: PIP 말풍선 유무에 따라 동적 변경
+    width:  isBubble ? (pipBubbleOpen ? 240 : 50) : 360
+    height: isBubble ? (pipBubbleOpen ? 190 : 50) : 520
+
     flags:  Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     color:  "transparent"
     visible: true
@@ -23,10 +38,47 @@ Window {
     Component.onCompleted: {
         x = Screen.width  - width  - 40
         y = Screen.height - height - 60
+        _loadCustomization()
     }
 
-    Behavior on width  { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
-    Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
+    function _loadCustomization() {
+        if (!bridge) return
+        try {
+            var obj = JSON.parse(bridge.loadCustomization())
+            customPartsJson = JSON.stringify(obj.parts || {})
+        } catch(e) {}
+    }
+
+    // PIP 말풍선이 열릴 때 y/height를 동시에 변경해 아이콘 위치를 고정
+    // (height Behavior와 y를 따로 움직이면 아이콘이 들떠 보이므로 명시적 애니메이션 사용)
+    NumberAnimation { id: yAnim;      target: root; property: "y";      duration: 200; easing.type: Easing.InOutQuad }
+    NumberAnimation { id: heightAnim; target: root; property: "height"; duration: 200; easing.type: Easing.InOutQuad }
+
+    onPipBubbleOpenChanged: {
+        if (!isBubble) return
+        // PipWindow 내부 상태를 동기화 (외부에서 pipBubbleOpen을 바꾼 경우)
+        if (pipView.bubbleOpen !== pipBubbleOpen) pipView.bubbleOpen = pipBubbleOpen
+
+        if (pipBubbleOpen) {
+            pipAnchorY = root.y + root.height   // 아이콘 하단 Y 저장 (열 때 1회)
+            yAnim.to = pipAnchorY - 190; yAnim.start()
+            heightAnim.to = 190;         heightAnim.start()
+        } else {
+            yAnim.to = pipAnchorY - 50;  yAnim.start()
+            heightAnim.to = 50;          heightAnim.start()
+        }
+    }
+
+    // PIP 모드 진입 시 앵커 초기화
+    onIsBubbleChanged: {
+        if (isBubble) {
+            pipAnchorY = root.y + root.height
+            pipBubbleOpen = false
+        }
+    }
+
+    Behavior on width  { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+    // height는 PIP 말풍선 전환 시 yAnim/heightAnim이 직접 제어하므로 Behavior 제거
 
     // taskbar X 또는 Alt+F4 → 앱 완전 종료
     onClosing: Qt.quit()
@@ -56,10 +108,15 @@ Window {
         function onMessageAdded(role, content) {
             messageModel.append({ "role": role, "content": content })
             Qt.callLater(() => { chatList.positionViewAtEnd() })
+            // PIP 모드: assistant 응답이 오면 말풍선 자동 표시
+            if (role === "assistant" && root.isBubble) {
+                pipView.showBubble(content)
+                root.pipBubbleOpen = true
+            }
         }
 
         function onStatusChanged(status) {
-            sendBtn.enabled = (status === "ready")
+            root.inputReady = (status === "ready")
             inputField.enabled = (status === "ready")
             if (status === "thinking") {
                 messageModel.append({ "role": "assistant", "content": "..." })
@@ -91,26 +148,66 @@ Window {
     Rectangle {
         id: container
         anchors.fill: parent
-        radius: root.isBubble ? width / 2 : 16
-        color:  root.isBubble ? "#4A90D9" : "#1E1E1E"
-        clip:   true
+        radius: root.isBubble ? 10 : 16
+        color:  root.isBubble ? "transparent" : "#1E1E1E"
+        clip:   false
 
         Behavior on radius { NumberAnimation { duration: 200 } }
         Behavior on color  { ColorAnimation  { duration: 200 } }
 
-        // ── 버블 모드: 캐릭터 이니셜 + 더블클릭으로 확장 ────────────────
-        Text {
-            anchors.centerIn: parent
+        // ── PIP 마스코트 모드 ─────────────────────────────────────────────
+        PipWindow {
+            id: pipView
             visible: root.isBubble
-            text: bridge ? bridge.characterName.charAt(0).toUpperCase() : ""
-            color: "white"
-            font.pixelSize: 28
-            font.bold: true
-        }
-        MouseArea {
             anchors.fill: parent
-            visible: root.isBubble
-            onDoubleClicked: root.isBubble = false
+            fontFamily:   koreanFont.font.family
+            currentMood:  root.currentMood
+            characterId:  bridge ? bridge.characterId : ""
+            inputEnabled: root.inputReady
+
+            onBubbleOpenChanged: root.pipBubbleOpen = bubbleOpen
+
+            onExpandRequested: {
+                root.pipBubbleOpen = false
+                root.isBubble = false
+            }
+
+            onMessageSent: function(text) {
+                // bridge.sendMessage → messageAdded("user") emit → Connections.onMessageAdded가 처리
+                // (직접 append 금지 — 중복 방지)
+                bridge.sendMessage(text)
+            }
+        }
+
+        // ── 커스터마이징 패널 오버레이 ────────────────────────────────────
+        CustomizationPanel {
+            anchors.fill: parent
+            visible: root.customizationOpen && !root.isBubble
+            z: 20
+            fontFamily:       koreanFont.font.family
+            partsJson:        root.customPartsJson
+            allPartsListJson: root.allPartsListJson
+            onCloseRequested: root.customizationOpen = false
+            onSaved: function(pJson) {
+                bridge.saveCustomization(JSON.stringify({ parts: JSON.parse(pJson) }))
+                root.customPartsJson   = pJson
+                root.customizationOpen = false
+            }
+        }
+
+        // ── 설정 패널 오버레이 ────────────────────────────────────────────
+        SettingsPanel {
+            anchors.fill: parent
+            visible: root.settingsOpen && !root.isBubble
+            z: 10
+            fontFamily:        koreanFont.font.family
+            characterListJson: root.charListJson
+            worldListJson:     root.worldListJson
+            onCloseRequested:  root.settingsOpen = false
+            onCustomizationRequested: {
+                root.allPartsListJson = bridge.getAllPartsList()
+                root.customizationOpen = true
+            }
         }
 
         // ── 확장 모드 ────────────────────────────────────────────────────
@@ -141,6 +238,25 @@ Window {
                     }
 
                     Item { Layout.fillWidth: true }
+
+                    // 설정 버튼
+                    Rectangle {
+                        width: 20; height: 20; radius: 4
+                        color: settingsHover.containsMouse ? "#3C3C3C" : "transparent"
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Text { anchors.centerIn: parent; text: "≡"; color: "#B0B0B0"; font.pixelSize: 13 }
+                        MouseArea {
+                            id: settingsHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.charListJson  = bridge.getCharacterList()
+                                root.worldListJson = bridge.getWorldList()
+                                root.settingsOpen  = true
+                            }
+                        }
+                    }
 
                     // 버블 축소 버튼
                     Rectangle {
@@ -226,7 +342,6 @@ Window {
                     visible: root.backgroundImageUrl !== ""
                     opacity: 0.35
                     Behavior on opacity { NumberAnimation { duration: 400 } }
-                    Behavior on source  { } // source 변경 시 즉시 교체
                 }
 
                 ListView {
@@ -256,6 +371,20 @@ Window {
                             color: "#555"
                         }
                     }
+                }
+
+                // SD 캐릭터 — 입력창 테두리에 걸치는 형태
+                // 하반신 40px가 아래 입력 영역에 의해 자연스럽게 가려짐
+                CharacterDisplay {
+                    id: charDisplay
+                    z: 2
+                    width: 128; height: 160
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: -40   // 40px 아래 입력창 영역으로 오버랩
+                    x: 8
+                    characterId: bridge ? bridge.characterId : ""
+                    partsJson:   root.customPartsJson
+                    currentMood: root.currentMood
                 }
             }
 
@@ -303,17 +432,16 @@ Window {
                     Rectangle {
                         width: 32; height: 32
                         radius: 8
-                        color: sendBtn.enabled
+                        color: root.inputReady
                                ? (sendBtnHover.containsMouse ? "#357ABD" : "#4A90D9")
                                : "#333"
                         Behavior on color { ColorAnimation { duration: 150 } }
 
                         Text {
                             id: sendBtn
-                            property bool enabled: true
                             anchors.centerIn: parent
-                            text: enabled ? "▶" : "…"
-                            color: enabled ? "white" : "#666"
+                            text: root.inputReady ? "▶" : "…"
+                            color: root.inputReady ? "white" : "#666"
                             font.pixelSize: 13
                         }
 
@@ -321,8 +449,8 @@ Window {
                             id: sendBtnHover
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: sendBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: if (sendBtn.enabled) sendMessage()
+                            cursorShape: root.inputReady ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: if (root.inputReady) sendMessage()
                         }
                     }
                 }

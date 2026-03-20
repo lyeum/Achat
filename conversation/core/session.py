@@ -17,7 +17,7 @@ class ConversationSession:
 
     location_context: Optional[str] = None  # 동적 장소 묘사 (YAML act 덮어쓰기)
 
-    mood: str = "neutral"   # neutral / happy / annoyed / sad
+    mood: str = "neutral"   # neutral / happy / affectionate / touched / curious / sad / embarrassed / annoyed / angry
     affection: int = 30     # 0~100
 
     turn_count: int = 0
