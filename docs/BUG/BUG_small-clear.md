@@ -321,6 +321,85 @@ eval 시점에는 gradient_checkpointing 비활성 → 전체 activation이 VRAM
 
 ---
 
+## BUG-14 · `training/train_monitor.py` — 최종 보고 eval 기록 오탐
+
+**발견**: LoRA_v9 (λ=150) 학습 완료 후 (2026-03-23)
+
+**문제**
+학습 정상 완료 후 모니터 최종 보고에서 "eval 기록 없음 (학습이 매우 짧게 진행됐거나 eval_split=0)"이 출력됨.
+실제로는 eval_loss가 step 700~900 구간에서 8회 기록됐으나 최종 보고에만 반영되지 않음.
+
+**원인**
+`train_monitor.py`의 최종 보고는 `state_path = output_dir / "trainer_state.json"`을 직접 읽는다.
+`lora_train.py`는 학습 종료 후 `checkpoint-*` 디렉토리를 전부 `shutil.rmtree`로 삭제하는데,
+HuggingFace Trainer가 `trainer_state.json`을 `output_dir/` 루트가 아닌 `checkpoint-N/` 내부에만 기록하므로
+모든 체크포인트 삭제 시 `trainer_state.json`도 함께 사라짐.
+최종 보고 시점(`trainer.train()` 반환 직후)에는 파일이 이미 없어 `load_log_history()`가 빈 리스트를 반환.
+
+**영향**
+- 실시간 모니터링(polling 구간) 동작은 정상 — eval_loss 추적 및 조기 종료 판단에는 무영향.
+- 최종 보고 섹션 ①만 eval 데이터 없이 출력됨 (오보, 기능 저하 없음).
+
+**미수정** — 최종 보고 영향 없음으로 즉시 수정 보류.
+수정 방향: `lora_train.py` 체크포인트 정리 전 `trainer.save_state()` 명시 호출 또는
+`state_path = best_checkpoint / "trainer_state.json"` 로 fallback 탐색.
+
+---
+
+## BUG-15 · `ui_ux/qml/main.qml` — thinking indicator `...` 잔류
+
+**발견**: MVP 대화 테스트 (2026-03-23)
+
+**문제**
+캐릭터 응답 전에 `...` 플레이스홀더가 표시된 뒤, 응답 수신 후에도 `...`가 목록에 남아 있었음.
+사용자 입력 내용에도 `...`가 덧붙어 저장되는 현상 동반.
+
+**원인**
+`_on_response(role, content)` → `_on_done()` 순서로 신호가 발생.
+`onStatusChanged("ready")` 핸들러에서 `messageModel.last.content === "..."` 확인 후 제거하려 했으나,
+`_on_response` 시점에 이미 실제 응답으로 교체되어 제거 조건이 항상 false.
+
+**수정** ✅ (2026-03-23)
+`onMessageAdded` 핸들러에서 `role === "assistant"` 직전 마지막 항목이 `"..."`이면 제거하도록 변경.
+
+```javascript
+function onMessageAdded(role, content) {
+    if (role === "assistant" && messageModel.count > 0) {
+        var last = messageModel.get(messageModel.count - 1)
+        if (last.content === "...") messageModel.remove(messageModel.count - 1)
+    }
+    messageModel.append({ "role": role, "content": content })
+    ...
+}
+```
+
+---
+
+## BUG-16 · `conversation/core/prompt_build.py` — Layer A 학습/런타임 형식 불일치
+
+**발견**: MVP 대화 테스트 (2026-03-23)
+
+**문제**
+affection 93 (intimate tier) 상태에서도 단답형 고착, tone 변화 미반영, 맥락 이해 불가.
+
+**원인**
+학습 데이터 system prompt는 전부 평문 단락 형식:
+> `"조용하고 차분한 태도로 대화한다. 반말을 쓰고 단답형이 많다. ..."`
+
+런타임 `_layer_a()`는 `[캐릭터 설명]` / `[말투]` / `[현재 감정 상태]` 섹션 구조로 조립.
+모델이 런타임 형식을 학습 중 한 번도 본 적 없어 affection tier 지시문 무시,
+섹션 헤더를 대화 맥락으로 오인하는 것으로 추정.
+
+**수정** ✅ (2026-03-23)
+`_layer_a()`를 섹션 구조 → 평문 단락으로 전면 재작성.
+name / description / speech_style / tone / mood_hint / rules_brief를 공백으로 이어붙임.
+
+```python
+return " ".join(parts)  # 헤더 없는 단일 평문 단락
+```
+
+---
+
 ## 미수정 항목 (계획 미완성 / 의도적 설계)
 
 | 항목 | 이유 |
