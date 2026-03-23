@@ -10,6 +10,8 @@ Window {
     property bool   isBubble:          false   // false=풀창, true=PIP 모드
     property bool   pipBubbleOpen:     false   // PIP 말풍선 표시 여부
     property string currentMode:       "chat"  // "chat" | "function"
+    property string currentTag:        ""      // 선택된 기능 태그 key (""=없음)
+    property color  inputTagColor:     "#4A90D9" // 활성 태그 색상 → 입력창 테두리에 반영
     property string backgroundImageUrl: bridge ? bridge.currentBackground : ""
     property string currentMood:       bridge ? bridge.currentMood : "neutral"
     property bool   inputReady:        true    // 전송 가능 여부
@@ -18,24 +20,26 @@ Window {
     property string worldListJson:     "[]"    // getWorldList() 캐시
 
     // 커스터마이징
-    property bool   customizationOpen: false
-    property string customPartsJson:   "{}"
-    property string allPartsListJson:  "{}"
+    property bool   emotionPanelOpen:      false
+    property bool   characterBuildOpen:    false
+    property string customPartsJson:       "{}"
+    property string allPartsListJson:      "{}"
 
     // PIP 모드 진입 시 아이콘 하단 Y 좌표 보존 (말풍선이 위로 펼쳐지도록)
     property int pipAnchorY: 0
 
-    // 창 크기: PIP 말풍선 유무에 따라 동적 변경
-    width:  isBubble ? (pipBubbleOpen ? 240 : 50) : 360
-    height: isBubble ? (pipBubbleOpen ? 190 : 50) : 520
+    // 창 크기: 풀창은 width 바인딩만 사용. height는 heightAnim이 직접 제어
+    // (풀창↔PIP 전환 시 height 바인딩이 애니메이션에 의해 깨지는 문제 방지)
+    width:  isBubble ? (pipBubbleOpen ? 280 : 160) : 432
 
     flags:  Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     color:  "transparent"
     visible: true
     title:  "Achat"
 
-    // 첫 렌더링 후 우하단 배치
+    // 첫 렌더링 후 우하단 배치 (height는 바인딩 없이 명시적으로 초기화)
     Component.onCompleted: {
+        root.height = 624
         x = Screen.width  - width  - 40
         y = Screen.height - height - 60
         _loadCustomization()
@@ -61,19 +65,29 @@ Window {
 
         if (pipBubbleOpen) {
             pipAnchorY = root.y + root.height   // 아이콘 하단 Y 저장 (열 때 1회)
-            yAnim.to = pipAnchorY - 190; yAnim.start()
-            heightAnim.to = 190;         heightAnim.start()
+            yAnim.to = pipAnchorY - 310; yAnim.start()
+            heightAnim.to = 310;         heightAnim.start()
         } else {
-            yAnim.to = pipAnchorY - 50;  yAnim.start()
-            heightAnim.to = 50;          heightAnim.start()
+            yAnim.to = pipAnchorY - 160; yAnim.start()
+            heightAnim.to = 160;         heightAnim.start()
         }
     }
 
-    // PIP 모드 진입 시 앵커 초기화
+    // PIP ↔ 풀창 전환: height를 명시적으로 관리 (선언적 바인딩 제거로 애니메이션 충돌 방지)
     onIsBubbleChanged: {
         if (isBubble) {
+            // 풀창 → PIP: 현재 bottom 위치 보존, 160px 아이콘으로 축소
+            yAnim.stop(); heightAnim.stop()
             pipAnchorY = root.y + root.height
             pipBubbleOpen = false
+            yAnim.to = pipAnchorY - 160; yAnim.start()
+            heightAnim.to = 160;         heightAnim.start()
+        } else {
+            // PIP → 풀창: 애니메이션 중단 후 height/y 명시적 복원
+            yAnim.stop(); heightAnim.stop()
+            root.height = 624
+            // 아이콘 bottom 기준으로 풀창을 위로 배치, 화면 밖으로 나가지 않게 클램프
+            root.y = Math.min(Screen.height - 624 - 20, Math.max(0, pipAnchorY - 624))
         }
     }
 
@@ -106,6 +120,11 @@ Window {
         target: bridge
 
         function onMessageAdded(role, content) {
+            // assistant 응답 추가 전 thinking placeholder("...") 제거
+            if (role === "assistant" && messageModel.count > 0) {
+                var last = messageModel.get(messageModel.count - 1)
+                if (last.content === "...") messageModel.remove(messageModel.count - 1)
+            }
             messageModel.append({ "role": role, "content": content })
             Qt.callLater(() => { chatList.positionViewAtEnd() })
             // PIP 모드: assistant 응답이 오면 말풍선 자동 표시
@@ -175,23 +194,33 @@ Window {
             onMessageSent: function(text) {
                 // bridge.sendMessage → messageAdded("user") emit → Connections.onMessageAdded가 처리
                 // (직접 append 금지 — 중복 방지)
-                bridge.sendMessage(text)
+                bridge.sendMessage(text, root.currentMode)
             }
         }
 
-        // ── 커스터마이징 패널 오버레이 ────────────────────────────────────
-        CustomizationPanel {
+        // ── 표정 / 아이콘 지정 패널 오버레이 ────────────────────────────
+        EmotionPanel {
             anchors.fill: parent
-            visible: root.customizationOpen && !root.isBubble
+            visible: root.emotionPanelOpen && !root.isBubble
+            z: 20
+            fontFamily:  koreanFont.font.family
+            characterId: bridge ? bridge.characterId : ""
+            onCloseRequested: root.emotionPanelOpen = false
+        }
+
+        // ── 캐릭터 커스텀 패널 오버레이 ──────────────────────────────────
+        CharacterBuildPanel {
+            anchors.fill: parent
+            visible: root.characterBuildOpen && !root.isBubble
             z: 20
             fontFamily:       koreanFont.font.family
             partsJson:        root.customPartsJson
             allPartsListJson: root.allPartsListJson
-            onCloseRequested: root.customizationOpen = false
+            onCloseRequested: root.characterBuildOpen = false
             onSaved: function(pJson) {
                 bridge.saveCustomization(JSON.stringify({ parts: JSON.parse(pJson) }))
-                root.customPartsJson   = pJson
-                root.customizationOpen = false
+                root.customPartsJson    = pJson
+                root.characterBuildOpen = false
             }
         }
 
@@ -203,10 +232,17 @@ Window {
             fontFamily:        koreanFont.font.family
             characterListJson: root.charListJson
             worldListJson:     root.worldListJson
-            onCloseRequested:  root.settingsOpen = false
-            onCustomizationRequested: {
-                root.allPartsListJson = bridge.getAllPartsList()
-                root.customizationOpen = true
+            onCloseRequested: root.settingsOpen = false
+            onEmotionPanelRequested: {
+                root.emotionPanelOpen = true
+            }
+            onCharacterBuildRequested: {
+                root.allPartsListJson   = bridge.getAllPartsList()
+                root.customPartsJson    = bridge ? JSON.stringify(JSON.parse(bridge.loadCustomization()).parts || {}) : "{}"
+                root.characterBuildOpen = true
+            }
+            onNewSessionRequested: function(keepMemory) {
+                bridge.newSession(keepMemory)
             }
         }
 
@@ -314,14 +350,20 @@ Window {
                                 anchors.centerIn: parent
                                 text: modelData.label
                                 color: root.currentMode === modelData.mode ? "white" : "#888"
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 font.family: koreanFont.font.family
                             }
 
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.currentMode = modelData.mode
+                                onClicked: {
+                                    root.currentMode = modelData.mode
+                                    if (modelData.mode === "chat") {
+                                        root.currentTag      = ""
+                                        root.inputTagColor   = "#4A90D9"
+                                    }
+                                }
                             }
                         }
                     }
@@ -340,13 +382,16 @@ Window {
                     source: root.backgroundImageUrl
                     fillMode: Image.PreserveAspectCrop
                     visible: root.backgroundImageUrl !== ""
-                    opacity: 0.35
+                    opacity: 0.55
                     Behavior on opacity { NumberAnimation { duration: 400 } }
                 }
 
                 ListView {
                     id: chatList
-                    anchors.fill: parent
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: parent.height - 120  // 캐릭터 아이콘 가시 영역(120px) 제외
                     clip: true
                     spacing: 4
                     bottomMargin: 8
@@ -369,6 +414,78 @@ Window {
                             implicitWidth: 4
                             radius: 2
                             color: "#555"
+                        }
+                    }
+                }
+
+                // ── 기능 태그 pills (기능 모드일 때만 표시) ──────────────────
+                // 대화 모드: 이 영역은 숨김 (차후 도트 애니메이션 예정)
+                Item {
+                    visible: root.currentMode === "function"
+                    anchors {
+                        left:   parent.left;  leftMargin:  140  // 캐릭터(128) + 간격(12)
+                        right:  parent.right; rightMargin: 8
+                        bottom: parent.bottom
+                    }
+                    height: 112
+                    z: 1
+
+                    Flow {
+                        anchors { fill: parent; topMargin: 8 }
+                        spacing: 6
+
+                        Repeater {
+                            model: [
+                                { key: "image_convert",   label: "#이미지 변환",    color: "#4E7FB5" },
+                                { key: "prompt_convert",  label: "#프롬프트 변환",  color: "#7A6BAA" },
+                                { key: "file_rename",     label: "#파일 이름 변경", color: "#AA7840" },
+                                { key: "folder_classify", label: "#폴더 분류",      color: "#3D8A72" },
+                                { key: "local_search",    label: "#파일 검색",      color: "#6A8A3D" },
+                                { key: "web_search",      label: "#웹 검색",        color: "#8A4A7A" },
+                            ]
+
+                            Rectangle {
+                                property bool _active: root.currentTag === modelData.key
+                                height: 24
+                                width:  tagLabel.implicitWidth + 18
+                                radius: 12
+
+                                color: _active ? modelData.color : "#1C1C1C"
+                                border.color: _active ? modelData.color : "#383838"
+                                border.width: 1
+                                Behavior on color        { ColorAnimation { duration: 150 } }
+                                Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                                Text {
+                                    id: tagLabel
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    color: parent._active ? "white" : "#787878"
+                                    font.pixelSize: 11
+                                    font.family: koreanFont.font.family
+                                    Behavior on color { ColorAnimation { duration: 150 } }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onEntered: if (!parent._active) parent.border.color = "#555"
+                                    onExited:  if (!parent._active) parent.border.color = "#383838"
+                                    onClicked: {
+                                        if (root.currentTag === modelData.key) {
+                                            // 같은 태그 재클릭 → 해제
+                                            root.currentTag    = ""
+                                            root.currentMode   = "chat"
+                                            root.inputTagColor = "#4A90D9"
+                                        } else {
+                                            root.currentTag    = modelData.key
+                                            root.currentMode   = "function"
+                                            root.inputTagColor = modelData.color
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -404,7 +521,9 @@ Window {
                         height: 32
                         radius: 8
                         color: "#2A2A2A"
-                        border.color: inputField.activeFocus ? "#4A90D9" : "#444"
+                        border.color: inputField.activeFocus
+                                      ? root.inputTagColor
+                                      : (root.currentTag !== "" ? Qt.darker(root.inputTagColor, 1.5) : "#444")
                         Behavior on border.color { ColorAnimation { duration: 150 } }
 
                         TextInput {
@@ -463,6 +582,6 @@ Window {
         var text = inputField.text.trim()
         if (text === "") return
         inputField.text = ""
-        bridge.sendMessage(text)
+        bridge.sendMessage(text, root.currentMode)
     }
 }
