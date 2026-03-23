@@ -7,9 +7,38 @@
 
 ---
 
-## 0. VDB 구성
+## 0. 메모리 분류 원칙
 
-### 0-1. 물리 저장 구조
+VDB에 저장되는 데이터는 **수명(lifetime)** 기준으로 두 종류로 분류한다.
+
+| 분류 | 컬렉션 | 설명 | 세션 초기화 시 |
+|---|---|---|---|
+| **에피소딕 (Episodic)** | `{char_id}_memory` | 특정 세션에서 사용자와 나눈 대화 기억 | 사용자 선택에 따라 삭제 가능 |
+| **영구 지식 (Permanent)** | `world_knowledge` | 세계관·장소 정보, LLM이 대화 중 생성한 장소 | 절대 삭제하지 않음 |
+
+> **에피소딕 기억**은 특정 캐릭터와의 한 세션(대화 회차) 동안 쌓이는 기억이다.
+> 새 세션 시작 시 사용자가 저장을 원하지 않으면 해당 세션의 기억을 삭제할 수 있다.
+>
+> **영구 지식**은 세계관·장소 지식으로, 세션 초기화와 무관하게 항상 보존된다.
+> 사용자가 대화를 통해 AI에게 알려준 세계/장소 정보도 여기에 속한다.
+
+### play_log — 학습용 데이터 (VDB 외부)
+
+`play_log`는 VDB와 **별개**로 관리되는 학습용 데이터다.
+
+- 저장 위치: `training/log/{category}/{session_id}.jsonl` (JSONL 형식)
+- 저장 주체: `training/log/conversation_logger.py` — `ConversationLogger.on_turn()`
+- 카테고리: `daily` / `emotion` / `advice` / `memory` / `persona` / `feedback_pos` / `feedback_neg`
+- 저장 대상: 대화 이력, 감정 표현 로그 등 fine-tuning용 원본 데이터
+- **배포(deployment) 빌드에서는 불필요**: `config.py`의 `enable_play_log: False`로 비활성화.
+  학습은 개발 단계에서만 수행되며, 배포 환경에는 로거를 초기화하지 않는다.
+- VDB 조회·쓰기 경로와 완전히 분리되어 있어 런타임 응답 성능에 영향 없음
+
+---
+
+## 1. VDB 구성
+
+### 1-1. 물리 저장 구조
 
 ChromaDB는 벡터만 저장하는 게 아니라 **원본 텍스트·메타데이터·벡터를 분리 저장**한다.
 
@@ -23,7 +52,7 @@ chroma_dev/
 - **SQLite**: 텍스트 원본, id, metadata 저장. 사람이 읽을 수 있는 형태.
 - **HNSW 바이너리**: float 벡터 배열. 빠른 근사 최근접 이웃 탐색(ANN)용.
 
-### 0-2. 검색 동작 원리
+### 1-2. 검색 동작 원리
 
 벡터는 검색 키로만 사용하고, 실제 반환값은 SQLite의 원본 텍스트다.
 
@@ -35,7 +64,7 @@ chroma_dev/
     → SQLite에서 id 기준 원본 document·metadata 반환
 ```
 
-### 0-3. 갱신 방식
+### 1-3. 갱신 방식
 
 VDB 갱신은 **항목 단위 upsert**다. 스냅샷 교체 방식이 아니다.
 
@@ -45,18 +74,24 @@ VDB 갱신은 **항목 단위 upsert**다. 스냅샷 교체 방식이 아니다.
 | 동적 장소 추가 (world_nav) | `col.upsert(id=loc_장소명)` — 동일 |
 | sources 수정 후 재인덱싱 | 예외적으로 컬렉션 삭제 후 전체 `col.add()` (`force=True`일 때만) |
 
-### 0-4. 세션 종료와 데이터 영속성
-
-**세션이 종료돼도 VDB 데이터는 사라지지 않는다.**
+### 1-4. 세션 종료와 데이터 영속성
 
 `PersistentClient`는 `upsert()` / `add()` 호출 시점에 즉시 디스크(`chroma_dev/`)에 기록한다.
-인메모리 DB가 아니므로 프로세스가 종료되거나 재시작해도 기존 기억·세계관 데이터가 그대로 유지된다.
+인메모리 DB가 아니므로 **프로세스가 종료되어도 데이터는 보존**된다.
+
+세션 초기화(새 대화 시작) 시 동작:
+
+| 데이터 종류 | 초기화 시 동작 |
+|---|---|
+| `{char_id}_memory` (에피소딕) | 사용자가 저장 거부 시 해당 세션의 기억 삭제 가능 |
+| `world_knowledge` (영구 지식) | 초기화와 무관하게 항상 보존 |
+| `play_log/*.jsonl` (학습용) | 항상 보존 (학습 데이터 누적 목적) |
 
 ---
 
-## 1. 주의사항
+## 2. 주의사항
 
-### 1-1. `force=True` 삭제 범위
+### 2-1. `force=True` 삭제 범위
 
 `force=True`로 재인덱싱할 때 삭제되는 것은 **`world_knowledge` 컬렉션 하나뿐**이다.
 `{char_id}_memory`(장기 기억)는 전혀 건드리지 않는다.
@@ -66,7 +101,7 @@ client.delete_collection("world_knowledge")  # 이것만 삭제
 # haru_memory, seonjae_memory 등 기억 컬렉션은 그대로
 ```
 
-### 1-2. 동적 생성 장소는 `force=True` 시 사라진다
+### 2-2. 동적 생성 장소는 `force=True` 시 사라진다
 
 대화 중 LLM이 생성한 장소(`source: "generated"`)는 `sources/*.md`에 기록되지 않는다.
 `world_knowledge` 컬렉션 안에만 존재하므로 `force=True` 재인덱싱 시 함께 삭제된다.
@@ -84,7 +119,7 @@ generated = col_w.get(where={"source": {"$eq": "generated"}})
 # 3. force=True 재인덱싱
 ```
 
-### 1-3. ChromaDB metadata 타입 제약
+### 2-3. ChromaDB metadata 타입 제약
 
 ChromaDB metadata 값은 `str / int / float / bool`만 허용한다.
 `list` 타입은 저장 불가 — `tags` 필드가 쉼표 직렬화(`"이름,취미,바다"`)로 저장되는 이유가 이것이다.
@@ -97,7 +132,7 @@ flat_meta = {
 }
 ```
 
-### 1-4. threshold 기본값 vs 실제 적용값
+### 2-4. threshold 기본값 vs 실제 적용값
 
 코드 기본값과 실제 설정값이 다르다.
 
@@ -111,20 +146,23 @@ flat_meta = {
 
 ---
 
-## 2. 컬렉션 구조
+## 3. 컬렉션 구조
 
 VDB 안에 두 개의 독립 컬렉션이 존재한다.
 
-| 컬렉션명 | 역할 | 저장 주체 | 검색 주체 |
-|---|---|---|---|
-| `{char_id}_memory` | 캐릭터별 장기 기억 | `memory/summarizer.py` | `memory/long_term.py` |
-| `world_knowledge` | 세계관·장소 지식 | `rag/index.py`, `rag/world_nav.py` | `rag/retrieve.py` |
+| 컬렉션명 | 분류 | 역할 | 저장 주체 | 검색 주체 |
+|---|---|---|---|---|
+| `{char_id}_memory` | 에피소딕 | 세션별 대화 기억 | `memory/summarizer.py` | `memory/long_term.py` |
+| `world_knowledge` | 영구 지식 | 세계관·장소 지식 | `rag/index.py`, `rag/world_nav.py` | `rag/retrieve.py` |
+
+`{char_id}_memory`는 **세션 단위**로 관리된다. 하나의 캐릭터에 대해 여러 세션이 존재할 수 있으며,
+각 기억 항목에는 `session_id` 메타데이터가 붙어 세션별 조회·삭제가 가능하다.
 
 ---
 
-## 3. `{char_id}_memory` — 장기 기억 컬렉션
+## 4. `{char_id}_memory` — 에피소딕 기억 컬렉션
 
-### 2-1. 저장 데이터 스키마 (`conversation/memory_act/M_schema.json`)
+### 4-1. 저장 데이터 스키마 (`conversation/memory_act/M_schema.json`)
 
 ```
 {
@@ -142,7 +180,7 @@ VDB 안에 두 개의 독립 컬렉션이 존재한다.
 }
 ```
 
-### 2-2. 중요도 기준 (`summarizer.score_importance`)
+### 4-2. 중요도 기준 (`summarizer.score_importance`)
 
 | 등급 | 점수 범위 | 저장 여부 | 트리거 키워드 예시 |
 |---|---|---|---|
@@ -154,7 +192,7 @@ VDB 안에 두 개의 독립 컬렉션이 존재한다.
 > 현재 `score_importance()`는 키워드 없으면 기본 0.5를 반환하므로 사실상 모든 요약이 저장됨.
 > 의도적 저장 억제가 필요하면 기본값을 0.5 미만으로 낮춰야 한다.
 
-### 2-3. 저장 흐름
+### 4-3. 저장 흐름
 
 ```
 매 턴 종료 후 (conversation/core/router.py handle_turn)
@@ -173,7 +211,7 @@ VDB 안에 두 개의 독립 컬렉션이 존재한다.
                       score ≥ 0.5 → long_term.store() → ChromaDB upsert
 ```
 
-### 2-4. 검색 흐름
+### 4-4. 검색 흐름
 
 ```
 매 턴 시작 (handle_turn 2번)
@@ -185,11 +223,23 @@ VDB 안에 두 개의 독립 컬렉션이 존재한다.
                └─ Layer C (장기 기억 150토큰) 로 PromptBuilder에 전달
 ```
 
+### 4-5. 세션 초기화 시 에피소딕 기억 삭제
+
+새 세션 시작 시 이전 세션 기억을 삭제하려면 `session_id` 기준으로 삭제한다.
+
+```python
+col = client.get_collection(f"{char_id}_memory")
+col.delete(where={"session_id": {"$eq": old_session_id}})
+```
+
+> 사용자가 저장을 원하는 경우 삭제하지 않고 다음 세션에도 조회되도록 유지할 수 있다.
+> `world_knowledge`는 이 과정에서 절대 건드리지 않는다.
+
 ---
 
-## 4. `world_knowledge` — 세계관·장소 컬렉션
+## 5. `world_knowledge` — 영구 지식 컬렉션
 
-### 3-1. 초기 인덱싱 (sources/*.md → VDB)
+### 5-1. 초기 인덱싱 (sources/*.md → VDB)
 
 ```
 conversation/main.py 시작 시 자동 실행 (force=False)
@@ -213,7 +263,7 @@ conversation/main.py 시작 시 자동 실행 (force=False)
 | `culture.md` | 마을 문화 및 풍습 |
 | `story.md` | 배경 스토리 (마을 역사, 등대지기 전설) |
 
-### 3-2. 검색 흐름
+### 5-2. 검색 흐름
 
 ```
 매 턴 시작 (handle_turn 3번)
@@ -225,7 +275,7 @@ conversation/main.py 시작 시 자동 실행 (force=False)
                └─ Layer B (세계관+act 200토큰) 로 PromptBuilder에 전달
 ```
 
-### 3-3. 동적 장소 생성 흐름 ⚠️
+### 5-3. 동적 장소 생성 흐름 ⚠️
 
 대화 중 유저가 sources에 없는 장소로 이동을 요청할 경우:
 
@@ -264,7 +314,7 @@ conversation/main.py 시작 시 자동 실행 (force=False)
 
 ---
 
-## 5. sources/*.md 수정 및 재인덱싱
+## 6. sources/*.md 수정 및 재인덱싱
 
 세계관 원본 문서를 수정하고 VDB에 반영하는 방법:
 
@@ -294,7 +344,7 @@ print('재인덱싱 완료')
 
 ---
 
-## 6. VDB 직접 조회·수정 명령어
+## 7. VDB 직접 조회·수정 명령어
 
 ### 장기 기억 조회
 
@@ -348,17 +398,18 @@ col_w.get(where={"source": {"$eq": "generated"}})
 
 ---
 
-## 7. 관련 파일 요약
+## 8. 관련 파일 요약
 
-| 파일 | 역할 |
-|---|---|
-| `memory/long_term.py` | ChromaDB store/query (장기 기억) |
-| `memory/short_term.py` | 슬라이딩 윈도우 단기 버퍼 (VDB 미사용) |
-| `memory/summarizer.py` | N턴 요약 → 중요도 scoring → VDB 저장 |
-| `rag/index.py` | sources/*.md → world_knowledge 인덱싱 |
-| `rag/retrieve.py` | world_knowledge 시맨틱 검색 + 동적 upsert |
-| `rag/world_nav.py` | 이동 의도 감지 → 동적 장소 생성·저장 |
-| `conversation/core/router.py` | 한 턴 전체 흐름 조율 (VDB·RAG 모두 여기서 호출) |
-| `conversation/memory_act/M_schema.json` | 기억 항목 스키마 + 중요도 규칙 |
-| `chroma_dev/` | ChromaDB 런타임 데이터 (gitignore 권장) |
-| `rag/sources/world/` | 세계관 원본 문서 (인덱싱 소스) |
+| 파일 | 분류 | 역할 |
+|---|---|---|
+| `memory/long_term.py` | 에피소딕 | ChromaDB store/query (세션별 기억) |
+| `memory/short_term.py` | 런타임 | 슬라이딩 윈도우 단기 버퍼 (VDB 미사용) |
+| `memory/summarizer.py` | 에피소딕 | N턴 요약 → 중요도 scoring → VDB 저장 |
+| `rag/index.py` | 영구 지식 | sources/*.md → world_knowledge 인덱싱 |
+| `rag/retrieve.py` | 영구 지식 | world_knowledge 시맨틱 검색 + 동적 upsert |
+| `rag/world_nav.py` | 영구 지식 | 이동 의도 감지 → 동적 장소 생성·저장 |
+| `conversation/core/router.py` | — | 한 턴 전체 흐름 조율 (VDB·RAG 모두 여기서 호출) |
+| `conversation/memory_act/M_schema.json` | — | 기억 항목 스키마 + 중요도 규칙 |
+| `training/log/conversation_logger.py` | 학습용 | 대화 이력·감정 로그 수집 (배포 불필요, dev-only) |
+| `chroma_dev/` | — | ChromaDB 런타임 데이터 (gitignore 권장) |
+| `rag/sources/world/` | 영구 지식 | 세계관 원본 문서 (인덱싱 소스) |

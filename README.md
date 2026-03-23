@@ -260,24 +260,28 @@ Achat/
 │       └─ web_search.py          # 인터넷 검색 (DuckDuckGo / SearXNG)
 │
 ├─ training/                       # LoRA 파인튜닝
-│   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, GPU/CPU 자동 전환)
+│   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, EWCTrainer, GPU/CPU 자동 전환)
+│   ├─ ewc.py                     # EWC Fisher 계산 CLI + EWCPenalty 클래스
 │   ├─ train_monitor.py           # 학습 모니터링 래퍼 — 과적합 감지 시 조기 종료 + VRAM 해제
-│   ├─ dataset.py                 # 데이터셋 로더 (ChatML, stratified sampling)
+│   ├─ dataset.py                 # 데이터셋 로더 (ChatML, stratified sampling, category_weights)
 │   ├─ 학습.md                    # 학습 가이드 (구조 분석, 실행법, 개선안)
 │   ├─ eval/                      # 학습 결과 검증 스크립트
 │   │   ├─ ai_tell_checker.py     # AI투 표현 패턴 측정 (학습 후 자동 실행)
 │   │   ├─ memory_test.py         # 기억 유지 정확도 (5케이스, 자동 실행)
 │   │   ├─ speed_bench.py         # 추론 속도 벤치마크 (수동)
 │   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 12턴 (수동)
-│   ├─ data/                      # 학습 데이터 (2,167건, 26파일)
+│   ├─ data/                      # 학습 데이터 (2,401건, 38파일)
 │   │   ├─ affection/             # 친밀도 단계별 (6단계: stranger~intimate)
 │   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow
+│   │   ├─ emotion/               # 감정 상태별 (9종: neutral/happy/affectionate/touched/curious/sad/embarrassed/annoyed/angry)
+│   │   ├─ long_dialogue/         # 장대화 (8-15턴: daily_chat / emotional_support / casual_deep)
 │   │   ├─ personality/           # 5종 성격별
 │   │   └─ speech_style/          # 말투 조합
 │   └─ log/                       # MVP 대화 로그 수집 (카테고리별 JSONL)
 │
 ├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
-│   └─ lora_v1/checkpoint-1/      # ⚠️ 실제 저장 경로 (config.py는 LoRA_v7/adapter 참조 — 불일치)
+│   ├─ LoRA_v8/                   # v8 (eval best 1.353, 5 epoch 과적합)
+│   └─ LoRA_v9/adapter/           # 현재 어댑터 (eval best 1.511, 3 epoch, EWC λ=500)
 │
 ├─ data/
 │   └─ lora/
@@ -302,7 +306,7 @@ Achat/
 
 | 단계 | 실현 가능성 | 비고 |
 |---|---|---|
-| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, lora_v1 학습 완료 (LoRA_v7 진행 중) |
+| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v9 완료 (EWC λ=500, 3 epoch, memory_test 4/5) |
 | LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
 | GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
 | Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
@@ -392,12 +396,19 @@ Achat/
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터
 - [x] `scripts/build_dataset.py` — training/log → data/lora/conversation 빌드 (시스템 프롬프트 자동 삽입)
 - [x] `training/dataset.py` — 데이터셋 로더 (apply_chat_template, stratified sampling)
-- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환), v7~: assistant 토큰 마스킹
-- [x] `training/학습.md` — 학습 구조 리뷰, 실행 가이드, 개선안 (EWC/카테고리 가중치)
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환), v7~: assistant 토큰 마스킹, EWCTrainer / --ewc_* / --category_weights 추가
+- [x] `training/ewc.py` — Fisher 대각 계산 CLI + `EWCPenalty` 클래스 (7-2 EWC 구현 완료)
+- [x] `training/dataset.py` — `category_weights` 파라미터 추가 — 카테고리별 오버/언더샘플링 (7-3 구현 완료)
+- [x] `training/학습.md` — 학습 구조 리뷰, 실행 가이드, 개선안 (EWC/카테고리 가중치 구현 완료)
 - [x] `training/eval/ai_tell_checker.py` / `training/eval/memory_test.py` / `training/eval/speed_bench.py` / `training/eval/verify_phases.py` 구현 (구 `eval/` 폴더에서 `training/eval/`로 이동)
 - [x] `training/train_monitor.py` — 과적합 모니터링 + 조기 종료 + VRAM 해제 래퍼 구현
+- [x] 학습 데이터 확장: `emotion/` (9종 × 20건 = 180건) + `long_dialogue/` (54건) 추가 → 총 2,401건 (38파일)
 - [x] CPU smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
 - [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 2,167건, assistant masking, eval best 1.687)
+- [x] (실행 검증) LoRA_v8 GPU 학습 완료 (5 epoch, 2,401건, category_weights, eval best 1.353 / 과적합 발생)
+- [x] 훈련 데이터 system prompt 정제 — emotion/long_dialogue 234건에서 "너는 하루다." 제거
+- [x] `training/lora_train.py` `--data_dir` 기본값 `data/lora` → `training/data` 수정
+- [ ] (실행 검증) LoRA_v9 GPU 학습 완료 (3 epoch, EWC λ=500, 데이터 정제 후)
 
 ---
 

@@ -5,8 +5,8 @@
 > | 항목 | 상태 |
 > |---|---|
 > | 7-1 Assistant 토큰 마스킹 | ✅ 완료 (lora_train.py v7~) |
-> | 7-2 EWC 다단계 연속 학습 | 🔲 미구현 — `training/ewc.py` 신설 필요 |
-> | 7-3 카테고리 가중치 샘플링 | 🔲 미구현 — `dataset.py` 수정 필요 |
+> | 7-2 EWC 다단계 연속 학습 | ✅ 완료 (`training/ewc.py`, `EWCTrainer`) |
+> | 7-3 카테고리 가중치 샘플링 | ✅ 완료 (`dataset.py` `category_weights` 파라미터) |
 > | 7-4 KL Divergence 규제 | ⏸ 보류 — DPO 파이프라인 구축 후 검토 |
 > | 7-5 VRAM 절감 기법 | 📄 문서화 완료 — 적용 실험 대기 |
 > | 7-6 스케줄러 전략 (WSD 등) | 📄 문서화 완료 — 적용 실험 대기 |
@@ -14,7 +14,7 @@
 > | 7-8 캐릭터 챗봇 실무 접근법 | 📄 문서화 완료 (SFT→DPO, ORPO, Curriculum) |
 > | 7-9 학습 모니터링 조기 종료 | ✅ 완료 (`training/train_monitor.py`) |
 >
-> **다음 구현 우선순위: 7-2 EWC → 7-3 카테고리 가중치**
+> **7-2, 7-3 구현 완료. 다음: 실험 후 7-5/7-6 적용 검토.**
 
 ---
 
@@ -48,12 +48,11 @@
   → 두 파일 모두 named_parameters() 기준 키 사용 (naming mismatch 없음)
 
 CLI:
-  uv run python training/ewc.py \
-    --model Qwen/Qwen2.5-3B-Instruct \
-    --adapter output/LoRA_v6/adapter \
-    --data_dir training/data \
-    --out output/LoRA_v6 \
-    --n_samples 500
+  uv run python -m training.ewc \
+    --adapter output/LoRA_vN/adapter \   #FIX# 이전 버전 어댑터 경로
+    --out output/LoRA_vN \               #FIX# fisher.pt / ref_params.pt 저장 위치
+    --n_samples 200
+  (--model 기본값: Qwen/Qwen2.5-3B-Instruct, --data_dir 기본값: training/data)
 ```
 
 ---
@@ -209,12 +208,14 @@ Qwen2.5 ChatML 포맷 기준:
   → "affection 응답이 단조로움", "memory_ref 반응이 약함" 등 확인
 
 [4단계 — vN+1 학습 (EWC + 카테고리 가중치)]
-  lora_train.py --data_dir training/data --output_dir output/LoRA_vN+1
+  train_monitor.py -- lora_train.py
+                --data_dir training/data --output_dir output/LoRA_vN+1
                 --ewc_fisher output/LoRA_vN/fisher.pt
                 --ewc_ref_params output/LoRA_vN/ref_params.pt
-                --ewc_lambda 0.5
-                --category_weights '{"affection": 2.0}'
-                --epochs 6 --max_samples -1 --eval_split 0.1
+                --ewc_lambda 500
+                --category_weights '{"emotion": 2.0, "long_dialogue": 1.5}'
+                --epochs 3 --max_samples -1 --eval_split 0.1 --logging_steps 20
+  ※ ewc_lambda 권장 시작값: 500 (0.5는 효과 미미)
 
 [5단계 — 반복]
   vN+1 Fisher 계산 → 테스트 → vN+2 학습 ...
@@ -226,7 +227,7 @@ Qwen2.5 ChatML 포맷 기준:
 
 | 파일 | 상태 | 변경 내용 |
 |---|---|---|
-| `training/lora_train.py` | ✅ 일부 완료 | assistant 토큰 마스킹(`_mask_labels`), VRAM 해제 블록, `--skip_eval`, `--ewc_*` / `--category_weights` 인자 **추가 예정** |
-| `training/ewc.py` | 🔲 미구현 | **신설** — Fisher 계산 CLI + `EWCPenalty` 클래스 |
-| `training/dataset.py` | 🔲 미구현 | `load_jsonl_files` / `load_training_data`에 `category_weights` 파라미터 추가 |
+| `training/lora_train.py` | ✅ 완료 | assistant 토큰 마스킹, VRAM 해제, `--ewc_*` / `--category_weights`, `EWCTrainer` |
+| `training/ewc.py` | ✅ 완료 | Fisher 계산 CLI + `EWCPenalty` 클래스 |
+| `training/dataset.py` | ✅ 완료 | `category_weights` 파라미터 추가 (오버/언더샘플) |
 | `training/train_monitor.py` | ✅ 완료 | 학습 모니터링 래퍼 — 과적합 조기 종료 + VRAM 해제 |

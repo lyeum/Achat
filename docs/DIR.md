@@ -20,7 +20,7 @@ Achat/
 │                                        CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                            ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
 ├─ config.py                          ✅ dev / deploy / ui_test 환경 분기 설정
-│                                        dev: adapter_path="./output/LoRA_v7/adapter" ⚠️ 실제 없음
+│                                        dev: adapter_path="./output/LoRA_v7/adapter" ⚠️ v8 완료, v9 완료 후 LoRA_v9로 업데이트 필요
 │                                        deploy: model_path="./models/model_q4km.gguf" ⚠️ 실제 없음
 ├─ pyproject.toml                     ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정
 ├─ pyproject-deploy.toml              ✅ 배포 환경 의존성 (uv, Windows + CPU)
@@ -132,15 +132,23 @@ Achat/
 │   └─ summarizer.py                 ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 │
 ├─ output/
-│   └─ lora_v1/                      📄 LoRA 학습 결과 (실제 폴더명)
-│       └─ checkpoint-1/             ← /adapter 구조 아님, checkpoint 구조
-│           ├─ adapter_config.json
-│           ├─ adapter_model.safetensors
-│           ├─ tokenizer.json / tokenizer_config.json
-│           ├─ trainer_state.json / training_args.bin
-│           └─ optimizer.pt / scheduler.pt / rng_state.pth
-│   ⚠️ config.py는 ./output/LoRA_v7/adapter 를 참조하나 실제 폴더 없음
-│      → dev 환경 실행 시 어댑터 로드 실패, 베이스 모델로 폴백됨
+│   ├─ LoRA_v7/                      📄 LoRA_v7 학습 결과 (.gitignore 처리)
+│   │   └─ adapter/                  ✅
+│   ├─ LoRA_v8/                      📄 LoRA_v8 학습 결과 (.gitignore 처리)
+│   │   ├─ adapter/                  ✅ (eval best 1.353, 5 epoch 과적합 — v9로 대체)
+│   │   ├─ loss_curve_epoch01~05.png
+│   │   ├─ loss_curve_final.png
+│   │   ├─ fisher.pt                 ✅ ewc.py 실행 완료 (LoRA_v9 학습에 사용)
+│   │   ├─ ref_params.pt             ✅ ewc.py 실행 완료
+│   │   └─ train.log
+│   └─ LoRA_v9/                      📄 LoRA_v9 학습 결과 (.gitignore 처리)
+│       ├─ adapter/                  ✅ 현재 최신 어댑터 (config.py 참조, eval best 1.511, 3 epoch EWC λ=500)
+│       │   ├─ adapter_config.json
+│       │   ├─ adapter_model.safetensors
+│       │   └─ tokenizer.json / tokenizer_config.json
+│       ├─ loss_curve_epoch01~03.png ← epoch별 자동 저장
+│       ├─ loss_curve_final.png
+│       └─ train.log                 ← 학습 전체 로그
 │
 ├─ rag/
 │   ├─ __init__.py                   ✅ 패키지 초기화
@@ -160,9 +168,7 @@ Achat/
 │
 ├─ scripts/
 │   ├─ build_dataset.py              ✅ training/log/*.jsonl → data/lora/conversation/ 빌드
-│   │                                   ⚠️ glob("*.jsonl")이 루트만 탐색 — 실제 로그는 서브폴더
-│   │                                   (daily/emotion/feedback_neg 등)에 있어 파일을 읽지 못함
-│   │                                   → glob("**/*.jsonl", recursive=True) 로 수정 필요
+│   │                                   ✅ glob("**/*.jsonl") 수정 완료 (2026-03-22)
 │   ├─ merge_lora.py                 ✅ LoRA 어댑터 병합 (float16, low_cpu_mem_usage=True)
 │   └─ convert_to_gguf.sh            ✅ GGUF 변환 + Q4_K_M 양자화 (--llama_cpp 경로 지정 필요)
 │
@@ -193,7 +199,13 @@ Achat/
 ├─ training/
 │   ├─ 학습.md                       ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
 │   ├─ dataset.py                    ✅ ChatML 포맷 데이터셋 로더 (apply_chat_template, max_length 필터,
-│   │                                   파일별 비율 유지 stratified sampling)
+│   │                                   파일별 비율 유지 stratified sampling, category_weights 오버/언더샘플링)
+│   ├─ ewc.py                        ✅ EWC Fisher 계산 CLI + EWCPenalty 클래스
+│   │                                   compute_fisher(): base model + adapter 로드 → LoRA 파라미터만
+│   │                                   n_samples forward/backward → Fisher 대각 평균 계산
+│   │                                   → fisher.pt / ref_params.pt 저장
+│   │                                   EWCPenalty(fisher_path, ref_params_path, lambda_, device)
+│   │                                   → penalty(model): λ/2 × Σ F_i × (θ_i - θ*_i)²
 │   ├─ train_monitor.py              ✅ 학습 모니터링 래퍼 — 학습 명령어를 입력받아 subprocess로 실행
 │   │                                   trainer_state.json 폴링(기본 15초) → 과적합 감지 시 SIGTERM
 │   │                                   종료 조건: eval_loss N회 연속 상승(--n_rise) or gap 초과(--gap)
@@ -201,7 +213,10 @@ Achat/
 │   │                                   사용: python training/train_monitor.py -- python -m training.lora_train ...
 │   ├─ lora_train.py                 ✅ LoRA 학습 (bfloat16, GPU/CPU 자동 전환, --no_save, --max_steps,
 │   │                                   --eval_split, best loss 저장, loss 그래프 PNG 자동 저장,
-│   │                                   assistant 토큰 마스킹, --skip_eval)
+│   │                                   assistant 토큰 마스킹, --skip_eval,
+│   │                                   EWCTrainer + --ewc_fisher/--ewc_ref_params/--ewc_lambda,
+│   │                                   --category_weights JSON 문자열)
+│   │                                   ✅ --data_dir 기본값 training/data로 수정 (2026-03-23)
 │   │                                   학습 완료 순서:
 │   │                                     1) 어댑터 저장 (output/{run}/adapter/)
 │   │                                     2) checkpoint-* 삭제
@@ -218,13 +233,22 @@ Achat/
 │   │   └─ verify_phases.py          ✅ Phase 2/3 실환경 검증 (12턴 자동 대화, 5항목 PASS, 수동 실행)
 │   │                                   LLM 풀 로드 필요 — 수동 실행만
 │   │
-│   ├─ data/
+│   ├─ data/                         📄 학습 데이터 총 2,401건 / 38파일
 │   │   ├─ affection/                📄 친밀도 단계별 데이터 (9파일: stranger/acquaintance/familiar/
 │   │   │                               affection_low~high/close/friendly/intimate)
 │   │   ├─ common/
 │   │   │   ├─ ai_tell_removal.jsonl 📄 AI투 표현 제거 학습 데이터
 │   │   │   ├─ memory_ref.jsonl      📄 기억 참조 학습 데이터
 │   │   │   └─ persona_follow.jsonl  📄 페르소나 준수 학습 데이터
+│   │   ├─ emotion/                  📄 감정 상태별 데이터 (9종 × 20건 = 180건)
+│   │   │                               neutral / happy / affectionate / touched / curious /
+│   │   │                               sad / embarrassed / annoyed / angry
+│   │   │                               ✅ system prompt "너는 하루다." 제거 (2026-03-23, 180건)
+│   │   ├─ long_dialogue/            📄 장대화 데이터 (54건, 평균 ~10턴)
+│   │   │                               ✅ system prompt "너는 하루다." 제거 (2026-03-23, 54건)
+│   │   │   ├─ daily_chat.jsonl      📄 일상 장대화 (21건)
+│   │   │   ├─ emotional_support.jsonl 📄 감정 지지 장대화 (17건)
+│   │   │   └─ casual_deep.jsonl     📄 일상+깊은 대화 (16건)
 │   │   ├─ personality/              📄 5종 성격별 데이터 (bright/calm/cynical/dependent/tsundere)
 │   │   └─ speech_style/
 │   │       ├─ formal/               📄 formal_blunt.jsonl / formal_soft.jsonl
@@ -271,8 +295,8 @@ Achat/
     │
     ├─ assets/
     │   ├─ background/               ← 장소별 배경 이미지. 경로: {world_id}/{location}.png
-    │   │   └─ Robby.png             ⚠️ 실제 이미지 있으나 위치 불일치
-    │   │                               → background/seaside_world/beach.png 등으로 이동 필요
+    │   │   └─ seaside_world/
+    │   │       └─ beach.png         ✅ 경로 일치 확인 (2026-03-22)
     │   │
     │   ├─ characters/               ← 파츠 합성용 레이어 이미지 (128×160 px PNG)
     │   │   ├─ .gitkeep
@@ -323,10 +347,10 @@ Achat/
 
 | # | 항목 | 위치 | 설명 | 우선순위 |
 |---|---|---|---|---|
-| 1 | 오타 빈 파일 잔존 | `conversation/loader/chracter_load.py` | 0 bytes 빈 파일. 삭제 필요 | 낮음 |
-| 2 | config.py 어댑터 경로 불일치 | `config.py` dev.adapter_path | `./output/LoRA_v7/adapter` 참조하나 실제는 `lora_v1/checkpoint-1/` — 베이스 모델로 폴백 실행됨 | 중간 |
-| 3 | build_dataset.py glob 버그 | `scripts/build_dataset.py:194` | `log_dir.glob("*.jsonl")`이 루트만 탐색 — 실제 로그는 `daily/` `emotion/` 등 서브폴더에 있어 파일을 읽지 못함. `glob("**/*.jsonl")` 으로 수정 필요 | 높음 |
-| 4 | 배경 이미지 위치 불일치 | `ui_ux/assets/background/Robby.png` | `background/seaside_world/beach.png` (또는 breakwater 등) 경로로 이동해야 bridge.py가 감지함 | 중간 |
+| ~~1~~ | ~~오타 빈 파일 잔존~~ | — | ✅ 해당 없음 — 이 작업공간에 `chracter_load.py` 없음 | 해결 |
+| ~~2~~ | ~~config.py 어댑터 경로 불일치~~ | — | ✅ `./output/LoRA_v7/adapter` 실존 확인, 경로 일치 | 해결 |
+| ~~3~~ | ~~build_dataset.py glob 버그~~ | — | ✅ `glob("**/*.jsonl")` 수정 완료 (2026-03-22) | 해결 |
+| ~~4~~ | ~~배경 이미지 위치 불일치~~ | — | ✅ `background/seaside_world/beach.png` 로 이동 완료 (2026-03-22) | 해결 |
 | 5 | config.py 배포 모델 없음 | `config.py` deploy.model_path | `./models/model_q4km.gguf` 참조하나 models/ 폴더 없음 — 배포 빌드 시 생성 필요 | 낮음 (배포 전 처리) |
 | 6 | 구버전 날짜 패턴 로그 잔존 | `training/log/daily/`, `emotion/` | `2026-03-17.jsonl` 등 날짜 패턴 파일이 현행 session_id 패턴과 혼재 | 낮음 |
 

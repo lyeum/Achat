@@ -16,7 +16,7 @@
 | Phase 2 | Agent 코어, 메모리, 라우터, 페르소나 + 실환경 검증 | ✅ 완료 |
 | Phase 3 | RAG 인덱스 / 검색 + 실환경 검증 | ✅ 완료 |
 | Phase 4 | UI (PySide6/QML) — 시각적 동작 확인 완료 | ✅ 완료 |
-| Phase 5 | LoRA 학습 파이프라인 — v1 완료, v2 학습 중 | 🔄 진행중 |
+| Phase 5 | LoRA 학습 파이프라인 — v7까지 완료, v8 EWC 학습 준비 중 | 🔄 진행중 |
 | Phase 6 | 모델 병합 → GGUF 변환 → 배포 | ⏳ Phase 5 완료 후 진행 |
 | Phase 7 | 기능 모드 도구 (폴더정리/검색/프롬프트 변환) | ✅ 완료 |
 
@@ -134,7 +134,7 @@ gsettings set org.freedesktop.ibus.engine.hangul switch-keys 'Hangul,Shift+space
 ```
 
 #### 재발 방지 — main.py 자동 적용
-`_ensure_ibus_hangul()` 함수에서 앱 시작 시 자동으로 이 설정을 보장해야 함 (환경을 새로 구성할 때마다 기본값으로 초기화될 수 있음). `main.py` 수정 필요 (TODO).
+`_ensure_ibus_hangul()` 함수에서 앱 시작 시 자동으로 이 설정을 보장함 (환경을 새로 구성할 때마다 기본값으로 초기화될 수 있음). ✅ `main.py` 적용 완료 — `gsettings set org.freedesktop.ibus.engine.hangul switch-keys`를 _ensure_ibus_hangul() 내부에서 자동 실행.
 
 #### 이번 조사에서 확정된 환경 사실
 | 항목 | 값 |
@@ -372,21 +372,21 @@ Achat/
 
 ---
 
-## 7. 현재 작업 — Phase 5 v2 학습 + Phase 6 대기
+## 7. 현재 작업 — Phase 5 v7 완료 + v8 EWC 학습 준비 + Phase 6 대기
 
-### Phase 5 완료 항목 (lora_haru_v1)
-- GPU 학습 3 epoch 완료 (loss 0.4425, RTX 5060, ~37분)
-- AI투 표현: 0건/응답 (캐릭터 말투 개선 확인)
-- 기억 정확도: 40% (목표 80% 미달 — v2 재학습 중)
-- 추론 속도: 10.3 tok/s GPU
+### Phase 5 완료 항목 (LoRA_v7 기준)
+- v7까지 학습 완료 (assistant 토큰 마스킹 적용, eval_loss 1.687, train/eval gap 1.33)
+- 어댑터: `output/LoRA_v7/adapter/` ✅ (config.py 경로 일치)
+- AI투 표현 제거 확인, 캐릭터 말투 일관성 개선
+- 기억 정확도: 40% (목표 80% 미달 — EWC + 카테고리 가중치 적용 v8 학습 예정)
 
-### 현재 진행 중 (lora_haru_v2)
-- `training/data` 전체 1,461건 × 3 epoch
-- **best eval loss 기반 저장** (eval_split=0.1, `load_best_model_at_end=True`)
-- 어댑터: `output/lora_haru_v2/adapter/`
+### 다음 단계 (v8 준비)
+- `training/ewc.py` 신설 — Fisher 계산 + EWCPenalty 클래스
+- `training/dataset.py` — category_weights 파라미터 추가
+- memory_ref 샘플 120→200+ 보강 후 v8 학습
 
 ### Phase 5 → 6 전환 조건
-v2 학습 완료 후:
+v8 학습 완료 후:
 1. `eval/memory_test.py` — 기억 정확도 80% 이상 달성 확인
 2. `scripts/merge_lora.py` — LoRA 어댑터 → HF 포맷 병합
 3. cmake 설치 완료 확인 후 `scripts/convert_to_gguf.sh` 실행

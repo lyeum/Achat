@@ -416,9 +416,12 @@ python training/eval/speed_bench.py --backend transformers
 - [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터 작성
 - [x] `scripts/build_dataset.py` — training/log/*.jsonl → data/lora/conversation/ 빌드 + 시스템 프롬프트 삽입 (버그 수정: TOKENS_PER_CHAR 역수 오류, relative_to 예외 처리)
 - [x] `training/dataset.py` — data/lora/**/*.jsonl 로드 + apply_chat_template + max_length 필터 (버그 수정: relative_to 예외 처리)
-- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, --eval_split best loss 저장, --weight_decay/--lora_dropout/--max_samples 과적합 억제 옵션, epoch/완료 시 loss 그래프 PNG 자동 저장, v7~: assistant 토큰 마스킹 (system/user -100, assistant 구간만 loss)
-- [x] `training/학습.md` — 학습 루프 흐름, 실행 방법, 실시간 모니터링, 인자 전체 목록, 과적합 분석 매뉴얼, 학습 구조 리뷰, 개선안 (EWC/카테고리 가중치/KL 보류)
-- [x] `docs/plan/training_개선.md` — EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획 (상세 설계)
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, --eval_split best loss 저장, --weight_decay/--lora_dropout/--max_samples 과적합 억제 옵션, epoch/완료 시 loss 그래프 PNG 자동 저장, v7~: assistant 토큰 마스킹, `EWCTrainer` + `--ewc_*` / `--category_weights` 추가
+- [x] `training/ewc.py` — Fisher 대각 계산 CLI + `EWCPenalty` 클래스 (7-2 EWC 구현 완료, 2026-03-23)
+- [x] `training/dataset.py` — `category_weights` 파라미터 추가 — 오버/언더샘플링 (7-3 카테고리 가중치 구현 완료, 2026-03-23)
+- [x] 학습 데이터 확장: `training/data/emotion/` (9종 × 20건) + `training/data/long_dialogue/` (54건) → 총 2,401건 (38파일) (2026-03-23)
+- [x] `training/학습.md` — 학습 루프 흐름, 실행 방법, 실시간 모니터링, 인자 전체 목록, 과적합 분석 매뉴얼, 학습 구조 리뷰, 개선안 (EWC/카테고리 가중치 구현 완료)
+- [x] `docs/plan/training_개선.md` — EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획 → 7-2/7-3 ✅ 완료
 - [x] `training/eval/ai_tell_checker.py` — AI투 표현 패턴 측정 + 베이스/LoRA 비교 (F541 버그 수정)
 - [x] `training/eval/memory_test.py` — 멀티턴 기억 유지 정확도 측정 (5케이스)
 - [x] `training/eval/speed_bench.py` — transformers/llama_cpp 추론 속도 벤치마크
@@ -428,11 +431,19 @@ python training/eval/speed_bench.py --backend transformers
 - [x] CPU 파이프라인 smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
 - [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 전체 2,167건 중 max_samples=-1, assistant masking, eval best 1.687)
   - ⚠️ v7 이후 loss는 assistant-only 기준 — v6 이전(전체 토큰 loss)과 직접 비교 불가
-- [x] (실행 검증) `ai_tell_checker.py` — AI투 0건, 캐릭터 말투 개선 확인
-- [x] (실행 검증) `memory_test.py` — 5/5 통과
-- [x] (실행 검증) `speed_bench.py` — GPU 추론 속도 확인
+- [x] (실행 검증) LoRA_v8 GPU 학습 완료 (5 epoch, 2,401건, category_weights emotion×2/long_dialogue×1.5, eval best 1.353 at step 900)
+  - ⚠️ 5 epoch 과적합 발생 (step 900 이후 eval 반등, 최종 gap=1.38). 3 epoch 권장.
+  - ⚠️ memory_test 3/5 (60%) — "너는 하루다." system prompt 오염으로 이름 recall 실패
+- [x] 훈련 데이터 정제 — emotion/long_dialogue 234건 system prompt "너는 하루다." 제거 (2026-03-23)
+- [x] `lora_train.py` `--data_dir` 기본값 `data/lora` → `training/data` 수정 (2026-03-23)
+- [x] `ewc.py` Fisher 계산 완료 — `output/LoRA_v8/fisher.pt`, `ref_params.pt` 생성 (2026-03-23)
+- [x] (실행 검증) `ai_tell_checker.py` — AI투 0건/10건, 캐릭터 말투 유지 확인 (v8)
+- [x] (실행 검증) LoRA_v9 GPU 학습 완료 (3 epoch, EWC λ=500, 정제 데이터, eval best 1.511 at step 600)
+  - memory_test 4/5 (80%) — 이름 기억 1건 잔존 실패. 직업/감정/선호/계획 기억 모두 통과.
+  - ai_tell 0건/10개 응답 — 유지
+- [ ] (실행 검증) `memory_test.py` — 5/5 통과 목표 (v10~)
 - [ ] 기능 모드 JSON 출력 정확도 확인 (data/lora/function 데이터로 별도 평가 필요)
-- [ ] 최종 채택 모델 결정 — LoRA_v8 이후 재평가 (EWC + 카테고리 가중치 적용 예정, docs/plan/training_개선.md 참조)
+- [ ] 최종 채택 모델 결정
 
 ---
 
