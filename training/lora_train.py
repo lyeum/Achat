@@ -50,7 +50,7 @@ from training.dataset import load_training_data
 def parse_args():
     parser = argparse.ArgumentParser(description="LoRA 파인튜닝")
     parser.add_argument("--model",       default="Qwen/Qwen2.5-3B-Instruct", help="HuggingFace 모델명")
-    parser.add_argument("--data_dir",    default="data/lora",                 help="학습 데이터 루트")
+    parser.add_argument("--data_dir",    default="training/data",             help="학습 데이터 루트")
     parser.add_argument("--output_dir",  default="output/LoRA_v7",              help="어댑터 저장 디렉토리 (output/ 하위 경로)")
     parser.add_argument("--subset",      default=None,                        help="conversation | function | None(전체)")
     parser.add_argument("--epochs",      type=int,   default=3)
@@ -70,6 +70,13 @@ def parse_args():
     parser.add_argument("--no_save",     action="store_true", help="학습 후 어댑터 저장 건너뜀 (테스트용)")
     parser.add_argument("--max_steps",   type=int,   default=-1, help="최대 학습 스텝 수 (-1=에폭 기준)")
     parser.add_argument("--skip_eval",   action="store_true", help="학습 후 자동 평가 건너뜀")
+    # EWC
+    parser.add_argument("--ewc_fisher",     default=None,  help="fisher.pt 경로 (EWC 활성화 시 필수)")
+    parser.add_argument("--ewc_ref_params", default=None,  help="ref_params.pt 경로 (EWC 활성화 시 필수)")
+    parser.add_argument("--ewc_lambda",     type=float, default=0.0, help="EWC 강도 (0이면 비활성)")
+    # 카테고리 가중치
+    parser.add_argument("--category_weights", default=None,
+                        help='카테고리별 가중치 JSON 문자열 (예: \'{"emotion": 2.0, "long_dialogue": 1.5}\')')
     return parser.parse_args()
 
 
@@ -153,6 +160,21 @@ class LossPlotCallback(TrainerCallback):
         plot_loss(state.log_history, self._output_dir, tag="final")
 
 
+class EWCTrainer(Trainer):
+    """EWC 패널티를 compute_loss에 추가하는 Trainer 서브클래스."""
+
+    def __init__(self, ewc_penalty=None, **kwargs):
+        super().__init__(**kwargs)
+        self.ewc_penalty = ewc_penalty
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        result = super().compute_loss(model, inputs, return_outputs=True, **kwargs)
+        loss, outputs = result
+        if self.ewc_penalty is not None:
+            loss = loss + self.ewc_penalty.penalty(model)
+        return (loss, outputs) if return_outputs else loss
+
+
 def apply_lora(model, args) -> object:
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -226,9 +248,32 @@ def main():
     model, tokenizer = load_model_and_tokenizer(args.model, use_gpu)
     model = apply_lora(model, args)
 
+    # ── EWC 패널티 ────────────────────────────────────────────────────────────
+    ewc_penalty = None
+    if args.ewc_lambda > 0:
+        assert args.ewc_fisher and args.ewc_ref_params, \
+            "--ewc_lambda > 0 이면 --ewc_fisher, --ewc_ref_params 필수"
+        from training.ewc import EWCPenalty
+        ewc_penalty = EWCPenalty(
+            fisher_path=ROOT / args.ewc_fisher,
+            ref_params_path=ROOT / args.ewc_ref_params,
+            lambda_=args.ewc_lambda,
+            device="cuda" if use_gpu else "cpu",
+        )
+        logger.info(f"EWC 활성화: lambda={args.ewc_lambda}")
+
+    # ── 카테고리 가중치 ────────────────────────────────────────────────────────
+    import json as _json
+    category_weights = _json.loads(args.category_weights) if args.category_weights else None
+    if category_weights:
+        logger.info(f"카테고리 가중치: {category_weights}")
+
     # ── 데이터셋 ───────────────────────────────────────────────────────────────
     logger.info(f"데이터 로드: {args.data_dir} (subset={args.subset})")
-    raw_ds = load_training_data(args.data_dir, tokenizer, args.max_length, args.subset, args.max_samples)
+    raw_ds = load_training_data(
+        args.data_dir, tokenizer, args.max_length, args.subset,
+        args.max_samples, category_weights=category_weights,
+    )
     tokenized_ds = tokenize_dataset(raw_ds, tokenizer, args.max_length)
     logger.info(f"최종 학습 샘플 수: {len(tokenized_ds)}")
 
@@ -298,7 +343,8 @@ def main():
     )
 
     # ── Trainer ────────────────────────────────────────────────────────────────
-    trainer = Trainer(
+    trainer = EWCTrainer(
+        ewc_penalty=ewc_penalty,
         model=model,
         args=training_args,
         train_dataset=train_ds,
