@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from loguru import logger
 
 from agent.persona import load_persona
@@ -40,6 +42,29 @@ _KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("인터넷", "웹 검색", "web", "구글", "검색해줘", "찾아봐"), "web_search"),
     (("검색", "search", "찾아", "파일 찾"), "local_search"),
 ]
+
+
+_WORLD_DIR = Path(__file__).resolve().parent.parent / "conversation" / "world"
+
+
+def _find_world_path(world_id: str | None) -> Path:
+    """world_id에 해당하는 W_*.yaml 경로를 반환한다.
+
+    world_id가 None이거나 일치하는 파일이 없으면 첫 번째 YAML을 반환한다.
+    """
+    if world_id:
+        for p in sorted(_WORLD_DIR.glob("W_*.yaml")):
+            try:
+                w = load_world(p)
+                if w.get("world_id") == world_id:
+                    return p
+            except Exception:
+                continue
+
+    worlds = sorted(_WORLD_DIR.glob("W_*.yaml"))
+    if worlds:
+        return worlds[0]
+    raise FileNotFoundError(f"world YAML 없음: {_WORLD_DIR}")
 
 
 def _select_tool(user_input: str) -> BaseTool | None:
@@ -114,6 +139,41 @@ class Agent:
             f"[agent] 초기화 완료 — 캐릭터: {self.character['name']} "
             f"mood: {self.session.mood} / affection: {self.session.affection}"
         )
+
+    @classmethod
+    def from_session(
+        cls,
+        state: "SessionState",  # type: ignore[name-defined]  # noqa: F821
+        config: dict | None = None,
+    ) -> "Agent":
+        """SessionState로부터 Agent 인스턴스를 복원한다.
+
+        세션 상태(mood / affection / turn_count / location)를 YAML 초기값 대신
+        저장된 값으로 복원한다. dialogue_log는 런타임 전용이므로 빈 상태로 시작한다.
+        """
+        from conversation.session_manager import SessionState as _SS  # local import
+
+        cfg = config or get_config()
+        world_path = _find_world_path(state.world_id)
+
+        agent = cls(
+            character_id=state.char_id,
+            world_path=str(world_path),
+            scenario_id=state.scenario_id,
+            act_id=state.act_id,
+            config=cfg,
+        )
+
+        # stub 모드에서는 session이 None이므로 복원 불필요
+        if agent.session is not None:
+            agent.session.session_id = state.session_id
+            agent.session.mood       = state.mood
+            agent.session.affection  = state.affection
+            agent.session.turn_count = state.turn_count
+            if state.location:
+                agent.session.location = state.location
+
+        return agent
 
     def chat(self, user_input: str, stream: bool = True) -> str:
         """대화 모드 진입점. user_input을 받아 캐릭터 응답을 반환한다."""

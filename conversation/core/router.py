@@ -87,6 +87,9 @@ class ConversationRouter:
         if summarizer.check_trigger(self.session, self._trigger_n):
             self._run_summarizer()
 
+        # 9. play_log 기록은 호출자(bridge.py or conversation/main.py)가 담당
+        #    training/log/conversation_logger.py ConversationLogger.on_turn() 참조
+
         return response
 
     # ── 내부 헬퍼 ──────────────────────────────────────────────────────────────
@@ -109,6 +112,7 @@ class ConversationRouter:
                 if location_name in act.get("location", ""):
                     self.session.scenario_id      = scenario["scenario_id"]
                     self.session.act_id           = act["act_id"]
+                    self.session.location         = act["location"]
                     self.session.location_context = None
                     logger.info(f"[router] 장소 이동 (YAML): {act['location']}")
                     return
@@ -116,6 +120,7 @@ class ConversationRouter:
         # RAG 검색 or LLM 생성
         world_desc = self.world.get("description", "")
         desc = find_or_create_location(location_name, world_desc, self.rag, self.llm)
+        self.session.location         = location_name
         self.session.location_context = f"{location_name}\n{desc}"
         logger.info(f"[router] 동적 장소 설정: '{location_name}'")
 

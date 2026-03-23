@@ -110,6 +110,31 @@ class LongTermMemory:
         )
         return filtered
 
+    def clear_session(self, character_id: str, session_id: str) -> int:
+        """해당 session_id의 에피소딕 기억을 모두 삭제한다.
+
+        Parameters
+        ----------
+        character_id : 캐릭터 ID (컬렉션 특정용)
+        session_id   : 삭제할 세션 ID
+
+        Returns
+        -------
+        삭제된 항목 수
+        """
+        col = self._collection(character_id)
+        if col.count() == 0:
+            return 0
+
+        result = col.get(where={"session_id": {"$eq": session_id}})
+        ids = result.get("ids", [])
+        if ids:
+            col.delete(ids=ids)
+            logger.info(
+                f"[long_term] 세션 기억 삭제: {character_id}/{session_id} ({len(ids)}개)"
+            )
+        return len(ids)
+
     def seed(self, entries: list[dict]) -> None:
         """M_default.json 초기 데이터를 일괄 삽입한다 (이미 있으면 upsert로 덮어씀)."""
         for entry in entries:

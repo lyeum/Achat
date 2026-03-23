@@ -106,7 +106,7 @@ def write_to_vdb(
         "content": summary,
         "metadata": {
             "character_id": session.character_id,
-            "session_id":   str(id(session)),
+            "session_id":   session.session_id or str(id(session)),
             "turn_range":   f"{turn_start}-{session.turn_count}",
             "importance":   score,
             "tags":         [],
