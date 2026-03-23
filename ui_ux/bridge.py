@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
+from conversation.session_manager import SessionManager, SessionState
 from ui_ux.chat_panel import LLMWorker
 
 _ASSETS         = Path(__file__).resolve().parent / "assets"
@@ -12,7 +14,7 @@ _CHARACTER_DIR  = Path(__file__).resolve().parent.parent / "conversation" / "cha
 _WORLD_DIR      = Path(__file__).resolve().parent.parent / "conversation" / "world"
 _ICONS_DIR      = _ASSETS / "icons"         # icons/{CharId}/{CharId}.png + emotion/
 _CHAR_PARTS_DIR = _ASSETS / "characters"    # characters/{type}/*.png (base/hair/eye/mouth/cloth)
-_BG_DIR         = _ASSETS / "background"    # background/{world_id}/{act_id}.png
+_BG_DIR         = _ASSETS / "background"    # background/{world_id}/{location}.png
 
 
 class ChatBridge(QObject):
@@ -39,12 +41,32 @@ class ChatBridge(QObject):
     characterNameChanged = Signal(str)
     backgroundChanged    = Signal(str)        # file URL or ""
     moodChanged          = Signal(str)        # neutral | happy | annoyed | sad
+    imageImported        = Signal(str, str)   # slot_type, result (icon→URL, parts→filename)
 
     def __init__(self, agent):
         super().__init__()
         self._agent = agent
         self._worker: LLMWorker | None = None
         self._character_name: str = agent.character.get("name", "")
+
+        # SessionManager 초기화
+        cfg = getattr(agent, "cfg", {})
+        session_dir = Path(cfg.get("session_dir", "./data/sessions"))
+        self._session_manager = SessionManager(session_dir)
+
+        # stub 모드가 아니면 세션 ID를 SessionManager와 연동
+        if not getattr(agent, "_stub", True) and agent.session is not None:
+            self._init_session()
+
+        # 학습 데이터 로거 (enable_play_log=True인 환경에서만 활성화)
+        self._conv_logger = None
+        if cfg.get("enable_play_log", False) and not getattr(agent, "_stub", True):
+            from training.log.conversation_logger import ConversationLogger
+            char_id = agent.character.get("id", "unknown")
+            self._conv_logger = ConversationLogger(character_id=char_id)
+
+        # 현재 act 위치 — session 없는 stub 모드에서도 배경 추적
+        self._location: str = self._resolve_initial_location()
 
         # 초기 배경/mood 상태
         self._current_bg: str = self._build_bg_url()
@@ -69,44 +91,84 @@ class ChatBridge(QObject):
     def currentMood(self) -> str:
         return self._current_mood
 
+    # ── 세션 관리 내부 헬퍼 ──────────────────────────────────────────────────
+
+    def _init_session(self) -> None:
+        """앱 시작 시 SessionManager와 ConversationSession을 연동한다.
+
+        이전 세션이 있으면 mood / affection / turn_count를 복원하고,
+        없으면 새 세션을 생성해 session_id를 부여한다.
+        """
+        char_id = self._agent.character.get("id", "")
+        active = self._session_manager.get_active()
+        if active and active.char_id == char_id:
+            self._agent.session.session_id = active.session_id
+            self._agent.session.mood       = active.mood
+            self._agent.session.affection  = active.affection
+            self._agent.session.turn_count = active.turn_count
+            if active.location:
+                self._agent.session.location = active.location
+        else:
+            state = self._session_manager.activate(char_id)
+            self._agent.session.session_id = state.session_id
+
+    def _sync_session_state(self) -> None:
+        """ConversationSession의 현재 상태를 SessionState에 동기화해 저장한다."""
+        session = getattr(self._agent, "session", None)
+        if session is None or session.session_id is None:
+            return
+        state = self._session_manager.get_active()
+        if state is None:
+            return
+        state.turn_count  = session.turn_count
+        state.mood        = session.mood
+        state.affection   = session.affection
+        state.location    = session.location    or state.location
+        state.act_id      = session.act_id      or state.act_id
+        state.scenario_id = session.scenario_id or state.scenario_id
+        state.world_id    = session.world_id    or state.world_id
+        self._session_manager.save_state(state)
+
+    def _rebuild_agent(self, state: SessionState) -> None:
+        """SessionState로부터 새 Agent를 구성하고 self._agent를 교체한다."""
+        from agent.core import Agent
+
+        cfg = getattr(self._agent, "cfg", None)
+        self._agent = Agent.from_session(state, cfg)
+        self._character_name = self._agent.character.get("name", state.char_id)
+        self._location = self._resolve_initial_location()
+
+        # 캐릭터/세션 교체 시 ConversationLogger도 새 캐릭터로 재시작
+        if self._conv_logger is not None:
+            self._conv_logger.flush_remaining()
+            from training.log.conversation_logger import ConversationLogger
+            self._conv_logger = ConversationLogger(character_id=state.char_id)
+
     # ── 내부 헬퍼 ────────────────────────────────────────────────────────────
 
-    def _build_bg_url(self) -> str:
-        """현재 session의 act에 해당하는 location 배경 이미지 file URL을 반환한다.
-        파일이 없거나 stub 모드면 빈 문자열을 반환한다.
-
-        탐색 경로: background/{world_id}/{location}.png
-        location은 world YAML의 act.location 필드에서 역참조한다.
-        """
-        from conversation.loader.world_load import get_act, load_world
-
+    def _resolve_initial_location(self) -> str:
+        """초기화 시 YAML에서 location을 읽어온다 (session 없는 stub 모드 대응)."""
         session = getattr(self._agent, "session", None)
+        if session and session.location:
+            return session.location
         world   = getattr(self._agent, "world", {})
-        world_id    = world.get("world_id", "")
-        scenario_id = session.scenario_id if session else None
-        act_id      = session.act_id if session else None
-        if not (world_id and scenario_id and act_id):
-            return ""
+        s_id = getattr(session, "scenario_id", None) if session else None
+        a_id = getattr(session, "act_id",      None) if session else None
+        if s_id and a_id:
+            from conversation.loader.world_load import get_act
+            act = get_act(world, s_id, a_id)
+            return act.get("location", "") if act else ""
+        return ""
 
-        # world dict가 이미 로드돼 있으면 그대로 사용, 없으면 YAML에서 로드
-        if world:
-            act = get_act(world, scenario_id, act_id)
-        else:
-            try:
-                for p in _WORLD_DIR.glob("W_*.yaml"):
-                    w = load_world(p)
-                    if w.get("world_id") == world_id:
-                        act = get_act(w, scenario_id, act_id)
-                        break
-                else:
-                    act = None
-            except Exception:  # noqa: BLE001
-                act = None
-
-        location = act.get("location", "") if act else ""
-        if not location:
+    def _build_bg_url(self) -> str:
+        """self._location과 world_id로 배경 이미지 file URL을 반환한다.
+        파일이 없으면 빈 문자열을 반환한다.
+        탐색 경로: background/{world_id}/{location}.png
+        """
+        world_id = getattr(self._agent, "world", {}).get("world_id", "")
+        if not world_id or not self._location:
             return ""
-        path = _BG_DIR / world_id / f"{location}.png"
+        path = _BG_DIR / world_id / f"{self._location}.png"
         return QUrl.fromLocalFile(str(path)).toString() if path.exists() else ""
 
     def _read_mood(self) -> str:
@@ -115,6 +177,11 @@ class ChatBridge(QObject):
 
     def _sync_state(self) -> None:
         """응답 후 act/mood 변화를 감지하고 변경 시 시그널을 emit한다."""
+        # session.location이 router에 의해 바뀌었을 수 있으므로 동기화
+        session = getattr(self._agent, "session", None)
+        if session and session.location:
+            self._location = session.location
+
         new_bg = self._build_bg_url()
         if new_bg != self._current_bg:
             self._current_bg = new_bg
@@ -127,16 +194,24 @@ class ChatBridge(QObject):
 
     # ── Slots (QML → Python) ──────────────────────────────────────────────────
 
-    @Slot(str)
-    def sendMessage(self, text: str) -> None:
-        """QML 입력창에서 메시지를 전송할 때 호출된다."""
+    @Slot(str, str)
+    def sendMessage(self, text: str, mode: str = "chat") -> None:
+        """QML 입력창에서 메시지를 전송할 때 호출된다.
+
+        Parameters
+        ----------
+        text : str
+            사용자 입력 텍스트.
+        mode : str
+            "chat" | "function" — QML currentMode 값을 그대로 전달한다.
+        """
         if not text.strip() or self._worker is not None:
             return
 
         self.messageAdded.emit("user", text)
         self.statusChanged.emit("thinking")
 
-        self._worker = LLMWorker(self._agent, text)
+        self._worker = LLMWorker(self._agent, text, mode=mode)
         self._worker.response_ready.connect(self._on_response)
         self._worker.error_occurred.connect(self._on_error)
         self._worker.finished.connect(self._on_done)
@@ -297,7 +372,7 @@ class ChatBridge(QObject):
         """
         import json
 
-        part_types = ["base", "hair", "eye", "mouth", "cloth"]
+        part_types = ["base", "hair", "eye", "eyebrow", "mouth", "cloth"]
         result: dict[str, list[str]] = {}
         for pt in part_types:
             d = _CHAR_PARTS_DIR / pt
@@ -305,17 +380,85 @@ class ChatBridge(QObject):
                          if d.exists() else []
         return json.dumps(result, ensure_ascii=False)
 
+    # ── 이미지 임포트 ─────────────────────────────────────────────────────────
+
+    _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
+
+    def _import_image(self, slot_type: str, source_path: str) -> str:
+        """이미지 파일을 해당 슬롯 경로에 복사하고 결과를 반환한다.
+
+        Returns
+        -------
+        str
+            icon  → file URL (``file:///...``)
+            parts → 복사된 파일명 (``hair_01.png`` 등)
+            실패  → ""
+        """
+        import shutil
+        from pathlib import Path as _P
+
+        src = _P(source_path)
+        if not src.exists() or src.suffix.lower() not in self._IMAGE_EXTS:
+            return ""
+
+        char_id = self.characterId
+
+        if slot_type == "icon":
+            if not char_id:
+                return ""
+            dest_dir = _ICONS_DIR / char_id
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"{char_id}.png"
+            shutil.copy2(str(src), str(dest))
+            return QUrl.fromLocalFile(str(dest)).toString()
+
+        if slot_type in ("base", "hair", "eye", "eyebrow", "mouth", "cloth"):
+            dest_dir = _CHAR_PARTS_DIR / slot_type
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / src.name
+            shutil.copy2(str(src), str(dest))
+            return src.name
+
+        if slot_type.startswith("emotion_"):
+            mood = slot_type[len("emotion_"):]
+            if not char_id or not mood:
+                return ""
+            dest_dir = _ICONS_DIR / char_id / "emotion"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"{mood}.png"
+            shutil.copy2(str(src), str(dest))
+            return QUrl.fromLocalFile(str(dest)).toString()
+
+        return ""
+
+    @Slot(str)
+    def browseImage(self, slot_type: str) -> None:
+        """네이티브 파일 다이얼로그를 열어 이미지를 선택·임포트한다."""
+        from PySide6.QtWidgets import QFileDialog
+
+        img_filter = (
+            "이미지 파일 (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tiff *.tif);;"
+            "모든 파일 (*)"
+        )
+        path, _ = QFileDialog.getOpenFileName(None, "이미지 선택", "", img_filter)
+        if path:
+            result = self._import_image(slot_type, path)
+            if result:
+                self.imageImported.emit(slot_type, result)
+
+    @Slot(str, str)
+    def importImageFromDrop(self, slot_type: str, file_url: str) -> None:
+        """드래그&드롭 file URL을 받아 이미지를 임포트한다."""
+        local = QUrl(file_url).toLocalFile() if file_url.startswith("file") else file_url
+        if local:
+            result = self._import_image(slot_type, local)
+            if result:
+                self.imageImported.emit(slot_type, result)
+
     @Slot(str, str, str)
     def changeWorld(self, world_id: str, scenario_id: str, act_id: str) -> None:
-        """세계관 / 시나리오 / act를 전환한다."""
-        if self._agent.session is None:
-            return
-
-        import json as _json
-
-        from agent.persona import swap_persona
-        from conversation.core.prompt_build import PromptBuilder
-        from conversation.loader.world_load import load_world
+        """세계관 / 시나리오 / act를 전환한다. stub 모드에서는 배경만 전환."""
+        from conversation.loader.world_load import get_act, load_world
 
         for path in _WORLD_DIR.glob("W_*.yaml"):
             try:
@@ -326,26 +469,44 @@ class ChatBridge(QObject):
                 continue
 
             try:
-                new_char, new_session = swap_persona(
-                    session=self._agent.session,
-                    new_character_id=self._agent.character["id"],
-                    world_id=world_id,
-                    scenario_id=scenario_id,
-                    act_id=act_id,
-                )
-                self._agent.world     = world
-                self._agent.character = new_char
-                self._agent.session   = new_session
+                # location 갱신 (session 유무 관계없이)
+                act_data = get_act(world, scenario_id, act_id)
+                self._location = act_data.get("location", "") if act_data else ""
+                self._agent.world = world
 
-                if self._agent.router is not None:
-                    self._agent.router.character = new_char
-                    self._agent.router.session   = new_session
-                    self._agent.router.builder   = PromptBuilder(
-                        new_char, world, new_session,
-                        count_tokens_fn=self._agent.llm.count_tokens,
+                if self._agent.session is not None:
+                    # 세계관/시나리오/act를 세션에 반영 (session_id 유지)
+                    from conversation.core.prompt_build import PromptBuilder
+                    old_session_id = self._agent.session.session_id
+                    from agent.persona import swap_persona
+                    new_char, new_session = swap_persona(
+                        session=self._agent.session,
+                        new_character_id=self._agent.character["id"],
+                        world_id=world_id,
+                        scenario_id=scenario_id,
+                        act_id=act_id,
                     )
+                    new_session.location   = self._location
+                    new_session.session_id = old_session_id  # session_id 유지
+                    self._agent.character = new_char
+                    self._agent.session   = new_session
+                    if self._agent.router is not None:
+                        self._agent.router.character = new_char
+                        self._agent.router.session   = new_session
+                        self._agent.router.builder   = PromptBuilder(
+                            new_char, world, new_session,
+                            count_tokens_fn=self._agent.llm.count_tokens,
+                        )
+                    # 변경된 world/scenario/act를 SessionState에 반영
+                    self._sync_session_state()
 
-                self._sync_state()
+                # 항상 배경/mood emit
+                new_bg = self._build_bg_url()
+                self._current_bg = new_bg
+                self.backgroundChanged.emit(new_bg)
+                new_mood = self._read_mood()
+                self._current_mood = new_mood
+                self.moodChanged.emit(new_mood)
             except Exception as e:  # noqa: BLE001
                 self.messageAdded.emit("system", f"[세계관 변경 실패] {e}")
             return
@@ -354,41 +515,108 @@ class ChatBridge(QObject):
 
     @Slot(str)
     def changeCharacter(self, char_id: str) -> None:
-        """캐릭터를 핫스왑하고 이름 변경 시그널을 emit한다."""
-        if self._agent.session is None:   # stub / ui_test 모드
+        """캐릭터를 전환하고 해당 캐릭터의 마지막 세션을 재개한다."""
+        if getattr(self._agent, "_stub", True):
             return
 
-        from agent.persona import swap_persona
-        from conversation.core.prompt_build import PromptBuilder
+        # 현재 세션 상태 저장
+        self._sync_session_state()
+
+        # 대상 캐릭터의 세션 활성화
+        state = self._session_manager.activate(char_id.strip())
+
         try:
-            new_char, new_session = swap_persona(
-                session=self._agent.session,
-                new_character_id=char_id.strip(),
-            )
-            self._agent.character = new_char
-            self._agent.session   = new_session
-
-            # router와 builder도 새 character / session 으로 교체
-            if self._agent.router is not None:
-                self._agent.router.character = new_char
-                self._agent.router.session   = new_session
-                self._agent.router.builder   = PromptBuilder(
-                    new_char,
-                    self._agent.world,
-                    new_session,
-                    count_tokens_fn=self._agent.llm.count_tokens,
-                )
-
-            self._character_name = new_char.get("name", char_id)
-            self.characterNameChanged.emit(self._character_name)
-        except FileNotFoundError as e:
+            self._rebuild_agent(state)
+        except Exception as e:
             self.messageAdded.emit("system", f"[캐릭터 변경 실패] {e}")
+            return
+
+        self.characterNameChanged.emit(self._character_name)
+
+        new_bg = self._build_bg_url()
+        self._current_bg = new_bg
+        self.backgroundChanged.emit(new_bg)
+
+        new_mood = self._read_mood()
+        self._current_mood = new_mood
+        self.moodChanged.emit(new_mood)
+
+    @Slot(bool)
+    def newSession(self, keep_memory: bool = False) -> None:
+        """현재 캐릭터의 새 세션을 시작한다.
+
+        Parameters
+        ----------
+        keep_memory : True이면 이전 세션의 에피소딕 기억을 보존한다.
+                      False이면 삭제한다 (기본값).
+        """
+        if getattr(self._agent, "_stub", True):
+            return
+
+        # 현재 세션 상태 저장
+        self._sync_session_state()
+
+        char_id = self._agent.character.get("id", "")
+        new_state, old_session_id = self._session_manager.new_session(char_id, keep_memory)
+
+        # 에피소딕 기억 삭제 (keep_memory=False 시)
+        if old_session_id and self._agent.long_term is not None:
+            self._agent.long_term.clear_session(char_id, old_session_id)
+
+        try:
+            self._rebuild_agent(new_state)
+        except Exception as e:
+            self.messageAdded.emit("system", f"[새 세션 시작 실패] {e}")
+            return
+
+        new_bg = self._build_bg_url()
+        self._current_bg = new_bg
+        self.backgroundChanged.emit(new_bg)
+
+        new_mood = self._read_mood()
+        self._current_mood = new_mood
+        self.moodChanged.emit(new_mood)
+
+        label = "새 세션이 시작되었습니다." if not keep_memory else "새 세션 시작 (기억 유지)."
+        self.messageAdded.emit("system", label)
+
+    @Slot(str, result=str)
+    def listSessions(self, char_id: str) -> str:
+        """해당 캐릭터의 세션 목록을 JSON 문자열로 반환한다.
+
+        Returns
+        -------
+        str
+            ``[{"session_id": "...", "char_id": "...", "created_at": "...", "last_active": "..."}]``
+        """
+        metas = self._session_manager.list_sessions(char_id)
+        return json.dumps(
+            [{"session_id": m.session_id, "char_id": m.char_id,
+              "created_at": m.created_at, "last_active": m.last_active}
+             for m in metas],
+            ensure_ascii=False,
+        )
 
     # ── 내부 콜백 ─────────────────────────────────────────────────────────────
 
     def _on_response(self, response: str) -> None:
         self.messageAdded.emit("assistant", response)
         self._sync_state()
+        self._sync_session_state()  # 턴 종료 시 세션 상태 디스크 동기화
+
+        # 학습 데이터 로깅 (enable_play_log=True 환경)
+        if self._conv_logger is not None:
+            session = getattr(self._agent, "session", None)
+            if session is not None:
+                # 마지막으로 추가된 user 발화 복원 (dialogue_log[-2])
+                log = session.dialogue_log
+                user_text = log[-2]["content"] if len(log) >= 2 else ""
+                self._conv_logger.on_turn(
+                    user_input=user_text,
+                    assistant_response=response,
+                    mood=session.mood,
+                    affection=session.affection,
+                )
 
     def _on_error(self, msg: str) -> None:
         self.messageAdded.emit("system", f"[오류] {msg}")

@@ -3,7 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
 // PIP 마스코트 모드 컴포넌트
-// 50×50 캐릭터 아이콘 + 말풍선 (위로 확장)
+// 160×160 캐릭터 아이콘 + 말풍선 (위로 확장)
 Item {
     id: pipRoot
 
@@ -147,10 +147,10 @@ Item {
         }
     }
 
-    // ── 캐릭터 아이콘 (50×50 고정) ───────────────────────────────────────────
+    // ── 캐릭터 아이콘 (160×160 고정) ──────────────────────────────────────────
     Rectangle {
         id: iconArea
-        width: 50; height: 50
+        width: 160; height: 160
         anchors { bottom: parent.bottom; left: parent.left }
         radius: 8
         color: "#2A2A2A"
