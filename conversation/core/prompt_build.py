@@ -100,61 +100,45 @@ class PromptBuilder:
     # ── Layer 생성 ────────────────────────────────────────────────────────────
 
     def _layer_a(self) -> str:
-        """캐릭터 시스템 프롬프트: 이름·설명·말투·현재 상태·금지 규칙."""
+        """캐릭터 시스템 프롬프트 — 학습 데이터 형식(평문 단락)에 맞춰 조립.
+
+        학습 데이터 system prompt 형식:
+          "조용하고 차분한 태도로 대화한다. 반말을 쓰고 단답형이 많다. ..."
+        헤더/섹션 없이 단일 평문 단락으로 출력한다.
+        """
         c = self.character
-        rules = "\n".join(f"- {r}" for r in c.get("rules", []))
         tier = self._affection_tier()
 
         # 톤: 캐릭터 YAML tone_guide 우선, 없으면 기본값
         tone_guide: dict = c.get("state", {}).get("tone_guide", {})
         tone = tone_guide.get(tier) or _TONE_DEFAULT.get(tier, _TONE_DEFAULT["mid"])
 
-        # mood 힌트
+        # mood 힌트 (neutral은 빈 문자열)
         mood_hint = _MOOD_HINT.get(self.session.mood, "")
 
-        # 대화 수위 파라미터
-        conv = c.get("conversation", {})
-        conv_lines = []
-        if "response_length" in conv:
-            lvl = conv["response_length"].get(tier, conv["response_length"].get("mid", 0.5))
-            if lvl <= 0.3:
-                conv_lines.append("응답을 매우 짧게 유지한다 (1~2문장 이내).")
-            elif lvl <= 0.6:
-                conv_lines.append("응답 길이는 보통 수준으로 유지한다.")
-            else:
-                conv_lines.append("응답이 자연스럽게 조금 길어질 수 있다.")
-        if "openness" in conv:
-            lvl = conv["openness"].get(tier, conv["openness"].get("mid", 0.4))
-            if lvl <= 0.2:
-                conv_lines.append("자신의 감정이나 생각을 거의 드러내지 않는다.")
-            elif lvl <= 0.5:
-                conv_lines.append("간간이 자신의 생각을 짧게 내비친다.")
-            else:
-                conv_lines.append("비교적 솔직하게 자신의 생각을 표현한다.")
-        if "directness" in conv:
-            lvl = conv["directness"]
-            if lvl <= 0.3:
-                conv_lines.append("하고 싶은 말을 돌려서 표현한다.")
-            elif lvl >= 0.7:
-                conv_lines.append("하고 싶은 말을 직접적으로 표현한다.")
+        # 핵심 규칙만 한 문장으로 압축
+        rules_list = c.get("rules", [])
+        rules_brief = "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, \"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다." if rules_list else ""
 
-        state_parts = [f"mood: {self.session.mood}  /  affection tier: {tier}", tone]
+        # 평문 단락으로 조립 (이름 + 설명 + 말투 + 톤 + mood + 규칙)
+        parts = []
+        name = c.get("name", "")
+        if name:
+            parts.append(f"너의 이름은 {name}이다.")
+        desc = c.get("description", "").strip()
+        if desc:
+            parts.append(desc)
+        speech = c.get("speech_style", "").strip()
+        if speech:
+            parts.append(speech)
+        if tone:
+            parts.append(tone)
         if mood_hint:
-            state_parts.append(mood_hint)
-        if conv_lines:
-            state_parts.append("\n".join(conv_lines))
+            parts.append(mood_hint)
+        if rules_brief:
+            parts.append(rules_brief)
 
-        return "\n".join([
-            f"너의 이름은 {c['name']}이다.",
-            "",
-            f"[성격 / 설명]\n{c.get('description', '').strip()}",
-            "",
-            f"[말투 규칙]\n{c.get('speech_style', '').strip()}",
-            "",
-            "[현재 감정 상태]\n" + "\n".join(state_parts),
-            "",
-            f"[금지 규칙]\n{rules}",
-        ])
+        return " ".join(parts)
 
     def _layer_b(self, rag_results: list[str] | None = None) -> str:
         """세계관 설명 + 현재 Act 상황 + RAG 검색 결과 (있을 때).
