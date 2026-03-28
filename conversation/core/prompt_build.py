@@ -116,9 +116,15 @@ class PromptBuilder:
         # mood 힌트 (neutral은 빈 문자열)
         mood_hint = _MOOD_HINT.get(self.session.mood, "")
 
-        # 핵심 규칙만 한 문장으로 압축
+        # 규칙: 문자열 리스트면 직접 조립 (build_sft_from_feedback.py와 동일 포맷)
         rules_list = c.get("rules", [])
-        rules_brief = "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, \"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다." if rules_list else ""
+        if rules_list and all(isinstance(r, str) for r in rules_list):
+            rules_brief = " ".join(rules_list)
+        elif rules_list:
+            # dict 타입 rules(CH_default.yaml 등) — 폴백 요약
+            rules_brief = "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, \"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다."
+        else:
+            rules_brief = ""
 
         # conversation 파라미터 → 자연어 지시문 (tier별 response_length/openness + 고정 directness)
         conv_hints = self._conv_hints(c, tier)
@@ -127,7 +133,7 @@ class PromptBuilder:
         parts = []
         name = c.get("name", "")
         if name:
-            parts.append(f"너의 이름은 {name}이다.")
+            parts.append(f"너는 {name}이다.")
         desc = c.get("description", "").strip()
         if desc:
             parts.append(desc)

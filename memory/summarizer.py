@@ -10,7 +10,8 @@ from memory.long_term import LongTermMemory
 
 # 중요도 판정 키워드 (M_schema.json importance_rules 기준)
 _HIGH_KEYWORDS = [
-    "이름", "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워",
+    "이름:", "이름은", "이름이", "이름",  # "이름: X" 형태 우선 인식
+    "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워",
     "기억해줘", "잊지마", "중요해", "말해줄게", "비밀", "처음으로",
 ]
 _MID_KEYWORDS  = [
@@ -50,6 +51,7 @@ def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
             "content": (
                 "다음 대화를 1~3문장으로 간결하게 요약해. "
                 "사용자에 대해 알게 된 정보(이름, 취미, 감정, 사건)를 중심으로 써. "
+                "사용자의 이름이 대화에서 언급된 경우, 반드시 '이름: [이름]' 형태로 요약에 포함해. "
                 "캐릭터 시점으로 쓰지 말고, 객관적으로 요약해."
             ),
         },
@@ -73,7 +75,7 @@ def score_importance(summary: str) -> float:
         if kw in summary:
             score = max(score, 0.85)
             break
-    if score < 0.5:
+    if score == 0.5:  # high 키워드 미매칭 시에만 mid 키워드 검사
         for kw in _MID_KEYWORDS:
             if kw in summary:
                 score = max(score, 0.6)
