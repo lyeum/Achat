@@ -120,7 +120,10 @@ class PromptBuilder:
         rules_list = c.get("rules", [])
         rules_brief = "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, \"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다." if rules_list else ""
 
-        # 평문 단락으로 조립 (이름 + 설명 + 말투 + 톤 + mood + 규칙)
+        # conversation 파라미터 → 자연어 지시문 (tier별 response_length/openness + 고정 directness)
+        conv_hints = self._conv_hints(c, tier)
+
+        # 평문 단락으로 조립 (이름 + 설명 + 말투 + 톤 + mood + 대화 수위 + 규칙)
         parts = []
         name = c.get("name", "")
         if name:
@@ -135,6 +138,7 @@ class PromptBuilder:
             parts.append(tone)
         if mood_hint:
             parts.append(mood_hint)
+        parts.extend(conv_hints)
         if rules_brief:
             parts.append(rules_brief)
 
@@ -184,6 +188,71 @@ class PromptBuilder:
         return short_buf[-2:]
 
     # ── 헬퍼 ─────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _conv_hints(character: dict, tier: str) -> list[str]:
+        """CH_*.yaml conversation 파라미터를 자연어 지시문 리스트로 변환한다.
+
+        response_length / openness 는 tier별 값, directness 는 고정값.
+        YAML에 conversation 필드가 없으면 빈 리스트를 반환한다.
+        """
+        conv: dict = character.get("conversation", {})
+        if not conv:
+            return []
+
+        hints: list[str] = []
+
+        # ── response_length ───────────────────────────────────────────────────
+        rl_val = conv.get("response_length", {})
+        if isinstance(rl_val, dict):
+            rl = rl_val.get(tier)
+        else:
+            rl = rl_val  # 고정값으로 쓴 경우 허용
+
+        if rl is not None:
+            if rl < 0.15:
+                hints.append("한 문장 이내로 짧게 끊는다.")
+            elif rl < 0.35:
+                hints.append("한두 문장 정도로 답한다.")
+            elif rl < 0.55:
+                hints.append("두세 문장 수준으로 답한다.")
+            elif rl < 0.70:
+                hints.append("서너 문장 정도로 답할 수 있다.")
+            else:
+                hints.append("감정이나 생각을 여러 문장으로 표현할 수 있다.")
+
+        # ── openness ─────────────────────────────────────────────────────────
+        op_val = conv.get("openness", {})
+        if isinstance(op_val, dict):
+            op = op_val.get(tier)
+        else:
+            op = op_val
+
+        if op is not None:
+            if op < 0.1:
+                hints.append("감정을 거의 드러내지 않는다.")
+            elif op < 0.25:
+                hints.append("감정을 드러내는 경우가 드물다.")
+            elif op < 0.45:
+                hints.append("가끔 감정이 말 속에 묻어난다.")
+            elif op < 0.65:
+                hints.append("감정을 자연스럽게 표현한다.")
+            else:
+                hints.append("감정을 솔직하게 표현한다.")
+
+        # ── directness (tier 무관 고정값) ─────────────────────────────────────
+        dr = conv.get("directness")
+        if dr is not None:
+            if dr < 0.3:
+                hints.append("말을 자주 돌려서 표현한다.")
+            elif dr < 0.55:
+                hints.append("말을 돌려 표현하는 경우가 많다.")
+            elif dr < 0.7:
+                hints.append("대체로 직접적으로 표현한다.")
+            else:
+                hints.append("하고 싶은 말을 직접적으로 표현한다.")
+
+        return hints
 
     def _affection_tier(self) -> str:
         thresholds: dict = (

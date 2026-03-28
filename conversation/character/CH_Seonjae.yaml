@@ -77,6 +77,7 @@ state:
     intimate:     "아주 편한 상태. 감정을 솔직하게, 하지만 조심스럽게 표현한다."
 
 # ── 대화 수위 파라미터 ────────────────────────────────────────────────────────
+# prompt_build.py _conv_hints()에서 tier별 자연어 지시문으로 변환 후 Layer A에 삽입
 conversation:
   response_length:
     stranger:     0.2
