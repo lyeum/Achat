@@ -267,10 +267,16 @@ main.py
 
 #### 4-1. `ui_ux/bridge.py` — Python↔QML 브리지
 - `ChatBridge(QObject)` — QML context property `bridge`로 등록
-- Signal: `messageAdded` / `statusChanged` / `characterNameChanged` / `backgroundChanged` / `moodChanged`
+- Signal: `messageAdded` / `statusChanged` / `characterNameChanged` / `backgroundChanged` / `moodChanged` / `imageImported`
 - Slot: `sendMessage` / `snapToEdge` / `changeCharacter` / `changeWorld`
        `loadCustomization` / `saveCustomization` / `getAllPartsList`
+       `browseImage` / `importImageFromDrop` / `browseCharacterYaml`
+       `newSession` / `listSessions`
+       `getCharacterStatus` / `resetCharacter`
+       `getTheme` / `saveTheme`
 - `_build_bg_url()`: act_id → location 역참조 후 `{location}.png` 탐색
+- SessionManager 연동: `_init_session()` / `_sync_session_state()` / `_rebuild_agent()`
+- `_PREFS_PATH`: `ui_ux/assets/preferences.json` (테마 등 UI 환경설정)
 
 #### 4-2. `ui_ux/chat_panel.py` — LLMWorker
 - `LLMWorker(QThread)` — `agent.chat(stream=False)` 비동기 실행
@@ -289,10 +295,15 @@ main.py
 - `ListView` + `messageModel(ListModel)` — `bridge.messageAdded` 시그널로 추가
 - `FontLoader` — `/mnt/c/Windows/Fonts/malgun.ttf` 로드 (WSL2 한글 폰트)
 - `onClosing: Qt.quit()` — X 버튼/Alt+F4 시 앱 완전 종료
-- `Component.onCompleted` — 초기 위치 우하단 설정 (`Screen.width/height` 기준)
+- `Component.onCompleted` — 초기 위치 우하단 설정, loadCustomization() + getTheme() 호출
+- **타이틀바**: 캐릭터 이름 + "캐릭터 변경" 버튼(charSelectOpen) + "상태" 버튼(charStatusOpen) + ≡ + PIP + ✕
+- **테마 시스템**: `currentTheme` + `_themes` 오브젝트(16색 팔레트 × 3종) + `readonly _th` shortcut
+  - 전체 색상을 `_th.*` 바인딩으로 교체 (bgMain/bgTitle/bgPanel/bgInput/textPrimary/accent/bubbleAssist/tagBg/tagBorder/scrollbar/charBtnBg/charBtnHover/statusBtnBg/statusBtnHover)
+  - `onThemeChangeRequested` → `bridge.saveTheme(themeId)` 후 `currentTheme` 갱신
 
 #### 4-5. `ui_ux/qml/ChatBubble.qml` — 말풍선 컴포넌트
 - `role` 프로퍼티로 좌/우 정렬 및 색상 분기
+- `userBubbleColor` / `assistBubbleColor` 프로퍼티 — 테마 색상을 delegate에서 주입
 
 #### 4-5-1. `ui_ux/qml/PipWindow.qml` — PIP 마스코트 모드
 - 50×50 아이콘 + 위로 확장 말풍선, mood 이모지 플레이스홀더
@@ -301,25 +312,44 @@ main.py
 #### 4-5-2. `ui_ux/qml/SettingsPanel.qml` — 설정 패널
 - 캐릭터·세계관·act 선택, 커스터마이징 열기 버튼
 - z:10 오른쪽 슬라이드인
+- "캐릭터 초기화" 버튼 → `resetConfirmRequested` 시그널
+- "테마" 섹션 — ocean/solar/forest 스와치 → `themeChangeRequested(themeId)` 시그널
 
 #### 4-5-3. `ui_ux/qml/CharacterDisplay.qml` — 캐릭터 표시
 - 레이어 합성: icons/{id}/{id}.png 우선 → 없으면 5레이어 파츠 합성
 - 감정 오버레이: icons/{id}/emotion/{mood}.png
 
 #### 4-5-4. `ui_ux/qml/CustomizationPanel.qml` — 커스터마이징 패널
-- 파츠 5종(base/hair/eye/mouth/cloth) 가로 스크롤
+- 파츠 6종(base/hair/eyebrow/eye/mouth/cloth) 가로 스크롤
 - delegate scope 버그 방지 (outerKey/outerSelected 패턴)
+
+#### 4-5-5. `ui_ux/qml/CharacterSelectPanel.qml` — 캐릭터 변경 모달 ✅
+- 타이틀바 "캐릭터 변경" 버튼 → z:20 모달
+- 캐릭터 목록 Repeater + 선택 시 `characterChanged(charId)` → `bridge.changeCharacter()`
+- "+" 버튼 → `addRequested` → `bridge.browseCharacterYaml()`
+
+#### 4-5-6. `ui_ux/qml/CharacterStatusPanel.qml` — 상태 표시 모달 ✅
+- 타이틀바 "상태" 버튼 → z:20 모달
+- `bridge.getCharacterStatus()` JSON 파싱 → 이름/tier 배지/친밀도 바/감정/대화 횟수
+- tier별 색상 맵: stranger(#666) → acquaintance → familiar → friendly → close → intimate(#D96A6A)
+
+#### 4-5-7. `ui_ux/qml/ResetConfirmPanel.qml` — 초기화 확인 모달 ✅
+- 설정 패널 "캐릭터 초기화" → z:30 모달
+- 캐릭터 목록 라디오 선택 + "초기화" 실행 버튼
+- `bridge.resetCharacter(char_id)` → 세션 디렉토리 + VDB 장기기억 전체 삭제
 
 #### 4-6. `ui_ux/tray.py` — 시스템 트레이
 - 열기/숨기기, 캐릭터 변경(`bridge.changeCharacter()`), 종료
 
-#### 4-7. `ui_ux/qml/Style.qml` — 디자인 토큰 (추가)
-- `pragma Singleton` — 색상(bgWindow/Bubble/User/Assistant), 폰트 패밀리/크기, 간격/반지름, 애니메이션 ms, 불투명도, 기본 크기 상수
-- `qmldir`에 Style / ChatBubble / PipWindow / SettingsPanel / CharacterDisplay / CustomizationPanel 등록
+#### 4-7. `ui_ux/qml/Style.qml` — 디자인 토큰
+- `pragma Singleton` — 색상/폰트/간격/애니메이션 상수 (테마 동적 색상은 main.qml `_themes`로 관리)
+- `qmldir`에 Style / ChatBubble / PipWindow / SettingsPanel / CharacterDisplay / CustomizationPanel / CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel 등록
 
-#### 4-8. `ui_ux/assets/` — 에셋 디렉토리 (추가)
-- `icons/` — 앱 아이콘 PNG (tray.py `_make_default_icon()` fallback 교체용)
-- `characters/` — 캐릭터 PNG/GIF (bubble 상태 아바타 표시용)
+#### 4-8. `ui_ux/assets/` — 에셋 디렉토리
+- `icons/` — 캐릭터 아이콘 + emotion/ + parts.json
+- `characters/` — 파츠 풀 (base/hair/eyebrow/eye/mouth/cloth)
+- `background/` — 배경 이미지 ({world_id}/{location}.png)
+- `preferences.json` — UI 환경설정 (테마 ID 등)
 
 ### 완료 기준
 - [x] `ui_ux/__init__.py`, `ui_ux/bridge.py`, `ui_ux/chat_panel.py`, `ui_ux/widget.py`, `ui_ux/tray.py` 구현
@@ -332,7 +362,10 @@ main.py
 - [x] (WSL2 dev 검증) 메시지 전송 → LLMWorker 비동기 응답 → ListView 추가
 - [x] 한글 입력 해결 — Ubuntu 24.04 + ibus-hangul, Ctrl+Space 자동 등록 (BUG_1-clear.md 참조)
 - [x] `PipWindow.qml` / `SettingsPanel.qml` / `CharacterDisplay.qml` / `CustomizationPanel.qml` 구현
-- [x] 자동화 테스트 79건 (test_bridge_slots.py 26건 + test_ui_structure.py 53건) 전부 통과
+- [x] `CharacterSelectPanel.qml` / `CharacterStatusPanel.qml` / `ResetConfirmPanel.qml` 구현 (2026-03-28)
+- [x] 테마 시스템 — ocean/solar/forest 3종, `_themes`/`_th`, getTheme()/saveTheme(), preferences.json (2026-03-28)
+- [x] bridge.py — getCharacterStatus / resetCharacter / getTheme / saveTheme / browseCharacterYaml 슬롯 추가 (2026-03-28)
+- [x] 자동화 테스트 (test_bridge_slots.py + test_ui_structure.py) 전부 통과
 - [ ] (미검증) hover 투명도 전환, 버블 축소/확장 애니메이션 (Windows 배포 환경)
 
 ### WSL2 dev 환경 실행 이슈 및 해결
