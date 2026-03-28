@@ -22,8 +22,75 @@ Window {
     // 커스터마이징
     property bool   emotionPanelOpen:      false
     property bool   characterBuildOpen:    false
+    property bool   charSelectOpen:        false
+    property bool   charStatusOpen:        false
+    property bool   resetConfirmOpen:      false
+    property string charStatusJson:        "{}"
     property string customPartsJson:       "{}"
     property string allPartsListJson:      "{}"
+
+    // ── 테마 ──────────────────────────────────────────────────────────────────
+    property string currentTheme: "ocean"
+
+    readonly property var _themes: ({
+        "ocean": {
+            bgMain:         "#0E1C22",
+            bgTitle:        "#142830",
+            bgPanel:        "#122028",
+            bgInput:        "#182C38",
+            textPrimary:    "#A8D0D8",
+            accent:         "#5A9EA8",
+            tabInactive:    "#182830",
+            bubbleAssist:   "#142830",
+            tagBg:          "#101E28",
+            tagBorder:      "#1E3C48",
+            scrollbar:      "#2A5060",
+            charBtnBg:      "#102030",
+            charBtnHover:   "#183848",
+            statusBtnBg:    "#101C28",
+            statusBtnHover: "#183038"
+        },
+        "solar": {
+            bgMain:         "#1C1610",
+            bgTitle:        "#261E0C",
+            bgPanel:        "#221A0E",
+            bgInput:        "#2E2412",
+            textPrimary:    "#D8C898",
+            accent:         "#A07830",
+            tabInactive:    "#2A2010",
+            bubbleAssist:   "#261E0C",
+            tagBg:          "#1E1810",
+            tagBorder:      "#382C14",
+            scrollbar:      "#503C18",
+            charBtnBg:      "#281E0C",
+            charBtnHover:   "#3A2C14",
+            statusBtnBg:    "#221A0C",
+            statusBtnHover: "#2E2410"
+        },
+        "forest": {
+            bgMain:         "#101810",
+            bgTitle:        "#141E14",
+            bgPanel:        "#121C12",
+            bgInput:        "#182418",
+            textPrimary:    "#A8C8B0",
+            accent:         "#5A8A68",
+            tabInactive:    "#161E16",
+            bubbleAssist:   "#141E14",
+            tagBg:          "#101810",
+            tagBorder:      "#1E3020",
+            scrollbar:      "#2A4A30",
+            charBtnBg:      "#101C12",
+            charBtnHover:   "#182A1A",
+            statusBtnBg:    "#101A12",
+            statusBtnHover: "#162418"
+        }
+    })
+
+    readonly property var _th: _themes[currentTheme] || _themes["ocean"]
+
+    onCurrentThemeChanged: {
+        if (currentTag === "") root.inputTagColor = _th.accent
+    }
 
     // PIP 모드 진입 시 아이콘 하단 Y 좌표 보존 (말풍선이 위로 펼쳐지도록)
     property int pipAnchorY: 0
@@ -43,6 +110,7 @@ Window {
         x = Screen.width  - width  - 40
         y = Screen.height - height - 60
         _loadCustomization()
+        if (bridge) root.currentTheme = bridge.getTheme()
     }
 
     function _loadCustomization() {
@@ -168,7 +236,7 @@ Window {
         id: container
         anchors.fill: parent
         radius: root.isBubble ? 10 : 16
-        color:  root.isBubble ? "transparent" : "#1E1E1E"
+        color:  root.isBubble ? "transparent" : root._th.bgMain
         clip:   false
 
         Behavior on radius { NumberAnimation { duration: 200 } }
@@ -232,7 +300,12 @@ Window {
             fontFamily:        koreanFont.font.family
             characterListJson: root.charListJson
             worldListJson:     root.worldListJson
+            currentTheme:      root.currentTheme
             onCloseRequested: root.settingsOpen = false
+            onThemeChangeRequested: function(themeId) {
+                root.currentTheme = themeId
+                if (bridge) bridge.saveTheme(themeId)
+            }
             onEmotionPanelRequested: {
                 root.emotionPanelOpen = true
             }
@@ -243,6 +316,56 @@ Window {
             }
             onNewSessionRequested: function(keepMemory) {
                 bridge.newSession(keepMemory)
+            }
+            onResetConfirmRequested: {
+                root.settingsOpen    = false
+                root.charListJson    = bridge.getCharacterList()
+                root.resetConfirmOpen = true
+            }
+        }
+
+        // ── 캐릭터 변경 패널 오버레이 ─────────────────────────────────────
+        CharacterSelectPanel {
+            anchors.fill: parent
+            visible: root.charSelectOpen && !root.isBubble
+            z: 20
+            fontFamily:        koreanFont.font.family
+            characterListJson: root.charListJson
+            onCloseRequested:  root.charSelectOpen = false
+            onCharacterChanged: function(charId) {
+                bridge.changeCharacter(charId)
+            }
+            onAddRequested: {
+                var newId = bridge.browseCharacterYaml()
+                if (newId !== "") {
+                    root.charListJson = bridge.getCharacterList()
+                }
+            }
+        }
+
+        // ── 캐릭터 상태 패널 오버레이 ─────────────────────────────────────
+        CharacterStatusPanel {
+            anchors.fill: parent
+            visible: root.charStatusOpen && !root.isBubble
+            z: 20
+            fontFamily:  koreanFont.font.family
+            statusJson:  root.charStatusJson
+            onCloseRequested: root.charStatusOpen = false
+        }
+
+        // ── 캐릭터 초기화 확인 패널 오버레이 ─────────────────────────────
+        ResetConfirmPanel {
+            anchors.fill: parent
+            visible: root.resetConfirmOpen && !root.isBubble
+            z: 20
+            fontFamily:        koreanFont.font.family
+            characterListJson: root.charListJson
+            onCloseRequested:  root.resetConfirmOpen = false
+            onResetConfirmed: function(charId) {
+                bridge.resetCharacter(charId)
+                // 초기화 후 상태창 갱신
+                if (root.charStatusOpen)
+                    root.charStatusJson = bridge.getCharacterStatus()
             }
         }
 
@@ -257,7 +380,7 @@ Window {
                 id: titleBar
                 Layout.fillWidth: true
                 height: 38
-                color: "#2A2A2A"
+                color: root._th.bgTitle
                 radius: 16
 
 
@@ -267,10 +390,50 @@ Window {
                     Text {
                         id: charNameLabel
                         text: bridge ? bridge.characterName : ""
-                        color: "#E0E0E0"
+                        color: root._th.textPrimary
                         font.pixelSize: 13
                         font.bold: true
                         font.family: koreanFont.font.family
+                    }
+
+                    // 캐릭터 변경 버튼
+                    Rectangle {
+                        width: 60; height: 20; radius: 4
+                        color: charSelectBtnHov.containsMouse ? root._th.charBtnHover : root._th.charBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "캐릭터 변경"
+                            color: root._th.accent; font.pixelSize: 10
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: charSelectBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.charListJson = bridge.getCharacterList()
+                                root.charSelectOpen = true
+                            }
+                        }
+                    }
+
+                    // 상태 버튼
+                    Rectangle {
+                        width: 34; height: 20; radius: 4
+                        color: charStatusBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "상태"
+                            color: root._th.accent; font.pixelSize: 10
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: charStatusBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.charStatusJson = bridge.getCharacterStatus()
+                                root.charStatusOpen = true
+                            }
+                        }
                     }
 
                     Item { Layout.fillWidth: true }
@@ -330,7 +493,7 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 height: 32
-                color: "#252525"
+                color: root._th.bgPanel
 
                 RowLayout {
                     anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
@@ -343,7 +506,7 @@ Window {
                             Layout.fillWidth: true
                             height: 22
                             radius: 6
-                            color: root.currentMode === modelData.mode ? "#4A90D9" : "#3C3C3C"
+                            color: root.currentMode === modelData.mode ? root._th.accent : root._th.tabInactive
                             Behavior on color { ColorAnimation { duration: 150 } }
 
                             Text {
@@ -406,6 +569,8 @@ Window {
                         role: model.role
                         content: model.content
                         fontFamily: koreanFont.font.family
+                        userBubbleColor:   root._th.accent
+                        assistBubbleColor: root._th.bubbleAssist
                     }
 
                     ScrollBar.vertical: ScrollBar {
@@ -413,7 +578,7 @@ Window {
                         contentItem: Rectangle {
                             implicitWidth: 4
                             radius: 2
-                            color: "#555"
+                            color: root._th.scrollbar
                         }
                     }
                 }
@@ -450,8 +615,8 @@ Window {
                                 width:  tagLabel.implicitWidth + 18
                                 radius: 12
 
-                                color: _active ? modelData.color : "#1C1C1C"
-                                border.color: _active ? modelData.color : "#383838"
+                                color: _active ? modelData.color : root._th.tagBg
+                                border.color: _active ? modelData.color : root._th.tagBorder
                                 border.width: 1
                                 Behavior on color        { ColorAnimation { duration: 150 } }
                                 Behavior on border.color { ColorAnimation { duration: 150 } }
@@ -460,7 +625,7 @@ Window {
                                     id: tagLabel
                                     anchors.centerIn: parent
                                     text: modelData.label
-                                    color: parent._active ? "white" : "#787878"
+                                    color: parent._active ? "white" : root._th.scrollbar
                                     font.pixelSize: 11
                                     font.family: koreanFont.font.family
                                     Behavior on color { ColorAnimation { duration: 150 } }
@@ -470,14 +635,14 @@ Window {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onEntered: if (!parent._active) parent.border.color = "#555"
-                                    onExited:  if (!parent._active) parent.border.color = "#383838"
+                                    onEntered: if (!parent._active) parent.border.color = root._th.scrollbar
+                                    onExited:  if (!parent._active) parent.border.color = root._th.tagBorder
                                     onClicked: {
                                         if (root.currentTag === modelData.key) {
                                             // 같은 태그 재클릭 → 해제
                                             root.currentTag    = ""
                                             root.currentMode   = "chat"
-                                            root.inputTagColor = "#4A90D9"
+                                            root.inputTagColor = root._th.accent
                                         } else {
                                             root.currentTag    = modelData.key
                                             root.currentMode   = "function"
@@ -509,7 +674,7 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 height: 48
-                color: "#252525"
+                color: root._th.bgPanel
                 radius: 16
 
                 RowLayout {
@@ -520,7 +685,7 @@ Window {
                         Layout.fillWidth: true
                         height: 32
                         radius: 8
-                        color: "#2A2A2A"
+                        color: root._th.bgInput
                         border.color: inputField.activeFocus
                                       ? root.inputTagColor
                                       : (root.currentTag !== "" ? Qt.darker(root.inputTagColor, 1.5) : "#444")
