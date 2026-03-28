@@ -262,3 +262,44 @@ def test_change_world_stub_mode_no_crash(bridge):
 def test_change_character_stub_mode_no_crash(bridge):
     """stub 모드에서 changeCharacter 호출 시 예외 없이 early return."""
     bridge.changeCharacter("Haru")  # must not raise
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. getCharacterStatus
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestGetCharacterStatus:
+    def test_returns_valid_json(self, bridge):
+        result = bridge.getCharacterStatus()
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_has_required_keys(self, bridge):
+        parsed = json.loads(bridge.getCharacterStatus())
+        for key in ("char_name", "mood", "affection", "tier", "turn_count"):
+            assert key in parsed, f"키 '{key}' 누락"
+
+    def test_no_session_defaults(self, bridge):
+        """session=None일 때 affection=0, turn_count=0."""
+        parsed = json.loads(bridge.getCharacterStatus())
+        assert parsed["affection"] == 0
+        assert parsed["turn_count"] == 0
+
+    def test_char_name_from_agent(self, bridge):
+        parsed = json.loads(bridge.getCharacterStatus())
+        assert parsed["char_name"] in ("하루", "Haru", "")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. resetCharacter
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_reset_character_nonexistent_no_crash(bridge):
+    """존재하지 않는 캐릭터 ID 초기화 시 예외 없이 True 반환."""
+    result = bridge.resetCharacter("NonExistentChar_xyz")
+    assert result is True
+
+
+def test_reset_character_returns_bool(bridge):
+    result = bridge.resetCharacter("Haru")
+    assert isinstance(result, bool)
