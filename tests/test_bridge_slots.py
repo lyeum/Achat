@@ -150,7 +150,7 @@ class TestCustomization:
 
     def test_save_invalid_json_does_not_crash(self, bridge):
         """잘못된 JSON 입력 시 예외 없이 처리 (messageAdded emit)."""
-        bridge.saveCustomization("not valid json{{{")  # noqa: exception must not propagate
+        bridge.saveCustomization("not valid json{{{")  # noqa
 
     def test_no_char_id_returns_empty(self, stub_agent, monkeypatch):
         """characterId가 없으면 빈 구조 반환."""
