@@ -19,18 +19,14 @@ from tools.prompt_converter import PromptConverterTool
 from tools.search.local_search import LocalSearchTool
 from tools.search.web_search import WebSearchTool
 
-# 등록된 도구 목록 (name → instance)
-_TOOLS: dict[str, BaseTool] = {
-    t.name: t
-    for t in [
-        ClassifierTool(),
-        ConverterTool(),
-        RenamerTool(),
-        PromptConverterTool(),
-        LocalSearchTool(),
-        WebSearchTool(),
-    ]
-}
+# LLM 주입 불필요 도구 — 모듈 로드 시 즉시 생성
+_STATIC_TOOLS: list[BaseTool] = [
+    ClassifierTool(),
+    ConverterTool(),
+    RenamerTool(),
+    LocalSearchTool(),
+    WebSearchTool(),
+]
 
 # 도구 선택용 키워드 매핑 (자연어 힌트 → tool name)
 # 순서 중요: 더 구체적인 키워드가 위에 있어야 "변환" 같은 공통 단어에 먼저 걸리지 않음
@@ -67,15 +63,6 @@ def _find_world_path(world_id: str | None) -> Path:
     raise FileNotFoundError(f"world YAML 없음: {_WORLD_DIR}")
 
 
-def _select_tool(user_input: str) -> BaseTool | None:
-    """user_input 에서 키워드를 감지해 도구를 선택한다."""
-    lower = user_input.lower()
-    for keywords, name in _KEYWORDS:
-        if any(kw in lower for kw in keywords):
-            return _TOOLS.get(name)
-    return None
-
-
 class Agent:
     """전체 대화 엔진을 조율하는 상위 오케스트레이터.
 
@@ -106,6 +93,11 @@ class Agent:
             self.long_term = None
             self.session = None
             self.router = None
+            # stub 모드: PromptConverterTool(llm=None)
+            self._tools: dict[str, BaseTool] = {
+                t.name: t for t in _STATIC_TOOLS
+            }
+            self._tools[PromptConverterTool.name] = PromptConverterTool(llm=None)
             return
 
         world_id = self.world.get("world_id")
@@ -134,6 +126,10 @@ class Agent:
             long_term=self.long_term,
             config=self.cfg,
         )
+
+        # 도구 목록 (LLM 로딩 후 구성 — PromptConverterTool에 LLM 주입)
+        self._tools = {t.name: t for t in _STATIC_TOOLS}
+        self._tools[PromptConverterTool.name] = PromptConverterTool(llm=self.llm)
 
         logger.info(
             f"[agent] 초기화 완료 — 캐릭터: {self.character['name']} "
@@ -181,30 +177,64 @@ class Agent:
             return f"[stub] 입력 받음: {user_input}"
         return self.router.handle_turn(user_input, stream=stream)
 
-    def handle_input(self, user_input: str, mode: str = "chat", stream: bool = True) -> str:
+    def handle_input(
+        self,
+        user_input: str,
+        mode: str = "chat",
+        stream: bool = True,
+        tool_name: str = "",
+        selected_path: str = "",
+    ) -> str:
         """모드별 분기 진입점.
 
         mode == "chat"     : 대화 엔진(Router) 경유
         mode == "function" : 도구 선택 → LLM 파라미터 파싱 → rule-based 실행
+
+        Parameters
+        ----------
+        tool_name : str
+            UI 태그 선택으로 전달된 도구 이름. 빈 문자열이면 키워드 감지로 폴백.
+        selected_path : str
+            파일 탐색기에서 사용자가 선택한 디렉토리 경로.
+            path가 필요한 도구(folder_classify / file_rename / image_convert / local_search)에
+            주입되어 LLM 추출 경로를 덮어씀.
         """
         if mode == "chat":
             return self.chat(user_input, stream=stream)
 
         if mode == "function":
-            return self._handle_function(user_input)
+            return self._handle_function(user_input, tool_name=tool_name, selected_path=selected_path)
 
         logger.warning(f"[agent] 알 수 없는 모드: {mode!r} — chat 으로 대체")
         return self.chat(user_input, stream=stream)
 
-    def _handle_function(self, user_input: str) -> str:
-        """기능 모드 처리: 도구 선택 → LLM 파라미터 추출 → execute"""
-        tool = _select_tool(user_input)
-        if tool is None:
-            registered = ", ".join(_TOOLS.keys())
-            return (
-                f"어떤 기능을 원하시는지 파악하지 못했습니다.\n"
-                f"사용 가능한 도구: {registered}"
-            )
+    def _select_tool(self, user_input: str) -> BaseTool | None:
+        """user_input에서 키워드를 감지해 도구를 선택한다 (폴백용)."""
+        lower = user_input.lower()
+        for keywords, name in _KEYWORDS:
+            if any(kw in lower for kw in keywords):
+                return self._tools.get(name)
+        return None
+
+    def _handle_function(self, user_input: str, tool_name: str = "", selected_path: str = "") -> str:
+        """기능 모드 처리: 도구 선택 → LLM 파라미터 추출 → execute
+
+        tool_name이 제공되면 키워드 감지 없이 해당 도구를 직접 사용한다.
+        selected_path가 제공되면 도구의 경로 파라미터를 덮어쓴다.
+        """
+        # 도구 선택: 명시적 이름 우선, 없으면 키워드 감지 폴백
+        if tool_name:
+            tool = self._tools.get(tool_name)
+            if tool is None:
+                return f"알 수 없는 도구: '{tool_name}'"
+        else:
+            tool = self._select_tool(user_input)
+            if tool is None:
+                registered = ", ".join(self._tools.keys())
+                return (
+                    f"어떤 기능을 원하시는지 파악하지 못했습니다.\n"
+                    f"사용 가능한 도구: {registered}"
+                )
 
         logger.info(f"[agent:function] 도구 선택 — {tool.name}")
 
@@ -218,8 +248,41 @@ class Agent:
                     {"role": "user", "content": user_input},
                 ],
                 stream=False,
+                mode="function",
             )
             params = tool.parse_params(llm_output)
             logger.debug(f"[agent:function] 파싱된 파라미터 — {params}")
+
+            # prompt_convert 전용: LLM 추출 실패 시 fallback
+            if tool.name == "prompt_convert":
+                # model: 비면 regex로 직접 추출
+                if not params.get("model"):
+                    import re as _re
+                    m = _re.search(
+                        r"(stable[\s\-]diffusion[\s\w\.]*|sdxl[\s\w\.]*"
+                        r"|midjourney[\s\w\.]*|dall[\s\-]e[\s\w\.]*"
+                        r"|flux[\s\w\.]*|leonardo[\s\w\.]*|imagen[\s\w\.]*)",
+                        user_input,
+                        _re.IGNORECASE,
+                    )
+                    if m:
+                        params["model"] = m.group(1).strip()
+                        logger.warning(
+                            f"[agent:function] model 필드 LLM 추출 실패 — regex fallback: {params['model']!r}"
+                        )
+                # content: 비거나 추출 실패면 user_input 전문 사용 (크롤링에 영향 없음)
+                if not params.get("content"):
+                    params["content"] = user_input
+                    logger.warning("[agent:function] content 필드 LLM 추출 실패 — user_input으로 대체")
+
+        # 사용자가 선택한 경로를 LLM 추출값보다 우선 적용
+        _PATH_PARAM: dict[str, str] = {
+            "folder_classify": "target",
+            "file_rename":     "target",
+            "image_convert":   "target",
+            "local_search":    "path",
+        }
+        if selected_path and tool.name in _PATH_PARAM:
+            params[_PATH_PARAM[tool.name]] = selected_path
 
         return tool.execute(params)

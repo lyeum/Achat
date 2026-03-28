@@ -373,6 +373,9 @@ def main():
         logger.info(f"어댑터 저장 완료: {adapter_path}")
 
         # ── 체크포인트 정리 (가중치·그래프·로그 제외 삭제) ────────────────────
+        # trainer_state.json은 checkpoint-* 내부에만 기록되므로
+        # 삭제 전에 output_dir 루트에 복사해 train_monitor 최종 보고용으로 보존한다.
+        trainer.save_state()
         import shutil
         for ckpt in sorted(output_dir.glob("checkpoint-*")):
             shutil.rmtree(ckpt)

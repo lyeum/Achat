@@ -1,110 +1,187 @@
 """
-prompt_converter.py — 프롬프트 변환 도구
+prompt_converter.py — 모델 특화 프롬프트 변환 도구
 
-사용자의 자연어 요청을 LLM에 최적화된 프롬프트로 변환한다.
-대화 히스토리 / 장기 메모리를 격리하여 기능 세션에 기록하지 않는다.
+동작 (3단 파이프라인):
+  1. LLM 파라미터 추출 — 대상 모델명 + 변환할 내용 분리
+  2. 웹 검색 + 크롤링 — 해당 모델의 프롬프트 가이드 수집
+  3. LLM 변환 — 가이드를 참고해 모델에 최적화된 프롬프트 생성
 
 LLM 파라미터:
   {
-    "text": "<변환할 원본 텍스트>",
-    "style": "명확하게" | "간결하게" | "상세하게" | "질문형" | "지시형",
-    "language": "ko" | "en"    (선택, 기본 ko)
+    "model":   "<대상 AI 모델명>",   # 예: "Stable Diffusion XL", "Midjourney"
+    "content": "<변환할 내용>"       # 예: "해질녘 바닷가 풍경"
   }
 
-지원 스타일:
-  - "명확하게"   : 모호한 표현 제거, 핵심 의도를 명확히 재서술
-  - "간결하게"   : 핵심만 남겨 짧게 압축
-  - "상세하게"   : 배경, 목적, 제약 조건을 포함해 풍부하게 확장
-  - "질문형"     : 지시문을 질문 형태로 전환
-  - "지시형"     : 질문/서술을 명령형 지시문으로 전환
+LLM 주입:
+  agent/core.py 에서 PromptConverterTool(llm=self.llm) 으로 생성.
+  llm=None (stub 모드) 이면 검색/크롤링만 수행하고 변환은 건너뜀.
+
+주의:
+  - 외부 네트워크 접근 필요 (검색 + 크롤링)
+  - 크롤링 실패 시 가이드 없이 LLM이 자체 지식으로 변환 (폴백)
+  - 의존: ddgs (구 duckduckgo-search)
 """
 
 from __future__ import annotations
 
 import re
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.error import URLError
+
+from loguru import logger
 
 from tools.base import BaseTool
 
-SUPPORTED_STYLES = {"명확하게", "간결하게", "상세하게", "질문형", "지시형"}
+# ── 설정 ──────────────────────────────────────────────────────────────
 
+_SEARCH_RESULTS  = 3      # 검색할 URL 수
+_CRAWL_TIMEOUT   = 8      # 크롤링 타임아웃 (초)
+_CONTEXT_MAX     = 3000   # LLM에 넘길 가이드 텍스트 최대 글자 수
+_SEARCH_TEMPLATE = "{model} prompt guide tips keywords site:reddit.com OR site:civitai.com OR site:prompthero.com"
+
+
+# ── 크롤링 헬퍼 ───────────────────────────────────────────────────────
+
+def _fetch_text(url: str) -> str:
+    """URL을 fetch해 HTML 태그를 제거한 순수 텍스트를 반환한다.
+    실패 시 빈 문자열 반환.
+    """
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; Achat/0.1)"},
+        )
+        with urllib.request.urlopen(req, timeout=_CRAWL_TIMEOUT) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+    except (URLError, Exception) as e:
+        logger.debug(f"[prompt_convert] 크롤링 실패: {url} — {e}")
+        return ""
+
+    # 노이즈 블록 제거: script / style / svg / noscript / iframe
+    html = re.sub(
+        r"<(script|style|svg|noscript|iframe)[^>]*>.*?</(script|style|svg|noscript|iframe)>",
+        " ", html, flags=re.DOTALL | re.IGNORECASE,
+    )
+    # data-uri 속성 제거 (base64 이미지 등)
+    html = re.sub(r'(?:src|href|data)="data:[^"]{30,}"', "", html)
+    # 200자 초과 인라인 JSON 블록 제거 (JSON-LD, 메타데이터)
+    html = re.sub(r"\{[^{}]{200,}\}", " ", html)
+    # 나머지 태그 제거 후 공백 정규화
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
+def _collect_guide(model: str) -> str:
+    """모델 프롬프트 가이드를 검색·크롤링해 합산 텍스트를 반환한다.
+    수집 실패 시 빈 문자열 반환.
+    """
+    from ddgs import DDGS
+    from ddgs.exceptions import DDGSException
+
+    query = _SEARCH_TEMPLATE.format(model=model)
+    logger.info(f"[prompt_convert] 검색: {query!r}")
+
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=_SEARCH_RESULTS) or []
+    except DDGSException as e:
+        logger.warning(f"[prompt_convert] 검색 실패: {e}")
+        return ""
+
+    urls = [r.get("href", "") for r in results if r.get("href")]
+    logger.debug(f"[prompt_convert] 병렬 크롤링: {len(urls)}개 URL")
+
+    parts: list[str] = []
+    with ThreadPoolExecutor(max_workers=len(urls) or 1) as executor:
+        futures = {executor.submit(_fetch_text, url): url for url in urls}
+        for future in as_completed(futures, timeout=_CRAWL_TIMEOUT + 2):
+            try:
+                text = future.result()
+                if text:
+                    parts.append(text[:_CONTEXT_MAX // _SEARCH_RESULTS])
+            except Exception as e:
+                logger.debug(f"[prompt_convert] 크롤링 future 예외: {e}")
+
+    guide = " ".join(parts)
+    return guide[:_CONTEXT_MAX]
+
+
+# ── Tool ─────────────────────────────────────────────────────────────
 
 class PromptConverterTool(BaseTool):
     name = "prompt_convert"
     system_prompt = (
         "너는 프롬프트 변환 도구의 파라미터를 추출하는 역할이다.\n"
         "사용자의 요청을 분석해서 아래 JSON 형식으로만 응답해라:\n"
-        '{"text": "<변환할 원본 텍스트>", "style": "<변환 스타일>", "language": "ko" 또는 "en"}\n'
-        "style 값: 명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형\n"
-        "language가 명시되지 않으면 ko로 설정해라."
+        '{"model": "<대상 AI 모델명>", "content": "<변환할 내용>"}\n\n'
+        "model: 사용자가 언급한 AI 모델 이름 (예: Stable Diffusion 1.5, Midjourney, DALL-E 3, FLUX)\n"
+        "content: 해당 모델로 생성하고 싶은 내용 (모델명 제외)\n"
+        "model이 명시되지 않으면 빈 문자열로 설정해라.\n\n"
+        "예시:\n"
+        "입력: stable diffusion 1.5로 고양이 그려줘\n"
+        '출력: {"model": "Stable Diffusion 1.5", "content": "고양이"}\n\n'
+        "입력: midjourney에서 사이버펑크 도시 밤 풍경 만들고 싶어\n"
+        '출력: {"model": "Midjourney", "content": "사이버펑크 도시 밤 풍경"}\n\n'
+        "입력: DALL-E 3 모델에게 귀여운 강아지 픽셀아트를 생성하라고 하고 싶은데\n"
+        '출력: {"model": "DALL-E 3", "content": "귀여운 강아지 픽셀아트"}\n\n'
+        "입력: stable-diffusion 1.5 모델에게 귀여운 고양이의 픽셀아트를 생성하라고 하고싶은데 뭐라고 하면 될까?\n"
+        '출력: {"model": "Stable Diffusion 1.5", "content": "귀여운 고양이 픽셀아트"}'
     )
 
-    # ── rule-based 변환 함수들 ──────────────────────────────────────────
-
-    def _to_clear(self, text: str) -> str:
-        """모호한 표현 제거 — 접속사/부사 정리, 주어 명시"""
-        # 불필요한 중복 어미 압축
-        text = re.sub(r"(것 같아요|것 같습니다|것 같아)", "입니다", text)
-        text = re.sub(r"(좀|약간|어쩌면|혹시|아마)\s*", "", text)
-        # 두 문장 이상이면 첫 문장만 핵심 서술로 정리
-        sentences = [s.strip() for s in re.split(r"[.。!?！？]+", text) if s.strip()]
-        if len(sentences) > 1:
-            return sentences[0] + "."
-        return text.strip()
-
-    def _to_concise(self, text: str) -> str:
-        """간결하게 — 조사/어미 외 불필요한 수식어 제거"""
-        text = re.sub(r"(그리고|그래서|하지만|그런데|또한|또,?)\s*", "", text)
-        text = re.sub(r"\s{2,}", " ", text)
-        return text.strip()
-
-    def _to_detailed(self, text: str) -> str:
-        """상세하게 — 배경·목적·제약 안내 문구 추가"""
-        prefix = "[목적] "
-        suffix = "\n[추가 맥락] 위 내용과 관련된 배경, 제약 조건, 기대 결과를 함께 설명해주세요."
-        return prefix + text.strip() + suffix
-
-    def _to_question(self, text: str) -> str:
-        """지시문 → 질문형"""
-        text = text.rstrip(".。!！")
-        # 동사 어미 '해줘 / 해주세요 / 하라 / 해라' → '어떻게 하나요?'
-        text = re.sub(r"(해줘|해주세요|하라|해라|해봐|하십시오)\s*$", "", text)
-        if not text.endswith("?"):
-            text = text.strip() + "는 어떻게 하나요?"
-        return text
-
-    def _to_imperative(self, text: str) -> str:
-        """질문/서술 → 지시형"""
-        text = text.rstrip("?？")
-        # '~인가요 / ~나요 / ~까요' 어미 제거
-        text = re.sub(r"(인가요|나요|까요|인지요|는지요)\s*$", "", text)
-        if not text.endswith(("세요", "하라", "해라", "해줘", "하십시오")):
-            text = text.strip() + "해주세요."
-        return text
-
-    # ──────────────────────────────────────────────────────────────────
+    def __init__(self, llm=None) -> None:
+        self._llm = llm
 
     def execute(self, params: dict) -> str:
-        text = params.get("text", "").strip()
-        style = params.get("style", "명확하게")
-        language = params.get("language", "ko")
+        model   = params.get("model",   "").strip()
+        content = params.get("content", "").strip()
 
-        if not text:
-            return "오류: 변환할 텍스트가 없습니다."
-        if style not in SUPPORTED_STYLES:
+        if not content:
+            return "오류: 변환할 내용이 없습니다."
+        if not model:
+            return "오류: 대상 모델을 입력해주세요. (예: 'Stable Diffusion XL에 대해 ~')"
+
+        logger.info(f"[prompt_convert] 모델={model!r}, 내용={content!r}")
+
+        # ── 2단: 웹 검색 + 크롤링 ──────────────────────────────────────
+        guide = _collect_guide(model)
+        if guide:
+            logger.info(f"[prompt_convert] 가이드 수집 완료 ({len(guide)}자)")
+        else:
+            logger.warning("[prompt_convert] 가이드 수집 실패 — LLM 자체 지식으로 변환")
+
+        # ── stub 모드: LLM 없음 ─────────────────────────────────────────
+        if self._llm is None:
+            guide_preview = guide[:200] + "..." if len(guide) > 200 else guide
             return (
-                f"오류: 지원하지 않는 스타일 — '{style}'\n"
-                f"지원 스타일: {', '.join(sorted(SUPPORTED_STYLES))}"
+                f"[stub] model={model!r}, content={content!r}\n"
+                f"가이드 미리보기: {guide_preview or '(없음)'}"
             )
-        if language not in ("ko", "en"):
-            return "오류: language는 'ko' 또는 'en'만 지원합니다."
 
-        dispatch = {
-            "명확하게": self._to_clear,
-            "간결하게": self._to_concise,
-            "상세하게": self._to_detailed,
-            "질문형":   self._to_question,
-            "지시형":   self._to_imperative,
-        }
-        converted = dispatch[style](text)
+        # ── 3단: LLM 변환 ───────────────────────────────────────────────
+        context_block = (
+            f"=== {model} 프롬프트 가이드 (웹 수집) ===\n{guide}\n"
+            if guide else
+            f"('{model}'에 대한 가이드를 찾지 못했습니다. 자체 지식을 활용해주세요.)\n"
+        )
 
-        return f"[{style}] {converted}"
+        system = (
+            f"너는 '{model}' 모델 전용 프롬프트 엔지니어다.\n"
+            "아래 가이드를 참고해서 사용자의 요청을 해당 모델에 최적화된 프롬프트로 변환해라.\n"
+            "출력은 변환된 프롬프트만 작성하고, 설명이나 전처리 없이 바로 사용 가능한 형태로 반환해라.\n\n"
+            + context_block
+        )
+
+        try:
+            converted = self._llm.generate(
+                messages=[
+                    {"role": "system",  "content": system},
+                    {"role": "user",    "content": f"변환 요청: {content}"},
+                ],
+                stream=False,
+            )
+        except Exception as e:
+            return f"오류: LLM 변환 중 예외 발생 — {e}"
+
+        return f"[{model}] {converted}"

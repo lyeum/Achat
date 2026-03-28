@@ -78,11 +78,16 @@ class LLMClient:
         messages: list[dict],
         stream: bool = False,
         max_tokens: int = 512,
+        mode: str = "chat",
     ) -> str:
-        """messages 리스트(ChatML 형식)를 받아 어시스턴트 응답 문자열을 반환한다."""
+        """messages 리스트(ChatML 형식)를 받아 어시스턴트 응답 문자열을 반환한다.
+
+        mode='function': JSON 파라미터 추출용 — greedy decoding, 강한 repetition_penalty.
+        mode='chat'    : 대화용 — sampling, 기본 repetition_penalty (기본값).
+        """
         if self.backend == "llama_cpp":
             return self._generate_llama(messages, stream, max_tokens)
-        return self._generate_transformers(messages, max_tokens)
+        return self._generate_transformers(messages, max_tokens, mode=mode)
 
     def _generate_llama(
         self, messages: list[dict], stream: bool, max_tokens: int
@@ -102,21 +107,27 @@ class LLMClient:
             return full
         return output["choices"][0]["message"]["content"]
 
-    def _generate_transformers(self, messages: list[dict], max_tokens: int) -> str:
+    def _generate_transformers(self, messages: list[dict], max_tokens: int, mode: str = "chat") -> str:
         import torch
 
         text = self._tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
         inputs = self._tokenizer(text, return_tensors="pt").to(self._model.device)
+
+        if mode == "function":
+            # JSON 추출: greedy decoding + 강한 반복 억제 → LoRA 할루시네이션 방지
+            gen_kwargs: dict = dict(do_sample=False, repetition_penalty=1.3)
+        else:
+            # 대화: sampling 유지
+            gen_kwargs = dict(do_sample=True, temperature=0.8, repetition_penalty=1.1)
+
         with torch.no_grad():
             out = self._model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
-                do_sample=True,
-                temperature=0.8,
-                repetition_penalty=1.1,
                 pad_token_id=self._tokenizer.eos_token_id,
+                **gen_kwargs,
             )
         response: str = self._tokenizer.decode(
             out[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
