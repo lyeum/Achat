@@ -66,6 +66,11 @@ class TestGetCharacterList:
         # conversation/character/CH_Haru.yaml 기준
         assert "Haru" in ids or len(ids) >= 1, "캐릭터 목록이 비어있거나 Haru 없음"
 
+    def test_default_character_excluded(self, bridge):
+        """id='default'인 CH_default.yaml이 목록에 포함되지 않아야 한다."""
+        ids = [c["id"] for c in json.loads(bridge.getCharacterList())]
+        assert "default" not in ids
+
     def test_no_exception_on_empty_dir(self, bridge, tmp_path, monkeypatch):
         """캐릭터 디렉토리가 비어있어도 빈 배열 반환."""
         import ui_ux.bridge as bmod

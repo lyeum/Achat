@@ -1,0 +1,351 @@
+"""대화 품질 개선 관련 단위 테스트.
+
+대화개선.md 항목 A~G에서 수정된 코드의 동작을 검증한다.
+LLM / GPU / ChromaDB 불필요. 파일 I/O는 tmp_path 사용.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+os.environ.setdefault("ACHAT_ENV", "ui_test")
+
+_CHAR_DIR = ROOT / "conversation" / "character"
+_HARU_YAML = _CHAR_DIR / "CH_Haru.yaml"
+_SEONJAE_YAML = _CHAR_DIR / "CH_Seonjae.yaml"
+_HARU_STRANGER = ROOT / "data" / "lora" / "conversation" / "haru_stranger.jsonl"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# A. character_load.py — default YAML 필수 필드 검사 제외
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestCharacterLoad:
+    @pytest.fixture
+    def loguru_sink(self):
+        """loguru 로그를 리스트에 캡처하는 픽스처."""
+        from loguru import logger
+        messages: list[str] = []
+        sink_id = logger.add(lambda msg: messages.append(msg), level="WARNING")
+        yield messages
+        logger.remove(sink_id)
+
+    def test_default_yaml_no_warning(self, loguru_sink):
+        """CH_default.yaml 로드 시 '누락 필드' 경고가 출력되지 않아야 한다."""
+        from conversation.loader.character_load import load_character
+        data = load_character(_CHAR_DIR / "CH_default.yaml")
+        assert data["id"] == "default"
+        assert not any("누락 필드" in m for m in loguru_sink)
+
+    def test_normal_character_missing_field_warns(self, tmp_path, loguru_sink):
+        """필수 필드가 없는 일반 캐릭터 YAML은 경고를 출력해야 한다."""
+        from conversation.loader.character_load import load_character
+        incomplete = tmp_path / "CH_TestChar.yaml"
+        incomplete.write_text("id: TestChar\nname: 테스트\n", encoding="utf-8")
+        load_character(incomplete)
+        assert any("누락 필드" in m for m in loguru_sink)
+
+    def test_haru_loads_without_error(self):
+        """CH_Haru.yaml 로드가 오류 없이 완료된다."""
+        from conversation.loader.character_load import load_character
+        data = load_character(_HARU_YAML)
+        assert data["id"] == "Haru"
+
+    def test_seonjae_loads_without_error(self):
+        """CH_Seonjae.yaml 로드가 오류 없이 완료된다."""
+        from conversation.loader.character_load import load_character
+        data = load_character(_SEONJAE_YAML)
+        assert data["id"] == "Seonjae"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# C & G. CH_Haru.yaml / CH_Seonjae.yaml 규칙 강화 검증
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestCharacterYamlRules:
+    @pytest.fixture(params=["CH_Haru.yaml", "CH_Seonjae.yaml"])
+    def char_data(self, request):
+        with open(_CHAR_DIR / request.param, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def test_speech_style_has_korean_only_rule(self, char_data):
+        """speech_style에 '한국어가 아닌 다른 언어' 관련 문장이 포함되어야 한다."""
+        speech = char_data.get("speech_style", "")
+        assert "한국어" in speech and "다른 언어" in speech, \
+            f"speech_style에 언어 규칙 없음: {speech[:80]}"
+
+    def test_speech_style_no_emotional_questions_to_strangers(self, char_data):
+        """speech_style에 처음 만난 상대 감정 질문 금지 지시가 있어야 한다."""
+        speech = char_data.get("speech_style", "")
+        assert "처음 만난" in speech, \
+            f"speech_style에 stranger 감정 질문 금지 없음: {speech[:80]}"
+
+    def test_rules_contain_no_other_languages(self, char_data):
+        """rules 목록에 다른 언어 금지 규칙이 있어야 한다."""
+        rules = char_data.get("rules", [])
+        assert any("다른 언어" in str(r) for r in rules), \
+            "rules에 '다른 언어' 금지 항목 없음"
+
+    def test_rules_contain_grammar_rule(self, char_data):
+        """rules 목록에 조사 문법 규칙이 있어야 한다."""
+        rules = char_data.get("rules", [])
+        assert any("조사" in str(r) for r in rules), \
+            "rules에 조사 문법 규칙 없음"
+
+    def test_rules_contain_stranger_tier_restriction(self, char_data):
+        """rules 목록에 stranger tier 감정 질문 금지가 있어야 한다."""
+        rules = char_data.get("rules", [])
+        assert any("stranger" in str(r) or "처음 만난" in str(r) for r in rules), \
+            "rules에 stranger tier 감정 질문 금지 없음"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# D. memory/summarizer.py — 이름 importance 보완
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSummarizerImportance:
+    @pytest.fixture(autouse=True)
+    def import_fn(self):
+        from memory.summarizer import score_importance
+        self.score = score_importance
+
+    def test_name_colon_format_scores_high(self):
+        """'이름: X' 형태는 high(0.85) 점수를 받아야 한다."""
+        assert self.score("사용자의 이름: 김철수라고 밝혔다.") == 0.85
+
+    def test_name_eun_scores_high(self):
+        """'이름은' 키워드 → 0.85."""
+        assert self.score("이름은 민지라고 했다.") == 0.85
+
+    def test_name_i_scores_high(self):
+        """'이름이' 키워드 → 0.85."""
+        assert self.score("이름이 뭔지 물어봤다.") == 0.85
+
+    def test_plain_name_scores_high(self):
+        """'이름' 단독 키워드 → 0.85."""
+        assert self.score("자신의 이름을 소개했다.") == 0.85
+
+    def test_promise_scores_high(self):
+        """'약속' 키워드 → 0.85."""
+        assert self.score("다음에 만나기로 약속했다.") == 0.85
+
+    def test_mid_keyword_scores_mid(self):
+        """high 키워드 없고 mid 키워드만 있으면 0.6을 반환해야 한다."""
+        assert self.score("취미가 독서라고 했다.") == 0.6
+
+    def test_mid_keyword_feeling_scores_mid(self):
+        """'감정' mid 키워드 → 0.6."""
+        assert self.score("오늘 기분이 좋다고 말했다.") == 0.6
+
+    def test_no_keyword_scores_default(self):
+        """키워드 없는 일반 대화 → 기본값 0.5 반환."""
+        assert self.score("날씨 얘기를 했다.") == 0.5
+
+    def test_high_keyword_overrides_mid(self):
+        """high와 mid 키워드가 동시에 있으면 0.85를 반환해야 한다."""
+        assert self.score("이름은 민지. 취미는 독서.") == 0.85
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# E. training/scripts/build_sft_from_feedback.py 변환 검증
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestBuildSftFromFeedback:
+    @pytest.fixture
+    def feedback_dir(self, tmp_path):
+        """단일 feedback_pos JSONL 파일이 있는 임시 디렉토리."""
+        entry = {
+            "messages": [
+                {"role": "user", "content": "안녕"},
+                {"role": "assistant", "content": "어."},
+            ],
+            "character_id": "Haru",
+            "affection": "low",
+        }
+        f = tmp_path / "test_session.jsonl"
+        f.write_text(json.dumps(entry, ensure_ascii=False) + "\n", encoding="utf-8")
+        return tmp_path
+
+    def test_convert_returns_records(self, feedback_dir):
+        """변환 결과가 1개 이상의 레코드를 포함해야 한다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", feedback_dir):
+            records = mod.convert()
+        assert len(records) == 1
+
+    def test_sft_entry_has_messages_key(self, feedback_dir):
+        """변환 결과 각 항목은 'messages' 키를 가져야 한다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", feedback_dir):
+            records = mod.convert()
+        assert "messages" in records[0]
+
+    def test_first_message_is_system(self, feedback_dir):
+        """messages[0]의 role은 'system'이어야 한다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", feedback_dir):
+            records = mod.convert()
+        assert records[0]["messages"][0]["role"] == "system"
+
+    def test_system_prompt_contains_character_name(self, feedback_dir):
+        """시스템 프롬프트에 캐릭터 이름(하루)이 포함되어야 한다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", feedback_dir):
+            records = mod.convert()
+        system_content = records[0]["messages"][0]["content"]
+        assert "하루" in system_content
+
+    def test_affection_low_maps_to_stranger(self, feedback_dir):
+        """affection='low' → stranger tier tone_guide가 시스템 프롬프트에 포함된다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", feedback_dir):
+            records = mod.convert()
+        system_content = records[0]["messages"][0]["content"]
+        assert "처음 만난" in system_content or "경계" in system_content
+
+    def test_reviewed_only_filters_unreviewed(self, feedback_dir):
+        """--reviewed_only 옵션 시 reviewed=true 항목만 포함된다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", feedback_dir):
+            records = mod.convert(reviewed_only=True)
+        assert len(records) == 0  # 픽스처 항목은 reviewed 없음
+
+    def test_reviewed_only_includes_reviewed_entry(self, tmp_path):
+        """reviewed=true인 항목은 --reviewed_only 시에도 포함된다."""
+        import training.scripts.build_sft_from_feedback as mod
+        entry = {
+            "messages": [{"role": "user", "content": "안녕"}, {"role": "assistant", "content": "응."}],
+            "character_id": "Haru",
+            "affection": "mid",
+            "reviewed": True,
+        }
+        f = tmp_path / "reviewed.jsonl"
+        f.write_text(json.dumps(entry, ensure_ascii=False) + "\n", encoding="utf-8")
+        with patch.object(mod, "_FEEDBACK_POS_DIR", tmp_path):
+            records = mod.convert(reviewed_only=True)
+        assert len(records) == 1
+
+    def test_empty_dir_returns_empty_list(self, tmp_path):
+        """빈 디렉토리는 빈 리스트를 반환한다."""
+        import training.scripts.build_sft_from_feedback as mod
+        with patch.object(mod, "_FEEDBACK_POS_DIR", tmp_path):
+            records = mod.convert()
+        assert records == []
+
+    def test_save_writes_jsonl(self, tmp_path):
+        """save()가 올바른 JSONL을 파일에 기록한다."""
+        import training.scripts.build_sft_from_feedback as mod
+        records = [{"messages": [{"role": "system", "content": "test"}]}]
+        out = tmp_path / "out.jsonl"
+        mod.save(records, out)
+        lines = out.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["messages"][0]["role"] == "system"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# F. data/lora/conversation/haru_stranger.jsonl 구조 검증
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHaruStrangerJsonl:
+    @pytest.fixture(scope="class")
+    def records(self):
+        assert _HARU_STRANGER.exists(), f"haru_stranger.jsonl 없음: {_HARU_STRANGER}"
+        result = []
+        with open(_HARU_STRANGER, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    result.append(json.loads(line))
+        return result
+
+    def test_minimum_record_count(self, records):
+        """최소 10개 이상의 대화 예시가 있어야 한다."""
+        assert len(records) >= 10, f"레코드 수 부족: {len(records)}"
+
+    def test_all_have_messages_key(self, records):
+        for i, rec in enumerate(records):
+            assert "messages" in rec, f"레코드 {i}: 'messages' 키 없음"
+
+    def test_first_message_is_system(self, records):
+        for i, rec in enumerate(records):
+            assert rec["messages"][0]["role"] == "system", \
+                f"레코드 {i}: 첫 메시지가 system 아님"
+
+    def test_system_prompt_has_stranger_tone(self, records):
+        """시스템 프롬프트에 stranger tier 톤 지시가 포함되어야 한다."""
+        for i, rec in enumerate(records):
+            sys_content = rec["messages"][0]["content"]
+            assert "처음 만난" in sys_content or "경계" in sys_content, \
+                f"레코드 {i}: stranger 톤 지시 없음"
+
+    def test_has_user_and_assistant_turns(self, records):
+        """system 이후에 user, assistant 메시지가 번갈아 나와야 한다."""
+        for i, rec in enumerate(records):
+            turns = rec["messages"][1:]  # system 제외
+            assert len(turns) >= 2, f"레코드 {i}: 대화 턴 부족"
+            roles = [m["role"] for m in turns]
+            assert "user" in roles and "assistant" in roles, \
+                f"레코드 {i}: user/assistant 턴 없음"
+
+    def test_assistant_responses_are_short(self, records):
+        """stranger tier 응답은 짧아야 한다 (평균 20자 이하)."""
+        for i, rec in enumerate(records):
+            assistant_msgs = [m["content"] for m in rec["messages"] if m["role"] == "assistant"]
+            if assistant_msgs:
+                avg_len = sum(len(m) for m in assistant_msgs) / len(assistant_msgs)
+                assert avg_len <= 25, \
+                    f"레코드 {i}: assistant 응답 평균 {avg_len:.1f}자 (기대 ≤ 25자)"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# prompt_build.py — YAML rules 포함 및 이름 형식 검증
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPromptBuildLayerA:
+    @pytest.fixture
+    def builder(self):
+        from conversation.core.prompt_build import PromptBuilder
+        from conversation.loader.character_load import load_character
+        from conversation.core.session import ConversationSession
+
+        char = load_character(_HARU_YAML)
+        world = {"description": "테스트 세계관", "scenarios": []}
+        session = ConversationSession.__new__(ConversationSession)
+        session.mood = "neutral"
+        session.affection = 5          # stranger tier
+        session.scenario_id = None
+        session.act_id = None
+        session.location_context = ""
+        return PromptBuilder(char, world, session)
+
+    def test_name_format_is_naneun(self, builder):
+        """시스템 프롬프트가 '너는 하루이다.' 형식으로 시작해야 한다."""
+        layer_a = builder._layer_a()
+        assert layer_a.startswith("너는 하루이다."), \
+            f"이름 형식 불일치: {layer_a[:40]}"
+
+    def test_rules_in_system_prompt(self, builder):
+        """YAML rules의 내용이 시스템 프롬프트에 포함되어야 한다."""
+        layer_a = builder._layer_a()
+        # 새로 추가된 규칙 확인
+        assert "다른 언어" in layer_a, "언어 금지 규칙이 Layer A에 없음"
+        assert "조사" in layer_a, "조사 문법 규칙이 Layer A에 없음"
+
+    def test_speech_style_in_system_prompt(self, builder):
+        """speech_style 내용이 시스템 프롬프트에 포함되어야 한다."""
+        layer_a = builder._layer_a()
+        assert "반말" in layer_a
+
+    def test_stranger_tone_in_system_prompt(self, builder):
+        """affection=5 → stranger tier 톤 지시가 포함되어야 한다."""
+        layer_a = builder._layer_a()
+        assert "처음 만난" in layer_a or "경계" in layer_a
