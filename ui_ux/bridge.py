@@ -15,6 +15,7 @@ _WORLD_DIR      = Path(__file__).resolve().parent.parent / "conversation" / "wor
 _ICONS_DIR      = _ASSETS / "icons"         # icons/{CharId}/{CharId}.png + emotion/
 _CHAR_PARTS_DIR = _ASSETS / "characters"    # characters/{type}/*.png (base/hair/eye/mouth/cloth)
 _BG_DIR         = _ASSETS / "background"    # background/{world_id}/{location}.png
+_PREFS_PATH     = _ASSETS / "preferences.json"   # UI 환경설정 (테마 등)
 
 
 class ChatBridge(QObject):
@@ -596,6 +597,152 @@ class ChatBridge(QObject):
              for m in metas],
             ensure_ascii=False,
         )
+
+    @Slot(result=str)
+    def getCharacterStatus(self) -> str:
+        """현재 캐릭터의 상태를 JSON 문자열로 반환한다.
+
+        Returns
+        -------
+        str
+            ``{"char_name": "하루", "mood": "neutral", "affection": 30,
+               "tier": "acquaintance", "turn_count": 0}`` 형태의 JSON.
+        """
+        session   = getattr(self._agent, "session",   None)
+        character = getattr(self._agent, "character", {}) or {}
+
+        mood        = session.mood        if session else "neutral"
+        affection   = session.affection   if session else 0
+        turn_count  = session.turn_count  if session else 0
+
+        thresholds: dict = character.get("state", {}).get("affection_thresholds", {})
+        tier = "unknown"
+        for tier_name, bounds in thresholds.items():
+            if bounds[0] <= affection <= bounds[1]:
+                tier = tier_name
+                break
+
+        return json.dumps({
+            "char_name":  character.get("name", ""),
+            "mood":       mood,
+            "affection":  affection,
+            "tier":       tier,
+            "turn_count": turn_count,
+        }, ensure_ascii=False)
+
+    @Slot(str, result=bool)
+    def resetCharacter(self, char_id: str) -> bool:
+        """해당 캐릭터의 세션 상태와 장기 기억을 전부 초기화한다.
+
+        - data/sessions/{char_id}/ 디렉토리 삭제 (세션 기록 전체)
+        - VDB 장기 기억 삭제 (clear_all)
+        - 현재 대화 중인 캐릭터라면 에이전트도 즉시 초기화
+
+        Parameters
+        ----------
+        char_id : str
+            초기화할 캐릭터 ID.
+
+        Returns
+        -------
+        bool
+            성공이면 True, 실패이면 False.
+        """
+        import shutil
+
+        try:
+            # 1. 세션 디렉토리 전체 삭제
+            char_session_dir = self._session_manager._char_dir(char_id)
+            if char_session_dir.exists():
+                shutil.rmtree(char_session_dir)
+
+            # 2. active.json이 이 캐릭터를 가리키면 초기화
+            active = self._session_manager._load_active()
+            if active and active.get("char_id") == char_id:
+                active_path = self._session_manager._active_path()
+                if active_path.exists():
+                    active_path.unlink()
+
+            # 3. VDB 장기 기억 전체 삭제
+            if getattr(self._agent, "long_term", None) is not None:
+                try:
+                    self._agent.long_term.clear_all(char_id)
+                except Exception:
+                    pass
+
+            # 4. 현재 활성 캐릭터이면 에이전트 초기화
+            current_id = (self._agent.character or {}).get("id", "")
+            if current_id == char_id and not getattr(self._agent, "_stub", True):
+                new_state = self._session_manager.activate(char_id)
+                self._rebuild_agent(new_state)
+                self.characterNameChanged.emit(self._character_name)
+                self.moodChanged.emit(self._read_mood())
+
+            return True
+
+        except Exception as e:  # noqa: BLE001
+            self.messageAdded.emit("system", f"[캐릭터 초기화 실패] {e}")
+            return False
+
+    @Slot(result=str)
+    def browseCharacterYaml(self) -> str:
+        """네이티브 파일 다이얼로그로 CH_*.yaml을 선택해 캐릭터 디렉토리에 복사한다.
+
+        Returns
+        -------
+        str
+            추가된 캐릭터의 id 문자열. 실패 시 빈 문자열.
+        """
+        import shutil
+
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            None, "캐릭터 YAML 선택", "", "YAML 파일 (*.yaml *.yml);;모든 파일 (*)"
+        )
+        if not path:
+            return ""
+
+        import yaml as _yaml
+
+        src = Path(path)
+        try:
+            data = _yaml.safe_load(src.read_text(encoding="utf-8"))
+            char_id = data.get("id", "")
+            if not char_id:
+                return ""
+            dest = _CHARACTER_DIR / f"CH_{char_id}.yaml"
+            shutil.copy2(str(src), str(dest))
+            return char_id
+        except Exception:  # noqa: BLE001
+            return ""
+
+    # ── 테마 설정 ─────────────────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def getTheme(self) -> str:
+        """저장된 테마 ID를 반환한다. 저장값이 없으면 'dark'."""
+        try:
+            if _PREFS_PATH.exists():
+                saved = json.loads(_PREFS_PATH.read_text(encoding="utf-8")).get("theme", "ocean")
+                return saved if saved in ("ocean", "solar", "forest") else "ocean"
+        except Exception:  # noqa: BLE001
+            pass
+        return "ocean"
+
+    @Slot(str)
+    def saveTheme(self, theme_id: str) -> None:
+        """테마 ID를 preferences.json에 저장한다."""
+        try:
+            data: dict = {}
+            if _PREFS_PATH.exists():
+                data = json.loads(_PREFS_PATH.read_text(encoding="utf-8"))
+            data["theme"] = theme_id
+            _PREFS_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     # ── 내부 콜백 ─────────────────────────────────────────────────────────────
 

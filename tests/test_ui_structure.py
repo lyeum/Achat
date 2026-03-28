@@ -77,8 +77,11 @@ class TestMainQml:
     def test_has_settingsOpen(self):
         assert "settingsOpen" in self.src
 
-    def test_has_customizationOpen(self):
-        assert "customizationOpen" in self.src
+    def test_has_emotionPanelOpen(self):
+        assert "emotionPanelOpen" in self.src
+
+    def test_has_characterBuildOpen(self):
+        assert "characterBuildOpen" in self.src
 
     def test_has_customPartsJson(self):
         assert "customPartsJson" in self.src
@@ -118,8 +121,8 @@ class TestMainQml:
     def test_has_settings_panel_component(self):
         assert "SettingsPanel {" in self.src
 
-    def test_has_customization_panel_component(self):
-        assert "CustomizationPanel {" in self.src
+    def test_has_character_build_panel_component(self):
+        assert "CharacterBuildPanel {" in self.src
 
     def test_has_character_display_component(self):
         assert "CharacterDisplay {" in self.src
@@ -158,8 +161,14 @@ class TestSettingsPanelQml:
     def test_has_close_requested_signal(self):
         assert "signal closeRequested" in self.src
 
-    def test_has_customization_requested_signal(self):
-        assert "signal customizationRequested" in self.src
+    def test_has_emotion_panel_requested_signal(self):
+        assert "signal emotionPanelRequested" in self.src
+
+    def test_has_character_build_requested_signal(self):
+        assert "signal characterBuildRequested" in self.src
+
+    def test_has_reset_confirm_requested_signal(self):
+        assert "signal resetConfirmRequested" in self.src
 
     def test_no_nested_repeater_parent_ref(self):
         """parent._wId / parent._scId 패턴이 제거되었는지 확인."""
@@ -233,9 +242,9 @@ class TestCustomizationPanelQml:
         assert "parent._selected ===" not in self.src, \
             "ListView delegate 내부 parent._selected === 비교 잔존 — contentItem scope 버그"
 
-    def test_uses_listview_view(self):
-        """ListView.view attached property를 사용해 outer scope 접근."""
-        assert "ListView.view" in self.src
+    def test_uses_slot_grid_layout(self):
+        """ListView 대신 Repeater + Grid 패턴 사용."""
+        assert "Repeater" in self.src
 
     def test_has_panel_rect_click_consumer(self):
         """panelRect 내 MouseArea가 클릭 이벤트를 소비."""

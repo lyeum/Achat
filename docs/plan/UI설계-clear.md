@@ -21,9 +21,10 @@
 ### 레이아웃
 
 ```
-┌─────────────────────────────┐
-│ 하루          [≡] [●] [✕]  │  ← ≡: 설정 패널, ●: PIP 전환(주황), ✕: 종료
-├─────────────────────────────┤
+┌─────────────────────────────────────────┐
+│ 하루  [캐릭터 변경] [상태]  [≡] [●] [✕] │  ← 변경: CharacterSelectPanel, 상태: CharacterStatusPanel
+│                                          │     ≡: SettingsPanel, ●: PIP 전환(주황), ✕: 종료
+├─────────────────────────────────────────┤
 │ [대화]  [기능]               │
 ├─────────────────────────────┤
 │                             │
@@ -52,9 +53,23 @@
 
 ### 설정 패널 (≡ 버튼 → 슬라이드인)
 
-- **캐릭터 변경**: `conversation/character/` 내 YAML 목록 표시 → 선택 시 핫스왑
+- **캐릭터**: `conversation/character/` 내 YAML 목록 표시 → 선택 시 핫스왑 (캐릭터 변경 버튼과 별도)
 - **세계관 / 시나리오 선택**: `conversation/world/` 내 YAML 목록 표시 → act 선택 포함
 - **커스터마이징**: 캐릭터 파츠 구성 설정 (섹션 4 참조)
+- **캐릭터 초기화**: ResetConfirmPanel 열기 → 캐릭터 선택 후 세션 + VDB 장기기억 전체 삭제
+- **테마**: ocean / solar / forest 3종 스와치 선택 → `themeChangeRequested(themeId)` 시그널 emit → bridge.saveTheme() 저장
+
+### CharacterSelectPanel ("캐릭터 변경" 버튼 → 모달)
+
+- 타이틀바 "캐릭터 변경" 버튼으로 열림 (z:20 모달)
+- `getCharacterList()` 결과로 캐릭터 목록 표시 → 선택 시 `characterChanged(charId)` 시그널
+- "+" 버튼 → `addRequested()` 시그널 → `bridge.browseCharacterYaml()` 호출 (파일 다이얼로그)
+
+### CharacterStatusPanel ("상태" 버튼 → 모달)
+
+- 타이틀바 "상태" 버튼으로 열림 (z:20 모달)
+- `bridge.getCharacterStatus()` 결과(JSON) 파싱 → 캐릭터 이름 / tier 배지 / 친밀도 바 / 감정 / 대화 횟수 표시
+- tier별 색상: `_tierColor` 맵으로 친밀도 바 + 배지 색상 연동
 
 ---
 
@@ -220,6 +235,7 @@ mood 상태는 `agent/state.py::update_mood()`가 **사용자 입력 키워드**
 | `characterNameChanged` | `name: str` | 캐릭터 이름 변경 |
 | `backgroundChanged` | `url: str` | act 변경 시 배경 이미지 file URL (장소 이미지 없으면 `""`) |
 | `moodChanged` | `mood: str` | mood 변경 시 감정 상태 문자열 |
+| `imageImported` | `slot_type: str, result: str` | 이미지 임포트 완료 (icon→URL, parts→filename) |
 
 ### Property (Python → QML)
 
@@ -234,15 +250,24 @@ mood 상태는 `agent/state.py::update_mood()`가 **사용자 입력 키워드**
 
 | 슬롯 | 인자 | 반환 | 용도 |
 |---|---|---|---|
-| `sendMessage` | `text: str` | — | 사용자 메시지 전송 |
+| `sendMessage` | `text: str, mode: str` | — | 사용자 메시지 전송 (`mode`: "chat"\|"function") |
 | `snapToEdge` | `x, y, w, h: int` | `list[int]` | PIP 모서리 스냅 좌표 계산 |
 | `getCharacterList` | — | `str` (JSON) | `[{id, name}, ...]` 목록 |
 | `getWorldList` | — | `str` (JSON) | `[{world_id, description, scenarios}, ...]` 목록 |
-| `changeCharacter` | `char_id: str` | — | 캐릭터 핫스왑 |
-| `changeWorld` | `world_id, scenario_id, act_id: str` | — | 세계관 / act 전환 → `_build_bg_url()`이 location 역참조 후 배경 갱신 |
+| `changeCharacter` | `char_id: str` | — | 캐릭터 핫스왑 (이전 세션 상태 저장 후 대상 캐릭터 마지막 세션 재개) |
+| `changeWorld` | `world_id, scenario_id, act_id: str` | — | 세계관 / act 전환 → location 역참조 후 배경 갱신 |
 | `loadCustomization` | — | `str` (JSON) | `{parts, icon_url, char_id}` 반환 |
 | `saveCustomization` | `json_data: str` | — | `{parts}` → `icons/{char_id}/parts.json` 저장 |
-| `getAllPartsList` | — | `str` (JSON) | `{base, hair, eye, mouth, cloth}` 파일 목록 |
+| `getAllPartsList` | — | `str` (JSON) | `{base, hair, eyebrow, eye, mouth, cloth}` 파일 목록 |
+| `browseImage` | `slot_type: str` | — | 파일 다이얼로그 → 이미지 임포트 → `imageImported` 시그널 |
+| `importImageFromDrop` | `slot_type, file_url: str` | — | 드래그&드롭 file URL → 이미지 임포트 |
+| `browseCharacterYaml` | — | `str` | YAML 파일 다이얼로그 → `conversation/character/`에 복사 → 추가된 char_id 반환 |
+| `newSession` | `keep_memory: bool` | — | 현재 캐릭터의 새 세션 시작 (keep_memory=False 시 VDB 에피소딕 기억 삭제) |
+| `listSessions` | `char_id: str` | `str` (JSON) | 해당 캐릭터의 세션 목록 |
+| `getCharacterStatus` | — | `str` (JSON) | `{char_name, mood, affection, tier, turn_count}` 현재 캐릭터 상태 |
+| `resetCharacter` | `char_id: str` | `bool` | 세션 디렉토리 + VDB 장기기억 전체 삭제 후 에이전트 재초기화 |
+| `getTheme` | — | `str` | `preferences.json`에서 저장된 테마 ID 반환 (없으면 `"ocean"`) |
+| `saveTheme` | `theme_id: str` | — | 테마 ID를 `preferences.json`에 저장 |
 
 ---
 
@@ -294,14 +319,18 @@ ui_ux/assets/
 
 ---
 
-## 7. 신규 QML 파일 목록
+## 7. QML 파일 목록
 
 | 파일 | 역할 |
 |---|---|
+| `ui_ux/qml/ChatBubble.qml` | 말풍선 컴포넌트 (role 기반 좌/우 정렬, 테마 색상 프로퍼티) |
 | `ui_ux/qml/PipWindow.qml` | PIP 마스코트 모드 (아이콘 + 말풍선) |
-| `ui_ux/qml/SettingsPanel.qml` | 슬라이드인 설정 패널 |
-| `ui_ux/qml/CustomizationPanel.qml` | 커스터마이징 편집 UI (파츠 선택) |
+| `ui_ux/qml/SettingsPanel.qml` | 슬라이드인 설정 패널 (캐릭터/세계관/커스터마이징/초기화/테마) |
 | `ui_ux/qml/CharacterDisplay.qml` | 레이어 합성 캐릭터 표시 컴포넌트 |
+| `ui_ux/qml/CustomizationPanel.qml` | 커스터마이징 편집 UI (파츠 선택) |
+| `ui_ux/qml/CharacterSelectPanel.qml` | 캐릭터 변경 모달 (타이틀바 "캐릭터 변경" 버튼) |
+| `ui_ux/qml/CharacterStatusPanel.qml` | 캐릭터 상태 모달 (타이틀바 "상태" 버튼) |
+| `ui_ux/qml/ResetConfirmPanel.qml` | 캐릭터 초기화 확인 모달 (설정 패널 "캐릭터 초기화" 버튼) |
 
 ---
 
@@ -432,6 +461,57 @@ ui_ux/assets/
   에셋 준비 (코드 수정 후 이미지 배치):
     ui_ux/assets/background/seaside_world/beach.png       ← act_1 (location: beach)
     ui_ux/assets/background/seaside_world/breakwater.png  ← act_2 (location: breakwater)
+
+7단계 — 타이틀바 캐릭터 변경/상태 버튼 + 초기화 + 테마 시스템 ✅ 완료 (2026-03-28)
+  구현 내용:
+    - CharacterSelectPanel.qml 신규 구현
+        · 타이틀바 "캐릭터 변경" 버튼 → 모달 (z:20)
+        · 캐릭터 목록 Repeater + 선택 시 characterChanged 시그널
+        · "+" 버튼 → addRequested 시그널 → bridge.browseCharacterYaml()
+    - CharacterStatusPanel.qml 신규 구현
+        · 타이틀바 "상태" 버튼 → 모달 (z:20)
+        · bridge.getCharacterStatus() JSON 파싱
+        · 이름/tier 배지/친밀도 바(Behavior 애니메이션)/감정/대화 횟수 표시
+        · tier별 색상 맵 (_tierColor) 연동
+    - ResetConfirmPanel.qml 신규 구현
+        · 설정 패널 "캐릭터 초기화" → 모달 (z:30)
+        · 캐릭터 목록 라디오 선택 + 초기화 실행
+        · bridge.resetCharacter(char_id) 호출 → 세션 + VDB 전체 삭제
+    - SettingsPanel.qml 업데이트
+        · "캐릭터 초기화" SettingsButton 추가 → resetConfirmRequested 시그널
+        · "테마" 섹션 추가: ocean/solar/forest 3종 스와치 → themeChangeRequested 시그널
+    - main.qml 테마 시스템 추가
+        · currentTheme 프로퍼티 + _themes 오브젝트(16색 팔레트) + _th shortcut
+        · 모든 핵심 색상을 _th.* 바인딩으로 교체
+        · ChatBubble delegate: userBubbleColor/_th.accent, assistBubbleColor/_th.bubbleAssist
+        · onThemeChangeRequested: bridge.saveTheme(themeId) 후 currentTheme 갱신
+        · Component.onCompleted에서 bridge.getTheme()으로 저장 테마 복원
+    - bridge.py 슬롯 추가
+        · getCharacterStatus() → JSON {char_name, mood, affection, tier, turn_count}
+        · resetCharacter(char_id) → 세션 디렉토리 삭제 + VDB clear_all + 에이전트 재초기화
+        · getTheme() / saveTheme(theme_id) → preferences.json 영속화
+        · browseCharacterYaml() → 파일 다이얼로그 + conversation/character/ 복사
+    - qmldir에 3개 컴포넌트 등록
+        · CharacterSelectPanel 1.0 / CharacterStatusPanel 1.0 / ResetConfirmPanel 1.0
+
+  구현 파일:
+    ui_ux/qml/CharacterSelectPanel.qml   — 캐릭터 변경 모달 (신규)
+    ui_ux/qml/CharacterStatusPanel.qml   — 상태 표시 모달 (신규)
+    ui_ux/qml/ResetConfirmPanel.qml      — 초기화 확인 모달 (신규)
+    ui_ux/qml/SettingsPanel.qml          — 초기화 버튼 + 테마 섹션 추가
+    ui_ux/qml/main.qml                   — 타이틀바 버튼 + 테마 시스템 전반
+    ui_ux/qml/qmldir                     — 3개 컴포넌트 등록
+    ui_ux/bridge.py                      — getCharacterStatus / resetCharacter / getTheme / saveTheme / browseCharacterYaml
+
+  테마 팔레트 (톤다운된 최종값):
+    ocean:  bgMain #0E1C22, accent #5A9EA8 (muted teal),  textPrimary #A8D0D8
+    solar:  bgMain #1C1610, accent #A07830 (dark gold),    textPrimary #D8C898
+    forest: bgMain #101810, accent #5A8A68 (sage green),   textPrimary #A8C8B0
+
+8단계 — .gitignore 정비 ✅ 완료 (2026-03-28)
+  - training/log/daily|emotion|feedback_neg|feedback_pos|memory/ 패턴 추가
+  - data/sessions/ 패턴 추가
+  - git rm --cached -r 로 23개 런타임 파일 tracking 해제 (파일 자체는 유지)
 
 6단계 — mood 8종 전체 대응 ✅ 완료 (2026-03-20)
   현황:

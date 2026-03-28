@@ -11,17 +11,21 @@ Item {
     // bridge.getCharacterList() / getWorldList() 반환 JSON 문자열
     property string characterListJson: "[]"
     property string worldListJson:     "[]"
+    property string currentTheme:     "dark"
 
     signal closeRequested()
     signal emotionPanelRequested()
     signal characterBuildRequested()
     signal newSessionRequested(bool keepMemory)
+    signal resetConfirmRequested()
+    signal themeChangeRequested(string themeId)
 
     // ── 섹션 펼침 상태 ────────────────────────────────────────────────────────
     property bool secCharExpanded:   true   // 캐릭터: 기본 펼침
     property bool secWorldExpanded:  false
     property bool secCustomExpanded: false
     property bool secSessionExpanded: false
+    property bool secThemeExpanded:  false
 
     // ── 배경 딤 (클릭으로 닫기) ──────────────────────────────────────────────
     Rectangle {
@@ -136,6 +140,16 @@ Item {
                                     bridge.changeCharacter(modelData.id)
                                     settingsRoot.closeRequested()
                                 }
+                            }
+                        }
+
+                        SettingsButton {
+                            width: charCol.width
+                            label: "캐릭터 초기화"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.resetConfirmRequested()
                             }
                         }
                     }
@@ -297,6 +311,133 @@ Item {
                             onActivated: {
                                 settingsRoot.closeRequested()
                                 settingsRoot.newSessionRequested(true)
+                            }
+                        }
+                    }
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // 테마 섹션
+                // ══════════════════════════════════════════════════════════════
+                SectionHeader {
+                    label: "테마"
+                    fontFamily: settingsRoot.fontFamily
+                    expanded: settingsRoot.secThemeExpanded
+                    onToggled: settingsRoot.secThemeExpanded = !settingsRoot.secThemeExpanded
+                }
+
+                Item {
+                    width: parent.width
+                    height: settingsRoot.secThemeExpanded ? themeArea.implicitHeight + 12 : 0
+                    clip: true
+                    Behavior on height { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+
+                    Column {
+                        id: themeArea
+                        width: parent.width
+                        spacing: 0
+
+                        Item { width: 1; height: 6 }
+
+                        // ── 스와치 행 ─────────────────────────────────────────
+                        Item {
+                            width: parent.width
+                            height: 72
+
+                            Row {
+                                anchors { left: parent.left; right: parent.right;
+                                          leftMargin: 8; rightMargin: 8 }
+                                spacing: 6
+
+                                // 오션
+                                Rectangle {
+                                    width: (parent.width - 12) / 3
+                                    height: 64; radius: 8
+                                    color: "#0E1C22"
+                                    border.color: settingsRoot.currentTheme === "ocean" ? "#FFFFFF" : "transparent"
+                                    border.width: 2
+                                    Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 6
+                                        Rectangle {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: 18; height: 18; radius: 9
+                                            color: "#5A9EA8"
+                                        }
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            text: "오션"
+                                            color: "#A8D0D8"; font.pixelSize: 10
+                                            font.family: settingsRoot.fontFamily
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: settingsRoot.themeChangeRequested("ocean")
+                                    }
+                                }
+
+                                // 솔라
+                                Rectangle {
+                                    width: (parent.width - 12) / 3
+                                    height: 64; radius: 8
+                                    color: "#1C1610"
+                                    border.color: settingsRoot.currentTheme === "solar" ? "#FFFFFF" : "transparent"
+                                    border.width: 2
+                                    Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 6
+                                        Rectangle {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: 18; height: 18; radius: 9
+                                            color: "#A07830"
+                                        }
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            text: "솔라"
+                                            color: "#D8C898"; font.pixelSize: 10
+                                            font.family: settingsRoot.fontFamily
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: settingsRoot.themeChangeRequested("solar")
+                                    }
+                                }
+
+                                // 포레스트
+                                Rectangle {
+                                    width: (parent.width - 12) / 3
+                                    height: 64; radius: 8
+                                    color: "#101810"
+                                    border.color: settingsRoot.currentTheme === "forest" ? "#FFFFFF" : "transparent"
+                                    border.width: 2
+                                    Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 6
+                                        Rectangle {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: 18; height: 18; radius: 9
+                                            color: "#5A8A68"
+                                        }
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            text: "포레스트"
+                                            color: "#A8C8B0"; font.pixelSize: 10
+                                            font.family: settingsRoot.fontFamily
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: settingsRoot.themeChangeRequested("forest")
+                                    }
+                                }
                             }
                         }
                     }

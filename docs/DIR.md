@@ -174,12 +174,14 @@ Achat/
 │
 ├─ tests/                            ← 모든 테스트 파일은 반드시 이 폴더에 저장한다
 │   │                                   (eval/ 폴더의 수동 검증 스크립트와 분리)
-│   ├─ test_bridge_slots.py          ✅ ChatBridge 슬롯 단위 테스트 (26건)
+│   ├─ test_bridge_slots.py          ✅ ChatBridge 슬롯 단위 테스트
 │   │                                   stub agent + QCoreApplication 헤드리스 실행
 │   │                                   monkeypatch로 _ICONS_DIR / _CHAR_PARTS_DIR / 스크린 mock
-│   └─ test_ui_structure.py          ✅ QML 파일 존재·qmldir 등록·프로퍼티·시그널 검증 (53건)
+│   │                                   getCharacterStatus / resetCharacter 테스트 포함
+│   └─ test_ui_structure.py          ✅ QML 파일 존재·qmldir 등록·프로퍼티·시그널 검증
 │                                       버그 회귀 방지 테스트 포함
 │                                       (pipBubbleOpen 바인딩 루프, delegate scope, panelRect 클릭 등)
+│                                       CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel 검증 포함
 │
 ├─ tools/
 │   ├─ __init__.py                   ✅ BaseTool re-export
@@ -276,18 +278,24 @@ Achat/
     ├─ __init__.py                   ✅ 패키지 초기화
     ├─ bridge.py                     ✅ ChatBridge(QObject) — QML↔Python 시그널/슬롯 브리지
     │                                   Signal: messageAdded / statusChanged / characterNameChanged
-    │                                           backgroundChanged / moodChanged
+    │                                           backgroundChanged / moodChanged / imageImported
     │                                   Property: characterName / characterId / currentBackground / currentMood
-    │                                   Slot: sendMessage / snapToEdge / changeCharacter / changeWorld
+    │                                   Slot: sendMessage(text, mode) / snapToEdge / changeCharacter / changeWorld
     │                                         getCharacterList / getWorldList
     │                                         loadCustomization / saveCustomization / getAllPartsList
+    │                                         browseImage / importImageFromDrop / browseCharacterYaml
+    │                                         newSession(keep_memory) / listSessions(char_id)
+    │                                         getCharacterStatus / resetCharacter(char_id)
+    │                                         getTheme / saveTheme(theme_id)
     │                                   경로 상수:
     │                                     _ICONS_DIR      = ui_ux/assets/icons/
     │                                     _CHAR_PARTS_DIR = ui_ux/assets/characters/
     │                                     _BG_DIR         = ui_ux/assets/background/
+    │                                     _PREFS_PATH     = ui_ux/assets/preferences.json
     │                                     _CHARACTER_DIR  = conversation/character/
     │                                     _WORLD_DIR      = conversation/world/
-    │                                   _build_bg_url(): act_id → location 역참조 후 {location}.png 탐색
+    │                                   _build_bg_url(): session.location → {location}.png 탐색
+    │                                   SessionManager 연동: _init_session / _sync_session_state / _rebuild_agent
     ├─ chat_panel.py                 ✅ LLMWorker(QThread) — 백그라운드 LLM 추론
     │                                   response_ready / error_occurred 시그널
     ├─ tray.py                       ✅ AppTrayIcon — 시스템 트레이 (열기/숨기기, 캐릭터 변경, 종료)
@@ -306,39 +314,56 @@ Achat/
     │   │   ├─ hair/                 🔲 비어있음 — 헤어 파츠 PNG 배치 예정
     │   │   └─ mouth/                🔲 비어있음 — 입 파츠 PNG 배치 예정
     │   │
-    │   └─ icons/                    ← 캐릭터별 완성 아이콘 + 감정 오버레이
-    │       ├─ .gitkeep
-    │       └─ Haru/
-    │           ├─ Haru.png          ✅ 하루 전신 기본 아이콘 (128×160 px)
-    │           ├─ parts.json        🔲 커스터마이징 저장 파일 (saveCustomization() 호출 시 생성)
-    │           └─ emotion/          🔲 비어있음 — 감정 오버레이 PNG 배치 예정
-    │                                   neutral/happy/affectionate/touched/curious/
-    │                                   sad/embarrassed/annoyed/angry .png (각 128×160 px)
+    │   ├─ icons/                    ← 캐릭터별 완성 아이콘 + 감정 오버레이
+    │   │   ├─ .gitkeep
+    │   │   └─ Haru/
+    │   │       ├─ Haru.png          ✅ 하루 전신 기본 아이콘 (128×160 px)
+    │   │       ├─ parts.json        🔲 커스터마이징 저장 파일 (saveCustomization() 호출 시 생성)
+    │   │       └─ emotion/          🔲 비어있음 — 감정 오버레이 PNG 배치 예정
+    │   │                               neutral/happy/affectionate/touched/curious/
+    │   │                               sad/embarrassed/annoyed/angry .png (각 128×160 px)
+    │   └─ preferences.json          📄 UI 환경설정 (getTheme/saveTheme로 읽기/쓰기, 앱 실행 시 자동 생성)
+    │                                   {"theme": "ocean"}
     │
     └─ qml/
         ├─ qmldir                    ✅ AchatUI 모듈 선언
         │                               Style(singleton) / ChatBubble / PipWindow / SettingsPanel /
-        │                               CharacterDisplay / CustomizationPanel
+        │                               CharacterDisplay / CustomizationPanel /
+        │                               CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel
         ├─ Style.qml                 ✅ 디자인 토큰 singleton — 색상/폰트/간격/애니메이션 상수
-        ├─ main.qml                  ✅ 프레임리스 플로팅 Window (360×520 ↔ 50×50 PIP 전환)
+        ├─ main.qml                  ✅ 프레임리스 플로팅 Window (432×624 ↔ 160×160 PIP 전환)
         │                               DragHandler, HoverHandler, 한글 폰트 로더
-        │                               isBubble / pipBubbleOpen / settingsOpen / customizationOpen /
+        │                               테마 시스템: currentTheme + _themes(ocean/solar/forest) + _th shortcut
+        │                               타이틀바: charNameLabel + "캐릭터 변경" + "상태" + ≡ + PIP + ✕
+        │                               isBubble / pipBubbleOpen / settingsOpen /
+        │                               charSelectOpen / charStatusOpen / resetConfirmOpen /
         │                               customPartsJson / allPartsListJson / backgroundImageUrl / currentMood
         ├─ ChatBubble.qml            ✅ 재사용 말풍선 컴포넌트 (role로 좌/우 정렬·색상 제어)
-        ├─ PipWindow.qml             ✅ PIP 마스코트 모드 (50×50 아이콘 + 위로 확장 말풍선)
+        │                               userBubbleColor / assistBubbleColor 프로퍼티 (테마 색상 주입)
+        ├─ PipWindow.qml             ✅ PIP 마스코트 모드 (아이콘 + 위로 확장 말풍선)
         │                               characterId 기반 icons/{id}/{id}.png + emotion 오버레이
         │                               mood 8종 이모지 플레이스홀더 / 5초 자동 닫힘 / expandRequested 시그널
         ├─ SettingsPanel.qml         ✅ 오른쪽 슬라이드인 설정 패널 (z:10)
-        │                               캐릭터 변경 / 세계관+act 선택 (flat model) / 커스터마이징 열기
-        │                               closeRequested / customizationRequested 시그널
+        │                               캐릭터 / 세계관+act / 커스터마이징 / 초기화 / 테마 섹션
+        │                               closeRequested / emotionPanelRequested / characterBuildRequested /
+        │                               newSessionRequested / resetConfirmRequested / themeChangeRequested 시그널
         ├─ CharacterDisplay.qml      ✅ 레이어 합성 캐릭터 표시 (128×160 px, z:2)
         │                               icons/{id}/{id}.png 우선 → 없으면 5레이어 파츠 합성
         │                               감정 오버레이: icons/{id}/emotion/{mood}.png
         │                               mood 8종 이모지 플레이스홀더 / _hasAnyPart 플레이스홀더 제어
-        └─ CustomizationPanel.qml    ✅ 커스터마이징 편집 모달 (z:20)
-                                        파츠 5종(base/hair/eye/mouth/cloth) 가로 스크롤 선택
-                                        ListView.view.outerKey/outerSelected (delegate scope 버그 방지)
-                                        saved(partsJson) 시그널
+        ├─ CustomizationPanel.qml    ✅ 커스터마이징 편집 모달 (z:20)
+        │                               파츠 6종(base/hair/eyebrow/eye/mouth/cloth) 가로 스크롤 선택
+        │                               ListView.view.outerKey/outerSelected (delegate scope 버그 방지)
+        │                               saved(partsJson) 시그널
+        ├─ CharacterSelectPanel.qml  ✅ 캐릭터 변경 모달 (z:20) — 타이틀바 "캐릭터 변경" 버튼
+        │                               캐릭터 목록 Repeater + 선택 시 characterChanged(charId)
+        │                               "+" 추가 버튼 → addRequested → bridge.browseCharacterYaml()
+        ├─ CharacterStatusPanel.qml  ✅ 캐릭터 상태 모달 (z:20) — 타이틀바 "상태" 버튼
+        │                               bridge.getCharacterStatus() JSON 파싱
+        │                               이름/tier 배지(색상 맵)/친밀도 바(Behavior)/감정/대화 횟수
+        └─ ResetConfirmPanel.qml     ✅ 캐릭터 초기화 확인 모달 (z:30)
+                                        캐릭터 목록 라디오 선택 + 초기화 버튼
+                                        bridge.resetCharacter(char_id) → 세션 + VDB 전체 삭제
 ```
 
 ---
@@ -348,11 +373,12 @@ Achat/
 | # | 항목 | 위치 | 설명 | 우선순위 |
 |---|---|---|---|---|
 | ~~1~~ | ~~오타 빈 파일 잔존~~ | — | ✅ 해당 없음 — 이 작업공간에 `chracter_load.py` 없음 | 해결 |
-| ~~2~~ | ~~config.py 어댑터 경로 불일치~~ | — | ✅ `./output/LoRA_v7/adapter` 실존 확인, 경로 일치 | 해결 |
+| ~~2~~ | ~~config.py 어댑터 경로 불일치~~ | — | ✅ `./output/LoRA_v9/adapter` 경로 일치 | 해결 |
 | ~~3~~ | ~~build_dataset.py glob 버그~~ | — | ✅ `glob("**/*.jsonl")` 수정 완료 (2026-03-22) | 해결 |
 | ~~4~~ | ~~배경 이미지 위치 불일치~~ | — | ✅ `background/seaside_world/beach.png` 로 이동 완료 (2026-03-22) | 해결 |
-| 5 | config.py 배포 모델 없음 | `config.py` deploy.model_path | `./models/model_q4km.gguf` 참조하나 models/ 폴더 없음 — 배포 빌드 시 생성 필요 | 낮음 (배포 전 처리) |
-| 6 | 구버전 날짜 패턴 로그 잔존 | `training/log/daily/`, `emotion/` | `2026-03-17.jsonl` 등 날짜 패턴 파일이 현행 session_id 패턴과 혼재 | 낮음 |
+| ~~5~~ | ~~런타임 로그 gitignore 미적용~~ | `.gitignore` | ✅ training/log/daily|emotion|feedback_neg|feedback_pos|memory/ + data/sessions/ 패턴 추가, git rm --cached 완료 (2026-03-28) | 해결 |
+| 6 | config.py 배포 모델 없음 | `config.py` deploy.model_path | `./models/model_q4km.gguf` 참조하나 models/ 폴더 없음 — 배포 빌드 시 생성 필요 | 낮음 (배포 전 처리) |
+| 7 | 구버전 날짜 패턴 로그 잔존 | `training/log/daily/`, `emotion/` | `2026-03-17.jsonl` 등 날짜 패턴 파일이 현행 session_id 패턴과 혼재 | 낮음 |
 
 ---
 

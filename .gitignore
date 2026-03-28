@@ -219,3 +219,11 @@ training/LoRA_v*/
 # 대화 세션 런타임 파일 (매 실행마다 재생성)
 training/log/.session_state.json
 training/log/.monitor.log
+training/log/daily/
+training/log/emotion/
+training/log/feedback_neg/
+training/log/feedback_pos/
+training/log/memory/
+
+# 세션 런타임 데이터 (실행마다 재생성)
+data/sessions/

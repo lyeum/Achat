@@ -6,6 +6,8 @@ Item {
     property string role: "user"      // "user" | "assistant" | "system"
     property string content: ""
     property string fontFamily: ""
+    property color  userBubbleColor:   "#4A90D9"
+    property color  assistBubbleColor: "#3C3C3C"
 
     // 말풍선 너비: 부모의 75% 이하
     width: parent.width
@@ -26,8 +28,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
 
         color: {
-            if (role === "user")      return "#4A90D9"
-            if (role === "assistant") return "#3C3C3C"
+            if (role === "user")      return root.userBubbleColor
+            if (role === "assistant") return root.assistBubbleColor
             return "#5A3A3A"  // system / error
         }
 

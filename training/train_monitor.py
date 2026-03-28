@@ -315,7 +315,7 @@ def main() -> None:
         best_step = int(eval_steps[eval_losses.index(best_eval)])
         latest_eval = eval_losses[-1]
         latest_train = train_losses[-1] if train_losses else float("nan")
-        logger.info(f"① 학습 상황")
+        logger.info("① 학습 상황")
         logger.info(f"   eval 체크포인트 수 : {len(eval_losses)}")
         logger.info(f"   best eval_loss     : {best_eval:.4f}  (step {best_step})")
         logger.info(f"   최종 eval_loss     : {latest_eval:.4f}")
