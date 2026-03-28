@@ -548,3 +548,72 @@ class TestAgentToolDispatch:
             mode="function",
         )
         assert "파악하지 못했습니다" in result or "도구" in result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. prompt_convert fallback 유틸 단위 테스트 (BUG-19)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPromptConvertFallbackUtils:
+    """agent/core.py 모듈 레벨 fallback 헬퍼 함수 검증."""
+
+    def test_korean_ratio_pure_korean(self):
+        from agent.core import _korean_ratio
+        assert _korean_ratio("안녕하세요") > 0.9
+
+    def test_korean_ratio_pure_ascii(self):
+        from agent.core import _korean_ratio
+        assert _korean_ratio("hello world") == 0.0
+
+    def test_korean_ratio_mixed(self):
+        from agent.core import _korean_ratio
+        # "고양이 cat" → 3 한글 / 6 non-space = 0.5
+        ratio = _korean_ratio("고양이 cat")
+        assert 0.4 < ratio < 0.6
+
+    def test_is_content_valid_empty_returns_false(self):
+        from agent.core import _is_content_valid
+        assert _is_content_valid("", "stable diffusion으로 그려줘") is False
+
+    def test_is_content_valid_english_content_korean_src(self):
+        """한국어 입력 + 영어 content → 비정상 판정."""
+        from agent.core import _is_content_valid
+        src = "stable diffusion 모델에 고양이를 그려달라고 입력할건데 프롬프트를 어떻게 작성해야 해"
+        content = "고양이 그리기 request for Stable Diffusion model"
+        assert _is_content_valid(content, src) is False
+
+    def test_is_content_valid_korean_content_korean_src(self):
+        """한국어 입력 + 한국어 content → 정상 판정."""
+        from agent.core import _is_content_valid
+        src = "stable diffusion으로 고양이 그림 그려줘"
+        content = "고양이가 앉아 있는 모습, 귀여운 스타일"
+        assert _is_content_valid(content, src) is True
+
+    def test_is_content_valid_english_src_english_content(self):
+        """영어 입력 + 영어 content → 정상 판정 (한국어 비율 임계 미충족)."""
+        from agent.core import _is_content_valid
+        src = "draw a cat with stable diffusion"
+        content = "cute cat sitting, photorealistic"
+        assert _is_content_valid(content, src) is True
+
+    def test_model_regex_korean_sentence_not_captured(self):
+        """한국어가 섞인 문장에서 모델명만 추출돼야 한다."""
+        from agent.core import _PROMPT_CONVERT_MODEL_RE
+        user_input = "stable diffusion 모델에 고양이를 그려달라고 입력할건데 프롬프트를 어떻게 작성해야 해"
+        m = _PROMPT_CONVERT_MODEL_RE.search(user_input)
+        assert m is not None
+        captured = m.group(1).strip()
+        # 한글이 포함되면 안 됨
+        assert all("\uAC00" > c or c > "\uD7A3" for c in captured), f"한글 포함됨: {captured!r}"
+        assert captured.lower().startswith("stable diffusion")
+
+    def test_model_regex_sdxl_variant(self):
+        from agent.core import _PROMPT_CONVERT_MODEL_RE
+        m = _PROMPT_CONVERT_MODEL_RE.search("sdxl turbo로 이미지 생성해줘")
+        assert m is not None
+        assert m.group(1).strip().lower().startswith("sdxl")
+
+    def test_model_regex_no_match_plain_korean(self):
+        from agent.core import _PROMPT_CONVERT_MODEL_RE
+        m = _PROMPT_CONVERT_MODEL_RE.search("고양이 그림 그려줘")
+        assert m is None

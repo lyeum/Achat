@@ -1,8 +1,41 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from pathlib import Path
 
 from loguru import logger
+
+# prompt_convert fallback: ASCII 전용 모델명 패턴 (한국어 \w 포함 방지)
+_PROMPT_CONVERT_MODEL_RE = re.compile(
+    r"(stable[\s\-]diffusion(?:\s+[a-zA-Z0-9._-]+){0,2}"
+    r"|sdxl(?:\s+[a-zA-Z0-9._-]+){0,1}"
+    r"|midjourney(?:\s+[a-zA-Z0-9._-]+){0,1}"
+    r"|dall[\s\-]e(?:\s+[a-zA-Z0-9._-]+){0,1}"
+    r"|flux(?:\s+[a-zA-Z0-9._-]+){0,2}"
+    r"|leonardo(?:\s+[a-zA-Z0-9._-]+){0,2}"
+    r"|imagen(?:\s+[a-zA-Z0-9._-]+){0,1})",
+    re.IGNORECASE,
+)
+
+
+def _korean_ratio(text: str) -> float:
+    """문자열 내 한글(가-힣) 비율 반환 (공백 제외)."""
+    chars = [c for c in text if not c.isspace()]
+    if not chars:
+        return 0.0
+    return sum(1 for c in chars if "\uAC00" <= c <= "\uD7A3") / len(chars)
+
+
+def _is_content_valid(content: str, src: str) -> bool:
+    """src(user_input)가 주로 한국어인데 content 한국어 비율이 낮으면 비정상."""
+    if not content:
+        return False
+    src_ko = _korean_ratio(src)
+    # user_input 30% 이상 한국어인데 content가 src 한국어 비율의 50% 미만 → 비정상(영어 hallucination)
+    if src_ko >= 0.3 and _korean_ratio(content) < src_ko * 0.5:
+        return False
+    return True
 
 from agent.persona import load_persona
 from config import get_config
@@ -257,21 +290,14 @@ class Agent:
             if tool.name == "prompt_convert":
                 # model: 비면 regex로 직접 추출
                 if not params.get("model"):
-                    import re as _re
-                    m = _re.search(
-                        r"(stable[\s\-]diffusion[\s\w\.]*|sdxl[\s\w\.]*"
-                        r"|midjourney[\s\w\.]*|dall[\s\-]e[\s\w\.]*"
-                        r"|flux[\s\w\.]*|leonardo[\s\w\.]*|imagen[\s\w\.]*)",
-                        user_input,
-                        _re.IGNORECASE,
-                    )
+                    m = _PROMPT_CONVERT_MODEL_RE.search(user_input)
                     if m:
                         params["model"] = m.group(1).strip()
                         logger.warning(
                             f"[agent:function] model 필드 LLM 추출 실패 — regex fallback: {params['model']!r}"
                         )
-                # content: 비거나 추출 실패면 user_input 전문 사용 (크롤링에 영향 없음)
-                if not params.get("content"):
+                # content: 비거나 한국어 입력 대비 한국어 비율이 낮으면 user_input으로 대체
+                if not _is_content_valid(params.get("content", ""), user_input):
                     params["content"] = user_input
                     logger.warning("[agent:function] content 필드 LLM 추출 실패 — user_input으로 대체")
 
