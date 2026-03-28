@@ -135,6 +135,23 @@ class LongTermMemory:
             )
         return len(ids)
 
+    def clear_all(self, character_id: str) -> int:
+        """해당 캐릭터의 모든 기억을 삭제한다 (캐릭터 초기화용).
+
+        Returns
+        -------
+        삭제된 항목 수
+        """
+        col = self._collection(character_id)
+        count = col.count()
+        if count == 0:
+            return 0
+        all_ids = col.get()["ids"]
+        if all_ids:
+            col.delete(ids=all_ids)
+            logger.info(f"[long_term] 전체 기억 삭제: {character_id} ({len(all_ids)}개)")
+        return len(all_ids)
+
     def seed(self, entries: list[dict]) -> None:
         """M_default.json 초기 데이터를 일괄 삽입한다 (이미 있으면 upsert로 덮어씀)."""
         for entry in entries:
