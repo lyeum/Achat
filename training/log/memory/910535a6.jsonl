@@ -1,1 +1,0 @@
-{"messages": [{"role": "user", "content": "내가 좋아한다는거 기억해?"}, {"role": "assistant", "content": "...잊지는 않아."}], "character_id": "Haru", "category": "memory", "affection": "high", "mood": "happy", "emotion_trigger": "기억_참조", "turn_range": "8-9", "logged_at": "2026-03-24T00:42:42", "reviewed": false}
