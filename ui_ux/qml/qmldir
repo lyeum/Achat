@@ -5,3 +5,6 @@ PipWindow 1.0 PipWindow.qml
 SettingsPanel 1.0 SettingsPanel.qml
 CharacterDisplay 1.0 CharacterDisplay.qml
 CustomizationPanel 1.0 CustomizationPanel.qml
+CharacterSelectPanel 1.0 CharacterSelectPanel.qml
+CharacterStatusPanel 1.0 CharacterStatusPanel.qml
+ResetConfirmPanel 1.0 ResetConfirmPanel.qml
