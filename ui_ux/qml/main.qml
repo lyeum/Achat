@@ -262,7 +262,7 @@ Window {
             onMessageSent: function(text) {
                 // bridge.sendMessage → messageAdded("user") emit → Connections.onMessageAdded가 처리
                 // (직접 append 금지 — 중복 방지)
-                bridge.sendMessage(text, root.currentMode)
+                bridge.sendMessage(text, root.currentMode, root.currentTag)
             }
         }
 
@@ -703,7 +703,9 @@ Window {
                             Text {
                                 anchors.fill: parent
                                 verticalAlignment: Text.AlignVCenter
-                                text: "메시지 입력..."
+                                text: root.currentTag !== ""
+                                      ? (root._tagHints[root.currentTag] || "입력하세요...")
+                                      : "메시지 입력..."
                                 color: "#555"
                                 font: inputField.font
                                 visible: inputField.text === "" && !inputField.activeFocus
@@ -742,11 +744,27 @@ Window {
         }
     }
 
+    // ── 태그별 placeholder 힌트 ─────────────────────────────────────────────
+    readonly property var _tagHints: ({
+        "image_convert":   "변환할 파일 설명 또는 추가 지시를 입력하세요...",
+        "prompt_convert":  "변환할 프롬프트를 입력하세요...",
+        "file_rename":     "파일 이름 변경 규칙을 입력하세요...",
+        "folder_classify": "분류 기준을 입력하세요...",
+        "local_search":    "검색어를 입력하세요...",
+        "web_search":      "검색할 내용을 입력하세요...",
+    })
+
     // ── 메시지 전송 ─────────────────────────────────────────────────────────
     function sendMessage() {
         var text = inputField.text.trim()
         if (text === "") return
+        // 기능 모드에서 태그 미선택 시 안내
+        if (root.currentMode === "function" && root.currentTag === "") {
+            messageModel.append({ "role": "system", "content": "기능 태그를 먼저 선택해주세요." })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+            return
+        }
         inputField.text = ""
-        bridge.sendMessage(text, root.currentMode)
+        bridge.sendMessage(text, root.currentMode, root.currentTag)
     }
 }

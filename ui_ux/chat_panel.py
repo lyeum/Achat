@@ -13,15 +13,30 @@ class LLMWorker(QThread):
     response_ready = Signal(str)   # 응답 완성 시
     error_occurred = Signal(str)   # 오류 발생 시
 
-    def __init__(self, agent, user_input: str, mode: str = "chat"):
+    def __init__(
+        self,
+        agent,
+        user_input: str,
+        mode: str = "chat",
+        tool_name: str = "",
+        selected_path: str = "",
+    ):
         super().__init__()
         self._agent = agent
         self._user_input = user_input
         self._mode = mode
+        self._tool_name = tool_name
+        self._selected_path = selected_path
 
     def run(self) -> None:
         try:
-            response = self._agent.handle_input(self._user_input, mode=self._mode, stream=False)
+            response = self._agent.handle_input(
+                self._user_input,
+                mode=self._mode,
+                stream=False,
+                tool_name=self._tool_name,
+                selected_path=self._selected_path,
+            )
             self.response_ready.emit(response)
         except Exception as e:
             self.error_occurred.emit(str(e))

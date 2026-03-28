@@ -195,8 +195,13 @@ class ChatBridge(QObject):
 
     # ── Slots (QML → Python) ──────────────────────────────────────────────────
 
-    @Slot(str, str)
-    def sendMessage(self, text: str, mode: str = "chat") -> None:
+    # 파일 탐색기가 필요한 기능 모드 도구 집합
+    _PATH_TOOLS: frozenset[str] = frozenset(
+        {"folder_classify", "file_rename", "image_convert", "local_search"}
+    )
+
+    @Slot(str, str, str)
+    def sendMessage(self, text: str, mode: str = "chat", tool_name: str = "") -> None:
         """QML 입력창에서 메시지를 전송할 때 호출된다.
 
         Parameters
@@ -205,14 +210,29 @@ class ChatBridge(QObject):
             사용자 입력 텍스트.
         mode : str
             "chat" | "function" — QML currentMode 값을 그대로 전달한다.
+        tool_name : str
+            기능 모드에서 선택된 태그 이름. 빈 문자열이면 키워드 감지 폴백.
         """
         if not text.strip() or self._worker is not None:
             return
 
+        # 경로가 필요한 도구는 OS 파일 탐색기로 먼저 디렉토리를 선택
+        selected_path = ""
+        if mode == "function" and tool_name in self._PATH_TOOLS:
+            from PySide6.QtWidgets import QFileDialog
+            selected_path = QFileDialog.getExistingDirectory(
+                None, "작업할 폴더 선택", str(Path.home())
+            )
+            if not selected_path:
+                return  # 사용자가 취소
+
         self.messageAdded.emit("user", text)
         self.statusChanged.emit("thinking")
 
-        self._worker = LLMWorker(self._agent, text, mode=mode)
+        self._worker = LLMWorker(
+            self._agent, text, mode=mode,
+            tool_name=tool_name, selected_path=selected_path,
+        )
         self._worker.response_ready.connect(self._on_response)
         self._worker.error_occurred.connect(self._on_error)
         self._worker.finished.connect(self._on_done)
@@ -261,6 +281,8 @@ class ChatBridge(QObject):
         for path in sorted(_CHARACTER_DIR.glob("CH_*.yaml")):
             try:
                 char = load_character(path)
+                if char.get("id") == "default":
+                    continue
                 result.append({"id": char["id"], "name": char.get("name", char["id"])})
             except Exception:  # noqa: BLE001
                 pass
