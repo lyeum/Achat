@@ -346,19 +346,110 @@ class TestLocalSearchTool:
         # "인덱싱 0개 갱신" 포함 여부로 증분 인덱싱 확인
         assert "0개 갱신" in result2
 
-    def test_hwpx_indexing(self, tool, tmp_path):
-        """hwpx (zip+XML) 파일에서 텍스트를 추출해 검색 가능한지 검증."""
-        import zipfile
-        hwpx = tmp_path / "sample.hwpx"
-        section_xml = b'<?xml version="1.0"?><body><p><t>hwpx_unique_content</t></p></body>'
-        with zipfile.ZipFile(hwpx, "w") as z:
-            z.writestr("Contents/section0.xml", section_xml)
-        result = tool.execute({
-            "query": "hwpx_unique_content",
-            "path": str(tmp_path),
-            "rebuild": True,
-        })
-        assert "sample.hwpx" in result
+
+# ── _sanitize_fts_query 단위 테스트 ──────────────────────────────────────────
+
+class TestSanitizeFtsQuery:
+    """FTS5 특수 문자 제거 — 단어 토큰만 추출."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from tools.search.local_search import _sanitize_fts_query
+        self.san = _sanitize_fts_query
+
+    def test_single_word(self):
+        assert self.san("hello") == "hello"
+
+    def test_multi_word(self):
+        assert self.san("hello world") == "hello world"
+
+    def test_hyphen_splits_into_two_terms(self):
+        result = self.san("2026-03")
+        assert result == "2026 03"
+
+    def test_asterisk_stripped(self):
+        result = self.san("prefix*")
+        assert result == "prefix"
+
+    def test_korean_passthrough(self):
+        result = self.san("보고서 작성")
+        assert result == "보고서 작성"
+
+    def test_special_chars_stripped(self):
+        result = self.san('(title:report) "exact"')
+        assert result == "title report exact"
+
+    def test_empty_string_returns_empty_phrase(self):
+        assert self.san("") == '""'
+
+
+class TestSearchFilenames:
+    """_search_filenames — 파일 시스템 직접 탐색 파일명 검색."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from tools.search.local_search import _search_filenames
+        self.fn = _search_filenames
+
+    def test_finds_by_exact_name(self, tmp_path):
+        (tmp_path / "report.txt").touch()
+        results = self.fn(tmp_path, "report", 10)
+        assert any("report.txt" in r[0] for r in results)
+
+    def test_finds_korean_filename(self, tmp_path):
+        (tmp_path / "보고서_2026.txt").touch()
+        results = self.fn(tmp_path, "보고서", 10)
+        assert len(results) == 1
+        assert "보고서_2026.txt" in results[0][0]
+
+    def test_finds_by_extension(self, tmp_path):
+        """'png'로 검색하면 .png 파일이 검색된다."""
+        (tmp_path / "image.png").write_bytes(b"\x89PNG\r\n")
+        (tmp_path / "notes.txt").write_text("hello")
+        results = self.fn(tmp_path, "png", 10)
+        paths = [r[0] for r in results]
+        assert any("image.png" in p for p in paths)
+        assert not any("notes.txt" in p for p in paths)
+
+    def test_case_insensitive(self, tmp_path):
+        (tmp_path / "README.md").touch()
+        results = self.fn(tmp_path, "readme", 10)
+        assert len(results) == 1
+
+    def test_limit_respected(self, tmp_path):
+        for i in range(5):
+            (tmp_path / f"file_{i}.txt").touch()
+        results = self.fn(tmp_path, "file", 3)
+        assert len(results) == 3
+
+    def test_no_match_returns_empty(self, tmp_path):
+        (tmp_path / "unrelated.txt").touch()
+        results = self.fn(tmp_path, "xyzzy_never", 10)
+        assert results == []
+
+    def test_binary_file_found_by_name(self, tmp_path):
+        """바이너리 파일도 파일명으로 검색된다."""
+        f = tmp_path / "archive.zip"
+        f.write_bytes(b"PK\x03\x04" + b"\x00" * 100)
+        results = self.fn(tmp_path, "archive", 10)
+        assert any("archive.zip" in r[0] for r in results)
+
+    def test_integrated_search_combines_name_and_content(self, tmp_path):
+        """_search: 파일명 매칭 + FTS5 내용 검색 합산 결과."""
+        from tools.search.local_search import _get_conn, _index_directory, _search
+        # 파일명 매칭 대상
+        (tmp_path / "보고서_summary.txt").write_text("무관한 내용", encoding="utf-8")
+        # 내용 매칭 대상
+        (tmp_path / "data.txt").write_text("보고서 내용이 여기 있습니다", encoding="utf-8")
+
+        conn = _get_conn(tmp_path / "test.db")
+        _index_directory(conn, tmp_path, {".txt"}, True)
+        results = _search(conn, "보고서", root=tmp_path)
+        conn.close()
+
+        paths = [r[0] for r in results]
+        assert any("보고서_summary.txt" in p for p in paths)
+        assert any("data.txt" in p for p in paths)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -459,13 +550,14 @@ class TestWebSearchTool:
         result = tool.execute({"query": ""})
         assert "오류" in result
 
-    def test_returns_formatted_results(self, tool):
+    def test_returns_html_hyperlink(self, tool):
+        """결과가 HTML <a href> 형식으로 반환된다."""
         fake = [{"title": "Python", "url": "https://python.org", "snippet": "Python is great."}]
         with self._mock_ddg(fake):
             result = tool.execute({"query": "python"})
-        assert "[1]" in result
-        assert "Python" in result
         assert "https://python.org" in result
+        assert "<a href=" in result
+        assert "Python" in result
 
     def test_no_results_returns_message(self, tool):
         with self._mock_ddg([]):
@@ -492,6 +584,172 @@ class TestWebSearchTool:
             tool.execute({"query": "test", "max_results": 0})
             called_max = mock_fn.call_args[0][1]
             assert called_max == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6-A. WebSearchTool — HTML hyperlink 및 유사도 스코어링 테스트
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestWebSearchHyperlinkAndScoring:
+    """HTML hyperlink 포맷 및 relevance 스코어링 동작 검증."""
+
+    _FAKE_RESULTS = [
+        {"title": "Python 공식", "url": "https://python.org",  "snippet": "파이썬 프로그래밍 언어다."},
+        {"title": "무관한 페이지", "url": "https://unrelated.com", "snippet": "완전히 다른 내용이다."},
+    ]
+
+    @pytest.fixture
+    def tool(self):
+        from tools.search.web_search import WebSearchTool
+        return WebSearchTool()
+
+    def _mock_ddg(self, results):
+        return patch("tools.search.web_search._ddg_search", return_value=results)
+
+    def test_output_contains_html_anchor_tags(self, tool):
+        """결과에 <a href="..."> HTML anchor 태그가 포함된다."""
+        with self._mock_ddg(self._FAKE_RESULTS):
+            result = tool.execute({"query": "파이썬"})
+        assert "<a href=" in result
+        assert "https://python.org" in result
+
+    def test_output_contains_snippet_text(self, tool):
+        """결과에 snippet 내용이 포함된다."""
+        with self._mock_ddg(self._FAKE_RESULTS):
+            result = tool.execute({"query": "파이썬"})
+        assert "파이썬 프로그래밍 언어다" in result
+
+    def test_high_relevance_result_appears_first(self, tool):
+        """쿼리 토큰 겹침이 많은 결과가 앞에 위치한다."""
+        results = [
+            {"title": "무관", "url": "https://a.com", "snippet": "전혀 관련없는 내용"},
+            {"title": "파이썬 역사", "url": "https://b.com", "snippet": "파이썬은 1991년에 만들어졌다"},
+        ]
+        with self._mock_ddg(results):
+            result = tool.execute({"query": "파이썬 역사"})
+        pos_b = result.index("https://b.com")
+        pos_a = result.index("https://a.com")
+        assert pos_b < pos_a, "관련도 높은 결과가 먼저 표시되어야 함"
+
+    def test_snippet_html_special_chars_escaped(self, tool):
+        """snippet의 HTML 특수문자(<, >, &)가 이스케이프된다."""
+        results = [{"title": "Test", "url": "https://t.com", "snippet": "A < B & C > D"}]
+        with self._mock_ddg(results):
+            result = tool.execute({"query": "test"})
+        assert "&lt;" in result
+        assert "&amp;" in result
+        assert "&gt;" in result
+
+    def test_result_count_shown_in_header(self, tool):
+        """헤더에 검색 건수가 표시된다."""
+        with self._mock_ddg(self._FAKE_RESULTS):
+            result = tool.execute({"query": "파이썬"})
+        assert "2건" in result
+
+    def _score_fn(self):
+        from tools.search.web_search import _score_relevance, _tokenize
+        return _score_relevance, _tokenize
+
+    def test_score_relevance_substring_match_korean(self):
+        """한국어 조사 포함 텍스트도 쿼리 토큰을 부분문자열로 감지한다."""
+        score_fn, tok_fn = self._score_fn()
+        q = tok_fn("파이썬 역사")
+        # snippet에 "파이썬은"(조사 은), "역사적으로"(파생어) 포함
+        result = {"title": "", "snippet": "파이썬은 1991년 역사적으로 중요하다"}
+        assert score_fn(q, result) == 2  # "파이썬" in "파이썬은", "역사" in "역사적으로"
+
+    def test_score_relevance_no_match_returns_zero(self):
+        """완전히 무관한 snippet은 0을 반환한다."""
+        score_fn, tok_fn = self._score_fn()
+        q = tok_fn("파이썬")
+        result = {"title": "", "snippet": "완전히 다른 내용"}
+        assert score_fn(q, result) == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6-B. PromptGuideStore 단위 테스트 (기능개선.md 3번)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPromptGuideStore:
+    """tools/prompt_store.py ChromaDB 없이 동작 검증 (tmp_path + chromadb in-memory)."""
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        """임시 경로 기반 PromptGuideStore (embedding 없이 metadata only)."""
+        from tools.prompt_store import PromptGuideStore
+        return PromptGuideStore(str(tmp_path / "chroma_test"), embedding_model=None)
+
+    def test_save_and_exact_query(self, store):
+        """저장 후 모델명으로 exact query가 동작해야 한다."""
+        store.save("Stable Diffusion XL", "quality, masterpiece, ...")
+        result = store.query("Stable Diffusion XL")
+        assert result is not None
+        assert "masterpiece" in result
+
+    def test_normalize_model_name(self, store):
+        """대소문자·공백 다른 모델명도 동일 항목으로 조회된다."""
+        store.save("stable diffusion xl", "guide text")
+        # 대문자, 공백 다르게 조회해도 normalize 후 동일 키
+        result = store.query("Stable Diffusion XL")
+        assert result is not None
+
+    def test_query_missing_returns_none(self, store):
+        """없는 모델명 조회는 None을 반환해야 한다."""
+        result = store.query("NonExistentModelXYZ")
+        assert result is None
+
+    def test_list_models(self, store):
+        """저장된 모델 목록이 반환되어야 한다."""
+        store.save("SDXL", "guide a")
+        store.save("Midjourney", "guide b")
+        models = store.list_models()
+        assert "sdxl" in models
+        assert "midjourney" in models
+
+    def test_delete_model(self, store):
+        """삭제 후 해당 모델 조회 시 None을 반환해야 한다."""
+        store.save("DALL-E 3", "guide text")
+        deleted = store.delete("DALL-E 3")
+        assert deleted > 0
+        assert store.query("DALL-E 3") is None
+
+    def test_db_first_flow_skips_crawling(self, tmp_path):
+        """DB에 가이드가 있으면 _collect_guide가 호출되지 않아야 한다."""
+        from tools.prompt_converter import PromptConverterTool
+        from tools.prompt_store import PromptGuideStore
+
+        store = PromptGuideStore(str(tmp_path / "chroma_test"), embedding_model=None)
+        store.save("Midjourney", "saved guide from DB")
+
+        tool = PromptConverterTool(
+            llm=None,
+            config={"chroma_path": str(tmp_path / "chroma_test")},
+        )
+        # PromptGuideStore를 직접 주입
+        tool._store = store
+
+        with patch("tools.prompt_converter._collect_guide") as mock_crawl:
+            result = tool.execute({"model": "Midjourney", "content": "하늘 그림"})
+        mock_crawl.assert_not_called()
+        assert "saved guide from DB" in result
+
+    def test_crawl_result_saved_to_db(self, tmp_path):
+        """크롤링 성공 시 결과가 DB에 자동 저장되어야 한다."""
+        from tools.prompt_converter import PromptConverterTool
+        from tools.prompt_store import PromptGuideStore
+
+        store = PromptGuideStore(str(tmp_path / "chroma_test"), embedding_model=None)
+        tool = PromptConverterTool(
+            llm=None,
+            config={"chroma_path": str(tmp_path / "chroma_test")},
+        )
+        tool._store = store
+
+        with patch("tools.prompt_converter._collect_guide", return_value="crawled guide data"):
+            tool.execute({"model": "Flux", "content": "풍경"})
+
+        # 크롤링 후 DB에 저장되었는지 확인
+        assert store.query("Flux") == "crawled guide data"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

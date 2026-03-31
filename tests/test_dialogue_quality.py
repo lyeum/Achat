@@ -118,20 +118,20 @@ class TestSummarizerImportance:
         self.score = score_importance
 
     def test_name_colon_format_scores_high(self):
-        """'이름: X' 형태는 high(0.85) 점수를 받아야 한다."""
-        assert self.score("사용자의 이름: 김철수라고 밝혔다.") == 0.85
+        """'이름: X' 형태는 최고 중요도(1.0)를 받아야 한다."""
+        assert self.score("사용자의 이름: 김철수라고 밝혔다.") == 1.0
 
     def test_name_eun_scores_high(self):
-        """'이름은' 키워드 → 0.85."""
-        assert self.score("이름은 민지라고 했다.") == 0.85
+        """'이름은' 키워드 → 1.0."""
+        assert self.score("이름은 민지라고 했다.") == 1.0
 
     def test_name_i_scores_high(self):
-        """'이름이' 키워드 → 0.85."""
-        assert self.score("이름이 뭔지 물어봤다.") == 0.85
+        """'이름이' 키워드 → 1.0."""
+        assert self.score("이름이 뭔지 물어봤다.") == 1.0
 
     def test_plain_name_scores_high(self):
-        """'이름' 단독 키워드 → 0.85."""
-        assert self.score("자신의 이름을 소개했다.") == 0.85
+        """'이름' 단독 키워드 → 1.0."""
+        assert self.score("자신의 이름을 소개했다.") == 1.0
 
     def test_promise_scores_high(self):
         """'약속' 키워드 → 0.85."""
@@ -150,8 +150,8 @@ class TestSummarizerImportance:
         assert self.score("날씨 얘기를 했다.") == 0.5
 
     def test_high_keyword_overrides_mid(self):
-        """high와 mid 키워드가 동시에 있으면 0.85를 반환해야 한다."""
-        assert self.score("이름은 민지. 취미는 독서.") == 0.85
+        """이름 키워드가 있으면 mid 키워드 무관하게 1.0을 반환해야 한다."""
+        assert self.score("이름은 민지. 취미는 독서.") == 1.0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -349,3 +349,126 @@ class TestPromptBuildLayerA:
         """affection=5 → stranger tier 톤 지시가 포함되어야 한다."""
         layer_a = builder._layer_a()
         assert "처음 만난" in layer_a or "경계" in layer_a
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# H. Affection 관리자 조절 + 잠금 (기능개선.md 1번)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestAffectionAdminControl:
+    """agent/state.py + conversation/core/session.py 잠금 동작 검증."""
+
+    @pytest.fixture
+    def session(self):
+        from conversation.core.session import ConversationSession
+        s = ConversationSession(character_id="Haru")
+        s.affection = 50
+        return s
+
+    def test_lock_fields_default(self, session):
+        """기본 세션은 잠금 해제 상태여야 한다."""
+        assert session.affection_locked is False
+        assert session.affection_lock_value is None
+
+    def test_update_affection_normal(self, session):
+        """잠금 없이 정상 update_affection 동작."""
+        from agent.state import update_affection
+        session.mood = "happy"
+        result = update_affection(session, "happy")
+        assert result == session.affection
+        assert session.affection == 53  # +3
+
+    def test_lock_prevents_update(self, session):
+        """잠금 상태에서 update_affection은 lock_value로 고정한다."""
+        from agent.state import update_affection
+        session.affection_locked = True
+        session.affection_lock_value = 40
+        session.affection = 40
+        # happy mood(+3)를 줘도 변화 없어야 함
+        result = update_affection(session, "happy")
+        assert result == 40
+        assert session.affection == 40
+
+    def test_lock_clamps_to_range(self, session):
+        """lock_value가 범위를 벗어나면 클램핑된다."""
+        from agent.state import update_affection
+        session.affection_locked = True
+        session.affection_lock_value = 150  # 범위 초과
+        session.affection = 50
+        update_affection(session, "happy")
+        assert session.affection == 100
+
+    def test_unlock_resumes_update(self, session):
+        """잠금 해제 후 정상 update_affection이 재개된다."""
+        from agent.state import update_affection
+        session.affection_locked = True
+        session.affection_lock_value = 40
+        session.affection = 40
+        # 잠금 해제
+        session.affection_locked = False
+        session.affection_lock_value = None
+        result = update_affection(session, "affectionate")  # +5
+        assert result == 45
+        assert session.affection == 45
+
+    def test_lock_without_lock_value_keeps_current(self, session):
+        """lock_value=None인 잠금 상태: 현재값을 그대로 유지한다."""
+        from agent.state import update_affection
+        session.affection = 60
+        session.affection_locked = True
+        session.affection_lock_value = None
+        result = update_affection(session, "angry")  # -5이지만 잠금
+        assert result == 60
+        assert session.affection == 60
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# I. Semantic Score 기반 Affection 게이팅 (기능개선.md 2번)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestAffectionSemanticGating:
+    """score_importance 게이팅 동작 및 config 키 검증."""
+
+    def test_config_has_aff_gate_threshold(self):
+        """모든 환경 config에 aff_gate_threshold가 존재해야 한다."""
+        from config import _CONFIGS
+        for env_name, cfg in _CONFIGS.items():
+            assert "aff_gate_threshold" in cfg, f"{env_name} config에 aff_gate_threshold 없음"
+
+    def test_router_reads_aff_gate_from_config(self):
+        """ConversationRouter가 config에서 aff_gate_threshold를 읽어야 한다."""
+        from unittest.mock import MagicMock
+        from conversation.core.router import ConversationRouter
+        from conversation.core.session import ConversationSession
+
+        char = {"id": "Haru", "name": "하루", "state": {}, "rules": [], "speech_style": ""}
+        world = {"world_id": "W1", "scenarios": []}
+        session = ConversationSession(character_id="Haru")
+        llm = MagicMock()
+        lt = MagicMock()
+        lt.query.return_value = []
+        cfg = {"aff_gate_threshold": 0.75, "memory_trigger_n": 10, "chroma_path": "./chroma_dev"}
+
+        with patch("rag.retrieve.WorldRetriever.__init__", return_value=None), \
+             patch("rag.retrieve.WorldRetriever.query", return_value=[]):
+            router = ConversationRouter(char, world, session, llm, lt, cfg)
+        assert router._aff_gate == 0.75
+
+    def test_low_importance_suppresses_affection(self):
+        """잡담(importance=0.5) 발화는 affection을 변화시키지 않는다."""
+        from memory.summarizer import score_importance
+        # 키워드 없는 잡담
+        score = score_importance("오늘 날씨 좋다")
+        assert score == 0.5  # low → 게이팅
+
+    def test_mid_importance_allows_affection(self):
+        """감정 표현(importance>=0.6) 발화는 affection 변화를 허용한다."""
+        from memory.summarizer import score_importance
+        score = score_importance("요즘 기분이 좀 슬퍼")
+        assert score >= 0.6  # mid → 게이팅 통과
+
+    def test_high_importance_allows_affection(self):
+        """이름(importance=1.0) 발화는 반드시 affection 변화를 허용한다."""
+        from memory.summarizer import score_importance
+        score = score_importance("내 이름은 민준이야")
+        assert score >= 0.6  # high → 게이팅 통과

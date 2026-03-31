@@ -308,3 +308,422 @@ def test_reset_character_nonexistent_no_crash(bridge):
 def test_reset_character_returns_bool(bridge):
     result = bridge.resetCharacter("Haru")
     assert isinstance(result, bool)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BUG-02: _unload_llm — LLM 이중 적재 OOM 방지
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestUnloadLlm:
+    """_unload_llm() 이 LLM 객체를 올바르게 해제하는지 검증 (BUG-02-A)."""
+
+    def _make_agent_with_llm(self, backend: str):
+        """테스트용 가짜 agent + llm을 반환한다."""
+        fake_model = MagicMock()
+        fake_llm = MagicMock()
+        fake_llm.backend = backend
+        fake_llm._model = fake_model
+        agent = MagicMock()
+        agent.session = None
+        agent.character = {"id": "Haru", "name": "하루"}
+        agent.world = {}
+        agent.llm = fake_llm
+        agent._stub = False
+        return agent, fake_model
+
+    def test_unload_llama_cpp_calls_close(self):
+        """llama_cpp 백엔드에서 model.close()가 호출되어야 한다."""
+        from ui_ux.bridge import ChatBridge
+
+        agent, fake_model = self._make_agent_with_llm("llama_cpp")
+        bridge_inst = ChatBridge.__new__(ChatBridge)
+        bridge_inst._agent = agent
+
+        bridge_inst._unload_llm()
+        fake_model.close.assert_called_once()
+
+    def test_unload_transformers_deletes_model(self, monkeypatch):
+        """transformers 백엔드에서 _model이 None으로 설정되어야 한다."""
+        from ui_ux.bridge import ChatBridge
+
+        agent, fake_model = self._make_agent_with_llm("transformers")
+
+        # torch mock — CUDA 없는 환경 대응
+        fake_torch = MagicMock()
+        fake_torch.cuda.is_available.return_value = False
+        monkeypatch.setattr("ui_ux.bridge.torch", fake_torch, raising=False)
+
+        import sys
+        sys.modules.setdefault("torch", fake_torch)
+
+        bridge_inst = ChatBridge.__new__(ChatBridge)
+        bridge_inst._agent = agent
+        bridge_inst._unload_llm()
+
+        assert agent.llm._model is None
+
+    def test_unload_no_crash_when_llm_is_none(self):
+        """llm=None인 agent(stub 모드)에서도 예외 없이 동작해야 한다."""
+        from ui_ux.bridge import ChatBridge
+
+        agent = MagicMock()
+        agent.llm = None
+        agent.session = None
+
+        bridge_inst = ChatBridge.__new__(ChatBridge)
+        bridge_inst._agent = agent
+        bridge_inst._unload_llm()  # must not raise
+
+    def test_unload_called_before_rebuild(self, monkeypatch):
+        """_rebuild_agent()가 _unload_llm()을 먼저 호출하는지 확인한다 (BUG-02-A 핵심)."""
+        from ui_ux.bridge import ChatBridge
+        from conversation.session_manager import SessionState
+
+        call_order: list[str] = []
+
+        bridge_inst = ChatBridge.__new__(ChatBridge)
+        bridge_inst._agent = MagicMock()
+        bridge_inst._agent.llm = None
+        bridge_inst._agent.cfg = {"model_backend": "stub"}
+        bridge_inst._agent.character = {"id": "Haru", "name": "하루"}
+        bridge_inst._conv_logger = None
+
+        def fake_unload():
+            call_order.append("unload")
+
+        def fake_agent_from_session(state, cfg):
+            call_order.append("load")
+            a = MagicMock()
+            a.character = {"id": state.char_id, "name": state.char_id}
+            a.session = None
+            a.world = {}
+            a.llm = None
+            return a
+
+        monkeypatch.setattr(bridge_inst, "_unload_llm", fake_unload)
+        monkeypatch.setattr(bridge_inst, "_resolve_initial_location", lambda: "")
+
+        import ui_ux.bridge as bmod
+        monkeypatch.setattr(
+            bmod.__import__("agent.core", fromlist=["Agent"]) if False else
+            __import__("agent.core", fromlist=["Agent"]),
+            "Agent",
+            type("A", (), {"from_session": staticmethod(fake_agent_from_session)})(),
+            raising=False,
+        )
+
+        # agent.core.Agent.from_session 패치
+        import agent.core as acore
+        monkeypatch.setattr(acore.Agent, "from_session", staticmethod(fake_agent_from_session))
+
+        state = SessionState(
+            char_id="Haru", session_id="s1", world_id="w",
+            scenario_id=None, act_id=None, location=None,
+            mood="neutral", affection=30, turn_count=0,
+            created_at="", last_active="",
+        )
+        bridge_inst._rebuild_agent(state)
+
+        assert call_order == ["unload", "load"], \
+            f"_unload_llm이 먼저 호출되어야 함. 실제 순서: {call_order}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 9. applyFileOptions (파일이름 변경 / 확장자 변경)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestApplyFileOptions:
+    """bridge.applyFileOptions() — 실제 파일 I/O를 tmp_path로 검증."""
+
+    @pytest.fixture
+    def txt_files(self, tmp_path):
+        files = []
+        for i in range(3):
+            f = tmp_path / f"sample_{i}.txt"
+            f.write_text(f"content {i}")
+            files.append(str(f))
+        return files, tmp_path
+
+    def test_rename_single_file(self, bridge, tmp_path):
+        src = tmp_path / "old_name.txt"
+        src.write_text("hello")
+        result = bridge.applyFileOptions(
+            json.dumps([str(src)]), "new_name", ""
+        )
+        assert "완료" in result
+        assert (tmp_path / "new_name.txt").exists()
+        assert not src.exists()
+
+    def test_rename_multiple_files_with_prefix(self, bridge, txt_files):
+        files, tmp_path = txt_files
+        result = bridge.applyFileOptions(json.dumps(files), "photo", "")
+        assert "완료" in result
+        assert (tmp_path / "photo_001.txt").exists()
+        assert (tmp_path / "photo_002.txt").exists()
+        assert (tmp_path / "photo_003.txt").exists()
+
+    def test_empty_paths_returns_error(self, bridge):
+        result = bridge.applyFileOptions("[]", "new", "")
+        assert "없습니다" in result
+
+    def test_invalid_paths_json_returns_error(self, bridge):
+        result = bridge.applyFileOptions("not json", "new", "")
+        assert "오류" in result
+
+    def test_no_rename_no_ext_no_change(self, bridge, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("x")
+        result = bridge.applyFileOptions(json.dumps([str(src)]), "", "")
+        # rename_to="" + new_ext="" → 변경 없음
+        assert "변경 없음" in result
+        assert src.exists()
+
+    def test_ext_change_non_image(self, bridge, tmp_path):
+        src = tmp_path / "data.txt"
+        src.write_text("x")
+        result = bridge.applyFileOptions(json.dumps([str(src)]), "", "csv")
+        assert "완료" in result
+        assert (tmp_path / "data.csv").exists()
+
+    def test_rename_and_ext_together(self, bridge, tmp_path):
+        src = tmp_path / "old.txt"
+        src.write_text("x")
+        result = bridge.applyFileOptions(json.dumps([str(src)]), "renamed", "csv")
+        assert "완료" in result
+        assert (tmp_path / "renamed.csv").exists()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 10. applyFolderClassify (폴더 분류)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestApplyFolderClassify:
+    """bridge.applyFolderClassify() — ClassifierTool 기반 폴더 분류."""
+
+    def test_empty_path_returns_string(self, bridge):
+        """빈 경로는 CWD로 해석되어 문자열을 반환한다 (오류 또는 결과)."""
+        result = bridge.applyFolderClassify("", "종류별", True)
+        assert isinstance(result, str)
+
+    def test_nonexistent_path_returns_error(self, bridge):
+        result = bridge.applyFolderClassify("/nonexistent/path/xyz_abc_123", "종류별", False)
+        assert "오류" in result
+
+    def test_dry_run_does_not_move_files(self, bridge, tmp_path):
+        """dry_run=True 시 파일 이동 없이 미리보기 반환."""
+        (tmp_path / "photo.jpg").write_bytes(b"\xff\xd8\xff")  # minimal JPEG header
+        result = bridge.applyFolderClassify(str(tmp_path), "종류별", True)
+        assert result  # 결과 문자열 반환
+        assert (tmp_path / "photo.jpg").exists()  # 파일 이동 안 됨
+
+    def test_returns_string(self, bridge, tmp_path):
+        (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.4")
+        result = bridge.applyFolderClassify(str(tmp_path), "확장자별", True)
+        assert isinstance(result, str)
+
+    def test_invalid_rule_returns_error_or_default(self, bridge, tmp_path):
+        """잘못된 rule 값도 예외 없이 처리."""
+        result = bridge.applyFolderClassify(str(tmp_path), "없는규칙", False)
+        assert isinstance(result, str)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 11. searchFiles / openFile
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSearchFiles:
+    """bridge.searchFiles() — 파일명 + FTS5 내용 통합 검색."""
+
+    def test_empty_query_returns_error_json(self, bridge):
+        result = bridge.searchFiles("", str(Path.home()), "")
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_nonexistent_dir_returns_error_json(self, bridge):
+        result = bridge.searchFiles("hello", "/nonexistent_xyz_abc", "")
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_returns_json_array(self, bridge, tmp_path):
+        (tmp_path / "hello_note.txt").write_text("some content")
+        result = bridge.searchFiles("hello", str(tmp_path), "")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
+
+    def test_found_file_has_path_and_snippet(self, bridge, tmp_path):
+        (tmp_path / "greet.txt").touch()
+        result = bridge.searchFiles("greet", str(tmp_path), "")
+        parsed = json.loads(result)
+        assert len(parsed) >= 1
+        assert "path" in parsed[0]
+        assert "snippet" in parsed[0]
+
+    def test_finds_by_korean_filename(self, bridge, tmp_path):
+        """한국어 파일명 검색."""
+        (tmp_path / "보고서_2026.txt").touch()
+        result = bridge.searchFiles("보고서", str(tmp_path), "")
+        parsed = json.loads(result)
+        assert any("보고서" in r["path"] for r in parsed)
+
+    def test_finds_binary_by_extension_keyword(self, bridge, tmp_path):
+        """'png' 검색 → .png 파일이 결과에 포함된다."""
+        (tmp_path / "screenshot.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        result = bridge.searchFiles("png", str(tmp_path), "")
+        parsed = json.loads(result)
+        assert any("screenshot.png" in r["path"] for r in parsed)
+
+    def test_no_results_returns_empty_list(self, bridge, tmp_path):
+        (tmp_path / "unrelated.txt").write_text("completely different content")
+        result = bridge.searchFiles("xyzzy_nonexistent_99999", str(tmp_path), "")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 0
+
+
+def test_open_file_no_crash(bridge, tmp_path, monkeypatch):
+    """openFile은 subprocess를 mock해서 실제 파일을 열지 않고 예외 없이 동작해야 한다."""
+    import ui_ux.bridge as bmod
+
+    monkeypatch.setattr(bmod._subprocess, "Popen", lambda *a, **kw: MagicMock())
+    monkeypatch.setattr(bmod._subprocess, "check_output", lambda *a, **kw: b"C:\\dummy.txt")
+    f = tmp_path / "dummy.txt"
+    f.write_text("hi")
+    bridge.openFile(str(f))  # must not raise
+
+
+class TestOpenFileWsl2:
+    """openFile() WSL2 환경에서 powershell.exe Invoke-Item 호출 확인."""
+
+    def _make_fake_subprocess(self, calls: list, win_path: bytes = b"C:\\test\\dummy.txt"):
+        """check_output + Popen을 가로채는 mock subprocess 네임스페이스."""
+        fake = MagicMock()
+
+        def fake_check_output(args, **kw):
+            if args and args[0] == "wslpath":
+                return win_path
+            raise FileNotFoundError
+
+        fake.check_output = fake_check_output
+        fake.DEVNULL = -1
+        fake.CalledProcessError = __import__("subprocess").CalledProcessError
+
+        def fake_popen(args, **kw):
+            calls.append(list(args))
+            return MagicMock()
+
+        fake.Popen = fake_popen
+        return fake
+
+    def test_wsl2_uses_powershell(self, bridge, tmp_path, monkeypatch):
+        """WSL2 환경에서 powershell.exe Invoke-Item을 사용해야 한다."""
+        import ui_ux.bridge as bmod
+
+        calls: list[list] = []
+        monkeypatch.setattr(bmod, "_is_wsl", lambda: True)
+        monkeypatch.setattr(bmod, "_is_windows", lambda: False)
+        monkeypatch.setattr(bmod, "_subprocess", self._make_fake_subprocess(calls))
+
+        f = tmp_path / "dummy.txt"
+        f.write_text("hi")
+        bridge.openFile(str(f))
+
+        assert any("powershell.exe" in str(c) for c in calls), "powershell.exe 호출 없음"
+        assert any("Invoke-Item" in str(c) for c in calls), "Invoke-Item 호출 없음"
+        assert not any("cmd.exe" in str(c) and "start" in str(c) for c in calls), \
+            "cmd.exe /c start 사용하면 안 됨 (UNC 경로 미지원)"
+
+    def test_wsl2_no_cmd_start(self, bridge, tmp_path, monkeypatch):
+        """WSL2에서 cmd.exe /c start는 openFile 시 호출하지 않아야 한다."""
+        import ui_ux.bridge as bmod
+
+        calls: list[list] = []
+        monkeypatch.setattr(bmod, "_is_wsl", lambda: True)
+        monkeypatch.setattr(bmod, "_is_windows", lambda: False)
+        monkeypatch.setattr(bmod, "_subprocess",
+                            self._make_fake_subprocess(calls, b"C:\\path\\image.png"))
+
+        f = tmp_path / "image.png"
+        f.write_bytes(b"\x89PNG")
+        bridge.openFile(str(f))
+
+        for c in calls:
+            assert not ("cmd.exe" in c and "start" in c), "cmd.exe /c start 호출 금지"
+
+
+class TestOpenUrl:
+    """openUrl() 슬롯 테스트."""
+
+    def _make_fake_subprocess(self, calls: list):
+        fake = MagicMock()
+        fake.DEVNULL = -1
+        fake.CalledProcessError = __import__("subprocess").CalledProcessError
+
+        def fake_popen(args, **kw):
+            calls.append(list(args))
+            return MagicMock()
+
+        fake.Popen = fake_popen
+        return fake
+
+    def test_no_crash_on_http(self, bridge, monkeypatch):
+        """HTTP URL에 대해 예외 없이 동작."""
+        import ui_ux.bridge as bmod
+        calls: list = []
+        monkeypatch.setattr(bmod, "_subprocess", self._make_fake_subprocess(calls))
+        bridge.openUrl("https://example.com")  # must not raise
+
+    def test_wsl2_uses_cmd_start_for_url(self, bridge, monkeypatch):
+        """WSL2에서 HTTP URL은 cmd.exe /c start로 열어야 한다."""
+        import ui_ux.bridge as bmod
+
+        calls: list[list] = []
+        monkeypatch.setattr(bmod, "_is_wsl", lambda: True)
+        monkeypatch.setattr(bmod, "_is_windows", lambda: False)
+        monkeypatch.setattr(bmod, "_subprocess", self._make_fake_subprocess(calls))
+
+        bridge.openUrl("https://example.com")
+
+        assert any("cmd.exe" in c for c in calls), "cmd.exe 호출 없음"
+        assert any("start" in c for c in calls), "start 명령 없음"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 12. getHelpText / getShownTagIntro / setShownTagIntro
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHelpAndTagIntro:
+    def test_get_help_text_known_key(self, bridge):
+        text = bridge.getHelpText("web_search")
+        assert "#웹 검색" in text
+
+    def test_get_help_text_file_convert(self, bridge):
+        text = bridge.getHelpText("file_convert")
+        assert "#파일 변환" in text
+
+    def test_get_help_text_unknown_key(self, bridge):
+        assert bridge.getHelpText("nonexistent_key") == ""
+
+    def test_shown_tag_intro_default_false(self, bridge, tmp_path, monkeypatch):
+        """preferences.json이 없으면 False 반환."""
+        import ui_ux.bridge as bmod
+        monkeypatch.setattr(bmod, "_PREFS_PATH", tmp_path / "prefs.json")
+        assert bridge.getShownTagIntro() is False
+
+    def test_set_and_get_shown_tag_intro(self, bridge, tmp_path, monkeypatch):
+        """setShownTagIntro(True) 후 getShownTagIntro()가 True를 반환해야 한다."""
+        import ui_ux.bridge as bmod
+        monkeypatch.setattr(bmod, "_PREFS_PATH", tmp_path / "prefs.json")
+        bridge.setShownTagIntro(True)
+        assert bridge.getShownTagIntro() is True
+
+    def test_set_preserves_existing_prefs(self, bridge, tmp_path, monkeypatch):
+        """setShownTagIntro가 기존 preferences(theme 등)를 덮어쓰지 않아야 한다."""
+        import ui_ux.bridge as bmod
+        import json as _json
+        prefs_path = tmp_path / "prefs.json"
+        prefs_path.write_text(_json.dumps({"theme": "solar"}), encoding="utf-8")
+        monkeypatch.setattr(bmod, "_PREFS_PATH", prefs_path)
+        bridge.setShownTagIntro(True)
+        saved = _json.loads(prefs_path.read_text(encoding="utf-8"))
+        assert saved["theme"] == "solar"
+        assert saved["shown_tag_intro"] is True
