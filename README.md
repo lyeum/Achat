@@ -121,6 +121,7 @@ User Input
     │     Layer C: VDB 검색 결과           (동적, ~150 tok)     │
     │     Layer D: 단기 버퍼 최근 N턴      (동적, ~300 tok)     │
     │     Layer E: 현재 사용자 입력                              │
+    │     Layer F: 최근 기능 작업 요약 (있을 때만, ~50 tok)      │
     │                  │                                         │
     │                  ▼                                         │
     │            LLM (llama-cpp)                                 │
@@ -172,8 +173,8 @@ LLM은 자연어 해석 및 파라미터 추출만 담당, 실행은 rule-based 
 ### 검색엔진
 | 종류 | 방식 |
 |---|---|
-| 로컬 검색 | SQLite FTS5 또는 whoosh 기반 파일 인덱싱 |
-| 인터넷 검색 | DuckDuckGo(무료 비공식) / SearXNG(셀프호스팅) / Brave Search API(선택) |
+| 로컬 검색 | SQLite FTS5 파일 인덱싱 (서브폴더 포함 os.walk, 권한 오류 자동 건너뜀) |
+| 인터넷 검색 | DuckDuckGo (ddgs) — 의미 관련도 정렬 후 HTML 하이퍼링크로 결과 제공 |
 
 ---
 
@@ -242,8 +243,11 @@ Achat/
 │   ├─ tray.py                    # 시스템 트레이
 │   ├─ qml/
 │   │   ├─ Style.qml              # 디자인 토큰 singleton (색상/폰트/애니메이션)
-│   │   ├─ main.qml               # 플로팅 윈도우 (버블 축소/확장, 드래그, 스냅)
-│   │   └─ ChatBubble.qml         # 재사용 말풍선 컴포넌트
+│   │   ├─ main.qml               # 플로팅 윈도우 (버블 축소/확장, 드래그, 스냅, 기능 태그 즉시 다이얼로그, #? 도움말 태그)
+│   │   ├─ ChatBubble.qml         # 재사용 말풍선 컴포넌트 (HTML 하이퍼링크 렌더링 지원)
+│   │   ├─ FileOptionsPanel.qml   # 파일 변환 오버레이 패널 (이름변경/확장자변환)
+│   │   ├─ FolderClassifyPanel.qml # 폴더 분류 오버레이 패널
+│   │   └─ FileSearchPanel.qml    # 파일 검색 결과 오버레이 패널
 │   └─ assets/
 │       ├─ icons/                 # 앱 아이콘 PNG
 │       └─ characters/            # 캐릭터 PNG/GIF
@@ -310,14 +314,14 @@ Achat/
 | LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
 | GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
 | Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
-| CPU 추론 (Windows) | ✅ 가능 | 3B는 7B보다 빠름, AVX2 이상 권장 |
-| PySide6 PIP 플로팅 UI | ✅ 가능 | Frameless + Always-on-top + 모서리 스냅, 외부 OS API 불필요 |
+| CPU 추론 (Windows) | ✅ 가능 | 3B Q4_K_M ~2.5GB RAM. 캐릭터 전환 OOM 수정 완료 ([BUG_02](docs/BUG/BUG_02.md)) |
+| PySide6 PIP 플로팅 UI | ✅ 가능 | Frameless + Always-on-top + 모서리 스냅, WSL2/Windows 플랫폼 분기 완료 |
 | 시맨틱 메모리 검색 | ✅ 가능 | ChromaDB + bge-m3, 로컬 동작 |
 | 폴더 정리 도구 | ✅ 가능 | pathlib / shutil 기반 rule-based, 이미지 확장자 변환은 Pillow |
-| 프롬프트 변환 도구 | ✅ 가능 | 기능 전용 시스템 프롬프트 교체로 구현 |
-| 로컬 검색 도구 | ✅ 가능 | SQLite FTS5 또는 whoosh |
-| 인터넷 검색 도구 | ⚠️ API 의존 | DuckDuckGo 비공식 or SearXNG 셀프호스팅 권장 |
-| JSON 파라미터 추출 (3B) | ⚠️ 주의 | 파인튜닝 데이터에 기능 모드 예시 필수 포함 |
+| 프롬프트 변환 도구 | ✅ 가능 | ChromaDB 가이드 캐싱 + 크롤링 폴백 |
+| 로컬 검색 도구 | ✅ 가능 | SQLite FTS5, os.walk 서브폴더 재귀 탐색 |
+| 인터넷 검색 도구 | ✅ 가능 | ddgs 기반, LLM 없이 하이퍼링크 직접 반환, 관련도 정렬 |
+| JSON 파라미터 추출 (3B) | ⚠️ 주의 | prompt_convert만 LLM 추출 사용. 나머지 도구는 직접 다이얼로그로 LLM 없이 동작 |
 | RTX 5060 Ti BnB | ✅ 미사용 | Blackwell SM 10.x 호환 이슈로 BitsAndBytes 대신 bfloat16 풀 파라미터 채택 |
 
 ---
@@ -433,10 +437,13 @@ Achat/
 - [x] `tools/folder/classifier.py` — 확장자별 / 종류별 파일 분류 (shutil.move, dry_run)
 - [x] `tools/folder/converter.py` — 이미지 포맷 변환 (Pillow: jpg/png/webp/bmp/tiff)
 - [x] `tools/folder/renamer.py` — 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
-- [x] `tools/prompt_converter.py` — 프롬프트 변환 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형)
-- [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적)
-- [x] `tools/search/web_search.py` — DuckDuckGo Instant Answer API 연동 구현
-- [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 + 키워드 기반 도구 선택
+- [x] `tools/prompt_converter.py` — 프롬프트 변환 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형) + ChromaDB 가이드 캐싱
+- [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, **os.walk 서브폴더 재귀**)
+- [x] `tools/search/web_search.py` — DuckDuckGo 검색 + 의미 관련도 정렬 + **HTML 하이퍼링크 직접 반환** (LLM 2-step 제거)
+- [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 + `_recent_ops` 기록 → Layer F 대화 연속성
+- [x] `ui_ux/bridge.py` — 플랫폼 분기 (`_is_wsl`, `_is_windows`), `openFile(WSL2 powershell)`, `openUrl()`, `getHelpText()`, `_unload_llm()` OOM 수정
+- [x] `ui_ux/qml/main.qml` — 태그 클릭 즉시 다이얼로그, `#?` 도움말 태그, `searchDirectory` 재사용
+- [x] `ui_ux/qml/ChatBubble.qml` — `Text.AutoText` + `bridge.openUrl()` 하이퍼링크 클릭
 
 ---
 
