@@ -45,6 +45,14 @@ Item {
             font.pixelSize: 13
             font.family: root.fontFamily
             wrapMode: Text.WordWrap
+            // HTML 링크(<a href>)가 포함된 메시지를 클릭 가능하게 렌더링한다.
+            // AutoText: HTML 태그가 있으면 RichText로, 없으면 PlainText로 자동 전환.
+            textFormat: Text.AutoText
+            onLinkActivated: function(link) {
+                // Qt.openUrlExternally는 WSL2에서 브라우저 감지 실패.
+                // bridge.openUrl이 플랫폼별 올바른 방식으로 처리한다.
+                bridge.openUrl(link)
+            }
         }
     }
 }

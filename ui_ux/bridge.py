@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import json
+import platform
+import subprocess as _subprocess
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtWidgets import QApplication
+
+
+# ── 플랫폼 감지 헬퍼 ──────────────────────────────────────────────────────────
+
+def _is_wsl() -> bool:
+    return platform.system() == "Linux" and "microsoft" in platform.uname().release.lower()
+
+
+def _is_windows() -> bool:
+    return platform.system() == "Windows"
 
 from conversation.session_manager import SessionManager, SessionState
 from ui_ux.chat_panel import LLMWorker
@@ -42,6 +54,7 @@ class ChatBridge(QObject):
     characterNameChanged = Signal(str)
     backgroundChanged    = Signal(str)        # file URL or ""
     moodChanged          = Signal(str)        # neutral | happy | annoyed | sad
+    affectionChanged     = Signal(int)        # 0~100 — admin 조작 or 잠금 해제 시 emit
     imageImported        = Signal(str, str)   # slot_type, result (icon→URL, parts→filename)
 
     def __init__(self, agent):
@@ -92,6 +105,16 @@ class ChatBridge(QObject):
     def currentMood(self) -> str:
         return self._current_mood
 
+    @Property(int, notify=affectionChanged)
+    def currentAffection(self) -> int:
+        session = getattr(self._agent, "session", None)
+        return session.affection if session else 30
+
+    @Property(bool, notify=affectionChanged)
+    def affectionLocked(self) -> bool:
+        session = getattr(self._agent, "session", None)
+        return session.affection_locked if session else False
+
     # ── 세션 관리 내부 헬퍼 ──────────────────────────────────────────────────
 
     def _init_session(self) -> None:
@@ -130,9 +153,55 @@ class ChatBridge(QObject):
         state.world_id    = session.world_id    or state.world_id
         self._session_manager.save_state(state)
 
+    def _unload_llm(self) -> None:
+        """현재 Agent의 LLM 모델을 메모리에서 해제한다.
+
+        캐릭터 전환 / 새 세션 / 초기화 시 새 LLM을 로드하기 직전에 반드시 호출해야 한다.
+        해제하지 않으면 기존 모델과 신규 모델이 동시에 메모리에 적재되어 OOM이 발생한다.
+
+        - llama_cpp : Llama.close() 호출 (내부 C 힙 해제)
+        - transformers : del model + torch.cuda.empty_cache()
+        """
+        import gc
+
+        llm = getattr(self._agent, "llm", None)
+        if llm is None:
+            return
+
+        backend = getattr(llm, "backend", "")
+        model   = getattr(llm, "_model", None)
+
+        if backend == "llama_cpp" and model is not None:
+            try:
+                model.close()
+            except Exception:
+                pass
+
+        if backend == "transformers" and model is not None:
+            try:
+                import torch
+                del llm._model
+                llm._model = None
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        # Python 참조 해제 후 GC 강제 실행
+        del model
+        gc.collect()
+
     def _rebuild_agent(self, state: SessionState) -> None:
-        """SessionState로부터 새 Agent를 구성하고 self._agent를 교체한다."""
+        """SessionState로부터 새 Agent를 구성하고 self._agent를 교체한다.
+
+        새 LLM 로드 전 반드시 기존 LLM을 해제(_unload_llm)해야 한다.
+        해제 없이 로드하면 기존 모델이 GC되기 전까지 두 모델이 동시에 메모리에
+        올라가 OOM이 발생한다. (Qwen2.5-3B bfloat16 기준 순간 ~12 GB)
+        """
         from agent.core import Agent
+
+        # 기존 LLM 먼저 해제 — OOM 방지 핵심
+        self._unload_llm()
 
         cfg = getattr(self._agent, "cfg", None)
         self._agent = Agent.from_session(state, cfg)
@@ -177,7 +246,7 @@ class ChatBridge(QObject):
         return session.mood if session else "neutral"
 
     def _sync_state(self) -> None:
-        """응답 후 act/mood 변화를 감지하고 변경 시 시그널을 emit한다."""
+        """응답 후 act/mood/affection 변화를 감지하고 변경 시 시그널을 emit한다."""
         # session.location이 router에 의해 바뀌었을 수 있으므로 동기화
         session = getattr(self._agent, "session", None)
         if session and session.location:
@@ -193,12 +262,16 @@ class ChatBridge(QObject):
             self._current_mood = new_mood
             self.moodChanged.emit(new_mood)
 
+        if session:
+            self.affectionChanged.emit(session.affection)
+
     # ── Slots (QML → Python) ──────────────────────────────────────────────────
 
-    # 파일 탐색기가 필요한 기능 모드 도구 집합
-    _PATH_TOOLS: frozenset[str] = frozenset(
-        {"folder_classify", "file_rename", "image_convert", "local_search"}
-    )
+    # 파일 탐색기(폴더)가 필요한 기능 모드 도구 집합
+    # file_rename / image_convert / folder_classify / local_search는 전용 다이얼로그로 분리
+    _PATH_TOOLS: frozenset[str] = frozenset()
+    # 파일 선택 옵션 패널이 필요한 도구 집합 (QML에서 browseFilesForOptions 호출)
+    _FILE_OPTION_TOOLS: frozenset[str] = frozenset({"file_convert"})
 
     @Slot(str, str, str)
     def sendMessage(self, text: str, mode: str = "chat", tool_name: str = "") -> None:
@@ -739,6 +812,329 @@ class ChatBridge(QObject):
         except Exception:  # noqa: BLE001
             return ""
 
+    # ── 파일 옵션 (파일이름 변경 / 확장자 변경) ──────────────────────────────────
+
+    # 이미지 포맷 변환이 가능한 확장자 집합
+    _IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+
+    @Slot(result=str)
+    def browseFilesForOptions(self) -> str:
+        """파일 선택 다이얼로그를 열어 선택된 경로 목록을 JSON으로 반환한다.
+
+        Returns
+        -------
+        str
+            ``["/path/to/file1.png", ...]`` 형태의 JSON.
+            취소하면 ``"[]"`` 반환.
+        """
+        from PySide6.QtWidgets import QFileDialog
+        paths, _ = QFileDialog.getOpenFileNames(
+            None, "파일 선택", str(Path.home()), "모든 파일 (*)"
+        )
+        return json.dumps(paths, ensure_ascii=False)
+
+    @Slot(str, str, str, result=str)
+    def applyFileOptions(self, paths_json: str, rename_to: str, new_ext: str) -> str:
+        """선택된 파일에 이름 변경 / 확장자 변경을 적용한다.
+
+        Parameters
+        ----------
+        paths_json : str
+            JSON 배열 — 선택된 파일 경로 목록.
+        rename_to : str
+            새 파일명 (확장자 제외). 비면 이름 유지.
+            복수 파일이면 "{rename_to}_001", "{rename_to}_002" 형태로 시퀀스 부여.
+        new_ext : str
+            변환할 확장자 ("png", "jpg" 등). 비면 확장자 유지.
+            이미지 포맷 간 변환은 Pillow를 사용.
+
+        Returns
+        -------
+        str
+            결과 메시지 (채팅창에 표시됨).
+        """
+        try:
+            paths = [Path(p) for p in json.loads(paths_json) if p]
+        except Exception as e:
+            return f"오류: 경로 파싱 실패 — {e}"
+
+        if not paths:
+            return "선택된 파일이 없습니다."
+
+        rename_to = rename_to.strip()
+        new_ext   = new_ext.strip().lstrip(".")
+
+        results: list[str] = []
+        for i, src in enumerate(paths):
+            if not src.exists():
+                results.append(f"없음: {src.name}")
+                continue
+
+            # 최종 대상 경로 계산
+            if rename_to:
+                stem = rename_to if len(paths) == 1 else f"{rename_to}_{i+1:03d}"
+            else:
+                stem = src.stem
+            ext_str = ("." + new_ext) if new_ext else src.suffix
+            dst = src.parent / (stem + ext_str)
+
+            if dst == src:
+                results.append(f"변경 없음: {src.name}")
+                continue
+            if dst.exists():
+                results.append(f"건너뜀 (충돌): {dst.name}")
+                continue
+
+            # 이미지 포맷 변환 (Pillow)
+            if new_ext and src.suffix.lower() in self._IMG_EXTS and ext_str.lower() in self._IMG_EXTS:
+                try:
+                    from PIL import Image
+                    _FORMAT_MAP = {
+                        ".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
+                        ".webp": "WEBP", ".bmp": "BMP", ".tiff": "TIFF", ".tif": "TIFF",
+                    }
+                    fmt = _FORMAT_MAP.get(ext_str.lower(), ext_str.upper().lstrip("."))
+                    with Image.open(src) as img:
+                        if fmt == "JPEG" and img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                        # 이름 변경도 함께 처리
+                        img.save(dst, fmt)
+                    if rename_to and dst.name != src.with_suffix(ext_str).name:
+                        pass  # dst는 이미 rename_to 적용 완료
+                    results.append(f"변환: {src.name} → {dst.name}")
+                except ImportError:
+                    return "오류: Pillow가 설치되지 않았습니다. (`uv add Pillow`)"
+                except Exception as e:
+                    results.append(f"실패: {src.name} — {e}")
+            else:
+                # 일반 파일 이름/확장자 변경
+                try:
+                    src.rename(dst)
+                    results.append(f"완료: {src.name} → {dst.name}")
+                except Exception as e:
+                    results.append(f"실패: {src.name} — {e}")
+
+        return "\n".join(results)
+
+    # ── 폴더 분류 ─────────────────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def browseFolderForClassify(self) -> str:
+        """폴더 선택 다이얼로그를 열어 선택된 경로를 반환한다.
+
+        Returns
+        -------
+        str
+            선택된 폴더 경로 문자열. 취소하면 빈 문자열.
+        """
+        from PySide6.QtWidgets import QFileDialog
+        path = QFileDialog.getExistingDirectory(None, "분류할 폴더 선택", str(Path.home()))
+        return path or ""
+
+    @Slot(str, str, bool, result=str)
+    def applyFolderClassify(self, folder_path: str, rule: str, dry_run: bool) -> str:
+        """ClassifierTool을 직접 실행하고 결과를 반환한다.
+
+        Parameters
+        ----------
+        folder_path : str
+            분류할 폴더 경로.
+        rule : str
+            "종류별" | "확장자별"
+        dry_run : bool
+            True이면 미리보기만 수행, False이면 실제 이동.
+
+        Returns
+        -------
+        str
+            분류 결과 메시지.
+        """
+        from tools.folder.classifier import ClassifierTool
+        tool = ClassifierTool()
+        return tool.execute({
+            "target": folder_path,
+            "rule":   rule or "종류별",
+            "dry_run": dry_run,
+        })
+
+    # ── 파일 검색 ─────────────────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def browseSearchDirectory(self) -> str:
+        """검색할 디렉토리 선택 다이얼로그를 열어 경로를 반환한다."""
+        from PySide6.QtWidgets import QFileDialog
+        path = QFileDialog.getExistingDirectory(None, "검색할 폴더 선택", str(Path.home()))
+        return path or ""
+
+    @Slot(str, str, str, result=str)
+    def searchFiles(self, query: str, folder_path: str, ext: str) -> str:
+        """LocalSearchTool을 직접 실행하고 결과를 JSON 문자열로 반환한다.
+
+        Parameters
+        ----------
+        query : str
+            검색어.
+        folder_path : str
+            검색할 디렉토리 경로. 빈 문자열이면 홈 디렉토리 사용.
+        ext : str
+            확장자 필터 (쉼표 구분, 예: "py,txt"). 빈 문자열이면 기본 확장자.
+
+        Returns
+        -------
+        str
+            JSON 문자열: [{"path": "...", "snippet": "..."}, ...] 또는 {"error": "..."}
+        """
+        import json as _json
+        from tools.search.local_search import _get_conn, _index_directory, _search, DEFAULT_EXTS
+        from pathlib import Path as _Path
+
+        if not query.strip():
+            return _json.dumps({"error": "검색어가 없습니다."})
+
+        root = _Path(folder_path).expanduser().resolve() if folder_path else _Path.home()
+        if not root.exists() or not root.is_dir():
+            return _json.dumps({"error": f"디렉토리가 존재하지 않습니다: {root}"})
+
+        if ext:
+            allowed_exts = {
+                ("." + e.strip().lstrip(".")).lower()
+                for e in ext.split(",") if e.strip()
+            }
+        else:
+            allowed_exts = DEFAULT_EXTS
+
+        try:
+            conn = _get_conn()
+            _index_directory(conn, root, allowed_exts, False)
+            results = _search(conn, query.strip(), root=root)
+            conn.close()
+        except Exception as e:  # noqa: BLE001
+            return _json.dumps({"error": f"검색 오류: {e}"})
+
+        # 전역 DB에 다른 경로 파일이 있을 수 있으므로 지정 폴더 내 결과만 반환
+        root_str = str(root)
+        results = [(p, s) for p, s in results if p.startswith(root_str)]
+
+        return _json.dumps(
+            [{"path": p, "snippet": s} for p, s in results],
+            ensure_ascii=False,
+        )
+
+    @Slot(str)
+    def openFile(self, path: str) -> None:
+        """OS 기본 앱으로 파일을 연다.
+
+        WSL2: cmd.exe /c start 는 UNC 경로(\\\\wsl.localhost\\...)를 지원하지 않아
+        PNG 등 이미지 열기에 실패한다. PowerShell Invoke-Item을 사용해야 한다.
+        Windows native: os.startfile().
+        Linux/macOS: xdg-open / open.
+        """
+        from pathlib import Path as _Path
+
+        p = str(_Path(path).resolve())
+
+        if _is_windows():
+            import os
+            try:
+                os.startfile(p)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            return
+
+        if _is_wsl():
+            # wslpath로 Windows 경로 변환 → PowerShell Invoke-Item
+            try:
+                win_path = _subprocess.check_output(
+                    ["wslpath", "-w", p], stderr=_subprocess.DEVNULL
+                ).decode().strip()
+                # PowerShell 문자열 리터럴 내 single-quote 이스케이프 (' → '')
+                safe = win_path.replace("'", "''")
+                _subprocess.Popen([
+                    "powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-Command", f"Invoke-Item '{safe}'",
+                ], stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+            except (FileNotFoundError, _subprocess.CalledProcessError):
+                pass
+            return
+
+        # Linux / macOS
+        for cmd in (["xdg-open", p], ["open", p]):
+            try:
+                _subprocess.Popen(cmd)
+                return
+            except FileNotFoundError:
+                continue
+
+        # 최후 폴백
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl as _QUrl
+        QDesktopServices.openUrl(_QUrl.fromLocalFile(p))
+
+    @Slot(str)
+    def openUrl(self, url: str) -> None:
+        """브라우저로 URL을 연다.
+
+        WSL2: Qt.openUrlExternally 는 브라우저 감지 실패로 무음 실패한다.
+        cmd.exe /c start는 HTTP URL에는 UNC 이슈가 없어 정상 작동한다.
+        Windows: os.startfile(url).
+        Linux/macOS: xdg-open / open.
+        """
+        if _is_windows():
+            import os
+            try:
+                os.startfile(url)  # type: ignore[attr-defined]
+            except Exception:
+                _subprocess.Popen(["cmd.exe", "/c", "start", "", url],
+                                   stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+            return
+
+        if _is_wsl():
+            _subprocess.Popen(
+                ["cmd.exe", "/c", "start", "", url],
+                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
+            )
+            return
+
+        for cmd in (["xdg-open", url], ["open", url]):
+            try:
+                _subprocess.Popen(cmd)
+                return
+            except FileNotFoundError:
+                continue
+
+    # ── Admin: Affection 직접 조절 ────────────────────────────────────────────
+
+    @Slot(int)
+    def setAffection(self, value: int) -> None:
+        """관리자 직접 설정. affection을 0~100 범위로 즉시 변경한다."""
+        session = getattr(self._agent, "session", None)
+        if session is None:
+            return
+        session.affection = max(0, min(100, value))
+        self.affectionChanged.emit(session.affection)
+
+    @Slot(int)
+    def lockAffection(self, value: int) -> None:
+        """특정 수치에 affection을 고정한다. 이후 update_affection() 호출은 무시된다."""
+        session = getattr(self._agent, "session", None)
+        if session is None:
+            return
+        clamped = max(0, min(100, value))
+        session.affection_locked     = True
+        session.affection_lock_value = clamped
+        session.affection            = clamped
+        self.affectionChanged.emit(session.affection)
+
+    @Slot()
+    def unlockAffection(self) -> None:
+        """affection 잠금을 해제한다. 이후 정상적인 update_affection() 동작이 재개된다."""
+        session = getattr(self._agent, "session", None)
+        if session is None:
+            return
+        session.affection_locked     = False
+        session.affection_lock_value = None
+        self.affectionChanged.emit(session.affection)
+
     # ── 테마 설정 ─────────────────────────────────────────────────────────────
 
     @Slot(result=str)
@@ -760,6 +1156,48 @@ class ChatBridge(QObject):
             if _PREFS_PATH.exists():
                 data = json.loads(_PREFS_PATH.read_text(encoding="utf-8"))
             data["theme"] = theme_id
+            _PREFS_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── 도움말 / 최초 안내 ──────────────────────────────────────────────────────
+
+    _HELP_TEXT: dict[str, str] = {
+        "file_convert":   "#파일 변환 — 파일명 변경 또는 확장자(jpg/png/webp 등) 변환",
+        "prompt_convert": "#프롬프트 변환 — ChromaDB 가이드 기반 프롬프트 자동 변환",
+        "folder_classify": "#폴더 분류 — 날짜/확장자별로 파일을 하위 폴더로 자동 정리",
+        "local_search":   "#파일 검색 — 폴더 내 파일명·내용 키워드 검색 (서브폴더 포함)",
+        "web_search":     "#웹 검색 — DuckDuckGo 인터넷 검색 (클릭 가능한 하이퍼링크 제공)",
+        "help":           "#? — 각 기능에 대한 간략한 설명을 표시합니다",
+    }
+
+    @Slot(str, result=str)
+    def getHelpText(self, key: str) -> str:
+        """기능 키에 해당하는 한 줄 도움말을 반환한다."""
+        return self._HELP_TEXT.get(key, "")
+
+    @Slot(result=bool)
+    def getShownTagIntro(self) -> bool:
+        """최초 기능 안내 팝업을 이미 표시했는지 여부를 반환한다."""
+        try:
+            if _PREFS_PATH.exists():
+                return json.loads(
+                    _PREFS_PATH.read_text(encoding="utf-8")
+                ).get("shown_tag_intro", False)
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    @Slot(bool)
+    def setShownTagIntro(self, value: bool) -> None:
+        """최초 기능 안내 팝업 표시 여부를 preferences.json에 저장한다."""
+        try:
+            data: dict = {}
+            if _PREFS_PATH.exists():
+                data = json.loads(_PREFS_PATH.read_text(encoding="utf-8"))
+            data["shown_tag_intro"] = value
             _PREFS_PATH.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
