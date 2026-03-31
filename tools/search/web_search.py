@@ -9,7 +9,9 @@ LLM 파라미터:
 
 동작:
   1. DDGS.text() 로 실제 DuckDuckGo 검색 결과 수집
-  2. title / href / body 포맷으로 최대 max_results 개 반환
+  2. 사용자 쿼리와 snippet 간의 어절 겹침으로 의미적 유사도 스코어링
+  3. 유사도 기준 재정렬 후 HTML hyperlink 형식으로 반환
+     (QML Text.AutoText 또는 RichText로 렌더링 시 클릭 가능)
 
 주의:
   - 외부 네트워크 접근 필요 (오프라인 환경에서는 오류 반환)
@@ -17,6 +19,8 @@ LLM 파라미터:
 """
 
 from __future__ import annotations
+
+import re
 
 from loguru import logger
 
@@ -56,6 +60,52 @@ def _ddg_search(query: str, max_results: int) -> list[dict]:
     ]
 
 
+def _tokenize(text: str) -> set[str]:
+    """텍스트에서 유니코드 단어 토큰을 추출한다 (한국어 어절 포함)."""
+    return set(re.findall(r"\w+", text.lower(), re.UNICODE))
+
+
+def _score_relevance(query_tokens: set[str], result: dict) -> int:
+    """쿼리 토큰이 결과 텍스트(title + snippet)에 포함된 수를 반환한다.
+
+    한국어는 조사가 붙어 "파이썬" → "파이썬은" 처럼 형태가 바뀌므로
+    정확 일치 대신 쿼리 토큰이 결과 텍스트의 부분 문자열인지 검사한다.
+    """
+    text = (result.get("title", "") + " " + result.get("snippet", "")).lower()
+    return sum(1 for qt in query_tokens if qt in text)
+
+
+def _format_html(query: str, results: list[dict]) -> str:
+    """검색 결과를 HTML hyperlink 형식으로 포맷한다.
+
+    QML Text.AutoText / Text.RichText 환경에서 클릭 가능한 링크로 렌더링된다.
+    """
+    lines = [f"검색 결과 — '{query}' ({len(results)}건)<br>"]
+    for i, r in enumerate(results, start=1):
+        title = r["title"] or r["url"]
+        url   = r["url"]
+        snippet = r["snippet"]
+
+        if url:
+            link = f'<a href="{url}">[{i}] {title}</a>'
+        else:
+            link = f"[{i}] {title}"
+
+        lines.append(link)
+        if snippet:
+            # snippet은 plain text — HTML 특수문자 이스케이프
+            safe_snippet = (
+                snippet
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            lines.append(f"<font color='#8090A0'>{safe_snippet}</font>")
+        lines.append("")
+
+    return "<br>".join(lines).rstrip("<br>")
+
+
 # ── Tool ─────────────────────────────────────────────────────────────
 
 class WebSearchTool(BaseTool):
@@ -85,10 +135,15 @@ class WebSearchTool(BaseTool):
         if not results:
             return f"'{query}'에 대한 검색 결과를 찾지 못했습니다."
 
-        lines = [f"검색 결과 — '{query}' ({len(results)}건)"]
-        for i, r in enumerate(results, start=1):
-            lines.append(f"\n[{i}] {r['title']}")
-            if r["url"]:
-                lines.append(f"    {r['url']}")
-            lines.append(f"    {r['snippet']}")
-        return "\n".join(lines)
+        # 쿼리 토큰 추출 후 유사도 스코어링 → 재정렬
+        q_tokens = _tokenize(query)
+        scored = sorted(results, key=lambda r: _score_relevance(q_tokens, r), reverse=True)
+
+        # 스코어 0인 결과(쿼리 토큰이 전혀 없음)는 DDG 랭킹 유지하되 뒤로 보냄
+        # (최소 1건은 보장하기 위해 완전 제거는 하지 않음)
+        logger.debug(
+            f"[web_search] 스코어: "
+            + ", ".join(f"{r['title'][:20]}={_score_relevance(q_tokens, r)}" for r in scored)
+        )
+
+        return _format_html(query, scored)

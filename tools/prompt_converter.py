@@ -130,8 +130,22 @@ class PromptConverterTool(BaseTool):
         '출력: {"model": "Stable Diffusion 1.5", "content": "귀여운 고양이 픽셀아트"}'
     )
 
-    def __init__(self, llm=None) -> None:
-        self._llm = llm
+    def __init__(self, llm=None, config: dict | None = None) -> None:
+        self._llm    = llm
+        self._config = config or {}
+        self._store: "PromptGuideStore | None" = None  # lazy init
+
+    def _get_store(self):
+        """PromptGuideStore lazy 초기화 (chroma_path가 없는 stub 환경에서는 None)."""
+        if self._store is not None:
+            return self._store
+        chroma_path = self._config.get("chroma_path", "")
+        if not chroma_path:
+            return None
+        from tools.prompt_store import PromptGuideStore
+        embed = self._config.get("embedding_model")
+        self._store = PromptGuideStore(chroma_path, embedding_model=embed)
+        return self._store
 
     def execute(self, params: dict) -> str:
         model   = params.get("model",   "").strip()
@@ -144,24 +158,40 @@ class PromptConverterTool(BaseTool):
 
         logger.info(f"[prompt_convert] 모델={model!r}, 내용={content!r}")
 
-        # ── 2단: 웹 검색 + 크롤링 ──────────────────────────────────────
-        guide = _collect_guide(model)
-        if guide:
-            logger.info(f"[prompt_convert] 가이드 수집 완료 ({len(guide)}자)")
-        else:
-            logger.warning("[prompt_convert] 가이드 수집 실패 — LLM 자체 지식으로 변환")
+        # ── 2단: DB 조회 → 크롤링 fallback ─────────────────────────────
+        guide = ""
+        guide_source = ""
+        store = self._get_store()
+        if store:
+            cached = store.query(model)
+            if cached:
+                guide = cached
+                guide_source = "DB"
+                logger.info(f"[prompt_convert] DB 가이드 사용 ({len(guide)}자)")
+
+        if not guide:
+            # DB 미스 → 크롤링 fallback
+            guide = _collect_guide(model)
+            if guide:
+                guide_source = "crawl"
+                logger.info(f"[prompt_convert] 크롤링 가이드 수집 ({len(guide)}자)")
+                # 크롤링 성공 시 DB에 자동 저장 (이후 요청은 DB에서 바로 조회)
+                if store:
+                    store.save(model, guide, source="crawl")
+            else:
+                logger.warning("[prompt_convert] 가이드 없음 — LLM 자체 지식으로 변환")
 
         # ── stub 모드: LLM 없음 ─────────────────────────────────────────
         if self._llm is None:
             guide_preview = guide[:200] + "..." if len(guide) > 200 else guide
             return (
-                f"[stub] model={model!r}, content={content!r}\n"
+                f"[stub] model={model!r}, content={content!r}, source={guide_source or 'none'}\n"
                 f"가이드 미리보기: {guide_preview or '(없음)'}"
             )
 
         # ── 3단: LLM 변환 ───────────────────────────────────────────────
         context_block = (
-            f"=== {model} 프롬프트 가이드 (웹 수집) ===\n{guide}\n"
+            f"=== {model} 프롬프트 가이드 ({guide_source}) ===\n{guide}\n"
             if guide else
             f"('{model}'에 대한 가이드를 찾지 못했습니다. 자체 지식을 활용해주세요.)\n"
         )
