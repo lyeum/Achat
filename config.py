@@ -25,6 +25,7 @@ _CONFIGS = {
         "embedding_model": None,
         "vdb_top_k": 2,
         "vdb_threshold": 0.7,
+        "aff_gate_threshold": 0.6,         # affection 변화 허용 최소 중요도
         "enable_play_log": False,
     },
     "dev": {
@@ -40,6 +41,7 @@ _CONFIGS = {
         "vdb_top_k": 2,
         "vdb_threshold": 0.52,  # bge-m3 한국어 특성 — 0.7은 과도하게 엄격
                                  # 세계관 관련 질문 ~0.55, 무관 질문 ~0.48 → 0.52로 분리
+        "aff_gate_threshold": 0.6,         # mid 이상(감정/취미) 발화에만 affection 반영
         "enable_play_log": True,           # dev에서만 학습 데이터 수집
     },
     "deploy": {
@@ -53,6 +55,7 @@ _CONFIGS = {
         "embedding_model": "BAAI/bge-m3",
         "vdb_top_k": 2,
         "vdb_threshold": 0.52,
+        "aff_gate_threshold": 0.6,
         "enable_play_log": False,          # 배포 환경에서는 학습 데이터 불필요
     },
 }

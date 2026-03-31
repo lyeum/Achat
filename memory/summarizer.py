@@ -9,8 +9,9 @@ from conversation.core.session import ConversationSession
 from memory.long_term import LongTermMemory
 
 # 중요도 판정 키워드 (M_schema.json importance_rules 기준)
+# 이름 키워드는 1.0으로 강제 — VDB 검색 실패(4/5) 원인이 낮은 importance로 인한 누락
+_NAME_KEYWORDS = ["이름:", "이름은", "이름이", "이름"]
 _HIGH_KEYWORDS = [
-    "이름:", "이름은", "이름이", "이름",  # "이름: X" 형태 우선 인식
     "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워",
     "기억해줘", "잊지마", "중요해", "말해줄게", "비밀", "처음으로",
 ]
@@ -71,6 +72,9 @@ def score_importance(summary: str) -> float:
     - low (<0.5)   : 일상 잡담 → 저장 안 함
     """
     score = 0.5  # 기본값 — 키워드 없어도 일단 저장
+    for kw in _NAME_KEYWORDS:
+        if kw in summary:
+            return 1.0  # 이름 정보는 최고 중요도 — 누락 방지
     for kw in _HIGH_KEYWORDS:
         if kw in summary:
             score = max(score, 0.85)

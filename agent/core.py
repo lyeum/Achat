@@ -53,12 +53,12 @@ from tools.search.local_search import LocalSearchTool
 from tools.search.web_search import WebSearchTool
 
 # LLM 주입 불필요 도구 — 모듈 로드 시 즉시 생성
+# WebSearchTool은 LLM + character 주입이 필요하므로 Agent.__init__에서 생성
 _STATIC_TOOLS: list[BaseTool] = [
     ClassifierTool(),
     ConverterTool(),
     RenamerTool(),
     LocalSearchTool(),
-    WebSearchTool(),
 ]
 
 # 도구 선택용 키워드 매핑 (자연어 힌트 → tool name)
@@ -120,17 +120,21 @@ class Agent:
         self.character = load_persona(character_id)
         self.world = load_world(world_path)
 
+        # 최근 기능 작업 기록 (대화 모드로 전환 시 캐릭터 컨텍스트에 주입)
+        self._recent_ops: list[str] = []
+
         if self._stub:
             logger.info("[agent] stub 모드 — LLM/메모리 로딩 건너뜀")
             self.llm = None
             self.long_term = None
             self.session = None
             self.router = None
-            # stub 모드: PromptConverterTool(llm=None)
+            # stub 모드: LLM 없음 — 도구에 None 주입
             self._tools: dict[str, BaseTool] = {
                 t.name: t for t in _STATIC_TOOLS
             }
-            self._tools[PromptConverterTool.name] = PromptConverterTool(llm=None)
+            self._tools[PromptConverterTool.name] = PromptConverterTool(llm=None, config=self.cfg)
+            self._tools[WebSearchTool.name] = WebSearchTool()
             return
 
         world_id = self.world.get("world_id")
@@ -160,9 +164,10 @@ class Agent:
             config=self.cfg,
         )
 
-        # 도구 목록 (LLM 로딩 후 구성 — PromptConverterTool에 LLM 주입)
+        # 도구 목록 (LLM 로딩 후 구성 — LLM + config/character 주입)
         self._tools = {t.name: t for t in _STATIC_TOOLS}
-        self._tools[PromptConverterTool.name] = PromptConverterTool(llm=self.llm)
+        self._tools[PromptConverterTool.name] = PromptConverterTool(llm=self.llm, config=self.cfg)
+        self._tools[WebSearchTool.name] = WebSearchTool()
 
         logger.info(
             f"[agent] 초기화 완료 — 캐릭터: {self.character['name']} "
@@ -205,10 +210,16 @@ class Agent:
         return agent
 
     def chat(self, user_input: str, stream: bool = True) -> str:
-        """대화 모드 진입점. user_input을 받아 캐릭터 응답을 반환한다."""
+        """대화 모드 진입점. user_input을 받아 캐릭터 응답을 반환한다.
+
+        최근 기능 작업(_recent_ops)이 있으면 라우터에 전달해
+        캐릭터가 방금 수행한 작업을 인지하고 대화할 수 있게 한다.
+        """
         if self._stub:
             return f"[stub] 입력 받음: {user_input}"
-        return self.router.handle_turn(user_input, stream=stream)
+        return self.router.handle_turn(
+            user_input, stream=stream, recent_ops=self._recent_ops or None
+        )
 
     def handle_input(
         self,
@@ -311,4 +322,36 @@ class Agent:
         if selected_path and tool.name in _PATH_PARAM:
             params[_PATH_PARAM[tool.name]] = selected_path
 
-        return tool.execute(params)
+        result = tool.execute(params)
+
+        # 최근 기능 작업 기록 — 대화 모드 컨텍스트 주입용
+        summary = self._summarize_op(tool.name, params, result)
+        self._recent_ops.append(summary)
+        if len(self._recent_ops) > 5:
+            self._recent_ops.pop(0)
+
+        return result
+
+    _OP_LABELS: dict[str, str] = {
+        "folder_classify": "폴더 분류",
+        "file_rename":     "파일 이름 변경",
+        "file_convert":    "파일 변환",
+        "image_convert":   "이미지 변환",
+        "local_search":    "파일 검색",
+        "web_search":      "웹 검색",
+        "prompt_convert":  "프롬프트 변환",
+    }
+
+    def _summarize_op(self, tool_name: str, params: dict, result: str) -> str:
+        """기능 실행 결과를 한 줄 요약으로 변환한다."""
+        label = self._OP_LABELS.get(tool_name, tool_name)
+        # 결과 첫 줄(혹은 최대 60자)을 요약으로 사용
+        first_line = result.split("\n")[0].split("<br>")[0].strip()
+        short = first_line[:60] + ("..." if len(first_line) > 60 else "")
+        # 경로/쿼리 힌트 추출
+        hint = ""
+        if "target" in params:
+            hint = f" (대상: {params['target']})"
+        elif "query" in params:
+            hint = f" (검색어: {params['query']})"
+        return f"[{label}]{hint} → {short}"

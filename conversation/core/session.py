@@ -21,6 +21,8 @@ class ConversationSession:
 
     mood: str = "neutral"   # neutral / happy / affectionate / touched / curious / sad / embarrassed / annoyed / angry
     affection: int = 30     # 0~100
+    affection_locked: bool = False           # True이면 update_affection() 무시
+    affection_lock_value: int | None = None  # 잠금 시 고정할 수치 (None이면 현재값 유지)
 
     turn_count: int = 0
     dialogue_log: list[dict] = field(default_factory=list)
