@@ -116,52 +116,64 @@ def _read_hwp(path: Path) -> str | None:
 
 
 def _index_directory(conn: sqlite3.Connection, root: Path, allowed_exts: set[str], rebuild: bool) -> int:
-    """root 아래 텍스트 파일을 FTS5 테이블에 인덱싱한다. 갱신된 파일 수를 반환."""
+    """root 아래 텍스트 파일을 FTS5 테이블에 인덱싱한다. 갱신된 파일 수를 반환.
+
+    os.walk + onerror 를 사용해 접근 불가 하위 디렉토리가 있어도
+    나머지 파일 인덱싱을 계속 진행한다.
+    """
+    import os as _os
+
     if rebuild:
         conn.execute("DELETE FROM file_meta")
         conn.execute("DELETE FROM file_fts")
         conn.commit()
 
     updated = 0
-    for f in root.rglob("*"):
-        if not f.is_file():
-            continue
-        if f.suffix.lower() not in allowed_exts:
-            continue
-        if f.stat().st_size > MAX_FILE_BYTES:
-            continue
-
-        path_str = str(f)
-        mtime = f.stat().st_mtime
-
-        row = conn.execute(
-            "SELECT mtime FROM file_meta WHERE path = ?", (path_str,)
-        ).fetchone()
-
-        if row and abs(row[0] - mtime) < 0.01:
-            continue  # 변경 없음
-
-        # 파일 읽기 (hwp/hwpx는 전용 추출, 나머지는 텍스트로)
-        if f.suffix.lower() in HWP_EXTS:
-            text = _read_hwp(f)
-            if text is None:
-                continue
-        else:
-            if not _is_text(f):
+    for dirpath, _dirnames, filenames in _os.walk(root, onerror=lambda _: None):
+        for fname in filenames:
+            f = Path(dirpath) / fname
+            if f.suffix.lower() not in allowed_exts:
                 continue
             try:
-                text = f.read_text(encoding="utf-8", errors="ignore")
+                if f.stat().st_size > MAX_FILE_BYTES:
+                    continue
             except OSError:
                 continue
 
-        if row:
-            conn.execute("DELETE FROM file_fts WHERE path = ?", (path_str,))
-            conn.execute("UPDATE file_meta SET mtime = ? WHERE path = ?", (mtime, path_str))
-        else:
-            conn.execute("INSERT INTO file_meta VALUES (?, ?)", (path_str, mtime))
+            path_str = str(f)
+            try:
+                mtime = f.stat().st_mtime
+            except OSError:
+                continue
 
-        conn.execute("INSERT INTO file_fts (path, content) VALUES (?, ?)", (path_str, text))
-        updated += 1
+            row = conn.execute(
+                "SELECT mtime FROM file_meta WHERE path = ?", (path_str,)
+            ).fetchone()
+
+            if row and abs(row[0] - mtime) < 0.01:
+                continue  # 변경 없음
+
+            # 파일 읽기 (hwp/hwpx는 전용 추출, 나머지는 텍스트로)
+            if f.suffix.lower() in HWP_EXTS:
+                text = _read_hwp(f)
+                if text is None:
+                    continue
+            else:
+                if not _is_text(f):
+                    continue
+                try:
+                    text = f.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+
+            if row:
+                conn.execute("DELETE FROM file_fts WHERE path = ?", (path_str,))
+                conn.execute("UPDATE file_meta SET mtime = ? WHERE path = ?", (mtime, path_str))
+            else:
+                conn.execute("INSERT INTO file_meta VALUES (?, ?)", (path_str, mtime))
+
+            conn.execute("INSERT INTO file_fts (path, content) VALUES (?, ?)", (path_str, text))
+            updated += 1
 
     conn.commit()
     logger.debug(f"[local_search] 인덱싱 완료 — {updated}개 파일 갱신 ({root})")
@@ -170,20 +182,89 @@ def _index_directory(conn: sqlite3.Connection, root: Path, allowed_exts: set[str
 
 # ── 검색 ─────────────────────────────────────────────────────────────
 
-def _search(conn: sqlite3.Connection, query: str, limit: int = MAX_RESULTS) -> list[tuple[str, str]]:
-    """FTS5 MATCH 쿼리. [(path, snippet), ...] 반환."""
-    rows = conn.execute(
-        """
-        SELECT path,
-               snippet(file_fts, 1, '[', ']', '...', 20)
-        FROM file_fts
-        WHERE file_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-        """,
-        (query, limit),
-    ).fetchall()
-    return rows
+def _sanitize_fts_query(raw: str) -> str:
+    """FTS5 특수 연산자를 제거하고 단어 토큰만 반환한다.
+
+    FTS5는 -, *, :, (, ) 등을 연산자로 해석한다.
+    re.findall(r'\\w+')로 단어 토큰만 추출하면 특수 문자 영향이 없다.
+    """
+    import re
+    terms = re.findall(r"\w+", raw, re.UNICODE)
+    if not terms:
+        return '""'
+    return " ".join(terms)
+
+
+def _search_filenames(root: Path, query: str, limit: int) -> list[tuple[str, str]]:
+    """파일 시스템을 직접 탐색해 파일명·경로에 query가 포함된 파일을 반환한다.
+
+    FTS5가 커버하지 못하는 케이스(한국어 파일명, 바이너리 파일, 확장자 검색)를
+    대부분 해결한다. root 범위가 사용자가 선택한 폴더로 제한되므로 탐색 비용이
+    현실적이다.
+
+    os.walk + onerror 를 사용해 접근 불가 하위 디렉토리가 있어도
+    탐색이 중단되지 않고 나머지 경로를 계속 탐색한다.
+    """
+    import os as _os
+
+    q = query.lower()
+    results: list[tuple[str, str]] = []
+
+    for dirpath, _dirnames, filenames in _os.walk(root, onerror=lambda _: None):
+        for fname in filenames:
+            if q in fname.lower():
+                fpath = str(Path(dirpath) / fname)
+                results.append((fpath, f"[파일명] {fname}"))
+                if len(results) >= limit:
+                    return results
+
+    return results
+
+
+def _search(
+    conn: sqlite3.Connection,
+    query: str,
+    root: Path | None = None,
+    limit: int = MAX_RESULTS,
+) -> list[tuple[str, str]]:
+    """파일명 직접 탐색 + FTS5 내용 검색을 합산해 반환한다.
+
+    1순위 — 파일명에 query가 포함된 파일 (한국어·확장자·바이너리 모두 커버)
+    2순위 — FTS5로 파일 내용에서 query가 매칭된 텍스트 파일
+    중복 경로는 파일명 매칭이 우선되고 내용 매칭은 추가되지 않는다.
+    """
+    seen: set[str] = set()
+    results: list[tuple[str, str]] = []
+
+    # 1. 파일명 검색 (파일 시스템 직접 탐색)
+    if root is not None:
+        for path_str, snippet in _search_filenames(root, query, limit):
+            seen.add(path_str)
+            results.append((path_str, snippet))
+
+    # 2. FTS5 내용 검색 (텍스트 파일)
+    fts_query = _sanitize_fts_query(query)
+    if fts_query and fts_query != '""':
+        try:
+            rows = conn.execute(
+                """
+                SELECT path,
+                       snippet(file_fts, 1, '[', ']', '...', 20)
+                FROM file_fts
+                WHERE file_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            ).fetchall()
+            for path_str, snippet in rows:
+                if path_str not in seen:
+                    seen.add(path_str)
+                    results.append((path_str, snippet))
+        except sqlite3.OperationalError:
+            pass
+
+    return results[:limit]
 
 
 # ── Tool ─────────────────────────────────────────────────────────────
@@ -225,7 +306,7 @@ class LocalSearchTool(BaseTool):
         conn = _get_conn()
         try:
             updated = _index_directory(conn, root, allowed_exts, rebuild)
-            results = _search(conn, query)
+            results = _search(conn, query, root=root)
         except sqlite3.OperationalError as e:
             conn.close()
             return f"오류: 검색 중 DB 오류 — {e}"

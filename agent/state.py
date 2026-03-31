@@ -44,7 +44,15 @@ def update_affection(session: ConversationSession, mood: str, character: dict | 
 
     캐릭터 YAML의 state.affection_delta가 있으면 우선 적용, 없으면 기본값 사용.
     affection은 0~100 범위로 클램핑된다.
+    session.affection_locked=True이면 lock_value로 고정하고 즉시 반환한다.
     """
+    if session.affection_locked:
+        lock_val = session.affection_lock_value
+        if lock_val is not None:
+            session.affection = max(0, min(100, lock_val))
+        logger.debug(f"[state] affection 잠금 중 — 값 고정: {session.affection}")
+        return session.affection
+
     char_delta: dict = {}
     if character:
         char_delta = character.get("state", {}).get("affection_delta", {})

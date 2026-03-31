@@ -29,6 +29,20 @@ Window {
     property string customPartsJson:       "{}"
     property string allPartsListJson:      "{}"
 
+    // 파일 변환 패널
+    property bool   fileOptionsOpen:       false
+    property string fileOptionsPaths:      "[]"
+
+    // 폴더 분류 패널
+    property bool   classifyPanelOpen:     false
+    property string classifyPath:          ""
+
+    // 파일 검색 결과 패널
+    property bool   fileSearchOpen:        false
+    property string fileSearchResults:     "[]"
+    property string fileSearchQuery:       ""
+    property string searchDirectory:       ""   // local_search 태그 선택 시 미리 저장
+
     // ── 테마 ──────────────────────────────────────────────────────────────────
     property string currentTheme: "ocean"
 
@@ -601,12 +615,12 @@ Window {
 
                         Repeater {
                             model: [
-                                { key: "image_convert",   label: "#이미지 변환",    color: "#4E7FB5" },
+                                { key: "file_convert",    label: "#파일 변환",      color: "#4E7FB5" },
                                 { key: "prompt_convert",  label: "#프롬프트 변환",  color: "#7A6BAA" },
-                                { key: "file_rename",     label: "#파일 이름 변경", color: "#AA7840" },
                                 { key: "folder_classify", label: "#폴더 분류",      color: "#3D8A72" },
                                 { key: "local_search",    label: "#파일 검색",      color: "#6A8A3D" },
                                 { key: "web_search",      label: "#웹 검색",        color: "#8A4A7A" },
+                                { key: "help",            label: "#?",              color: "#7A7A7A" },
                             ]
 
                             Rectangle {
@@ -643,10 +657,60 @@ Window {
                                             root.currentTag    = ""
                                             root.currentMode   = "chat"
                                             root.inputTagColor = root._th.accent
+                                            root.searchDirectory = ""
                                         } else {
+                                            // #? 도움말 태그: 즉시 도움말 표시 후 해제
+                                            if (modelData.key === "help") {
+                                                var helpKeys = ["file_convert","folder_classify","local_search","web_search","prompt_convert"]
+                                                var helpLines = []
+                                                for (var hi = 0; hi < helpKeys.length; hi++) {
+                                                    var ht = bridge.getHelpText(helpKeys[hi])
+                                                    if (ht) helpLines.push(ht)
+                                                }
+                                                messageModel.append({ "role": "system", "content": helpLines.join("\n") })
+                                                Qt.callLater(() => { chatList.positionViewAtEnd() })
+                                                return
+                                            }
+
                                             root.currentTag    = modelData.key
                                             root.currentMode   = "function"
                                             root.inputTagColor = modelData.color
+                                            root.searchDirectory = ""
+
+                                            // 파일/폴더가 필요한 태그는 즉시 다이얼로그 열기
+                                            if (modelData.key === "file_convert") {
+                                                var pathsJson = bridge.browseFilesForOptions()
+                                                var paths = []
+                                                try { paths = JSON.parse(pathsJson) } catch(e) {}
+                                                if (paths.length > 0) {
+                                                    root.fileOptionsPaths = pathsJson
+                                                    root.fileOptionsOpen  = true
+                                                } else {
+                                                    // 취소 시 태그 해제
+                                                    root.currentTag    = ""
+                                                    root.currentMode   = "chat"
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            } else if (modelData.key === "folder_classify") {
+                                                var fp = bridge.browseFolderForClassify()
+                                                if (fp) {
+                                                    root.classifyPath      = fp
+                                                    root.classifyPanelOpen = true
+                                                } else {
+                                                    root.currentTag    = ""
+                                                    root.currentMode   = "chat"
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            } else if (modelData.key === "local_search") {
+                                                var sd = bridge.browseSearchDirectory()
+                                                if (sd) {
+                                                    root.searchDirectory = sd
+                                                } else {
+                                                    root.currentTag    = ""
+                                                    root.currentMode   = "chat"
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -746,12 +810,12 @@ Window {
 
     // ── 태그별 placeholder 힌트 ─────────────────────────────────────────────
     readonly property var _tagHints: ({
-        "image_convert":   "변환할 파일 설명 또는 추가 지시를 입력하세요...",
+        "file_convert":    "변환하거나 이름을 바꿀 파일을 선택하세요...",
         "prompt_convert":  "변환할 프롬프트를 입력하세요...",
-        "file_rename":     "파일 이름 변경 규칙을 입력하세요...",
         "folder_classify": "분류 기준을 입력하세요...",
         "local_search":    "검색어를 입력하세요...",
         "web_search":      "검색할 내용을 입력하세요...",
+        "help":            "궁금하신 기능의 이름을 입력하세요...",
     })
 
     // ── 메시지 전송 ─────────────────────────────────────────────────────────
@@ -764,7 +828,81 @@ Window {
             Qt.callLater(() => { chatList.positionViewAtEnd() })
             return
         }
+
+        // file_convert / folder_classify: 태그 클릭 시 이미 다이얼로그가 열리므로 여기서는 처리하지 않음
+        if (root.currentMode === "function" &&
+            (root.currentTag === "file_convert" || root.currentTag === "folder_classify")) {
+            return
+        }
+
+        // 파일 검색 도구: 태그 선택 시 저장된 searchDirectory 재사용 (없으면 다시 요청)
+        if (root.currentMode === "function" && root.currentTag === "local_search") {
+            var searchDir = root.searchDirectory
+            if (!searchDir) {
+                searchDir = bridge.browseSearchDirectory()
+                if (!searchDir) return
+                root.searchDirectory = searchDir
+            }
+            var searchQuery = text
+            root.fileSearchQuery   = searchQuery
+            root.fileSearchResults = bridge.searchFiles(searchQuery, searchDir, "")
+            root.fileSearchOpen    = true
+            inputField.text = ""
+            return
+        }
+
         inputField.text = ""
         bridge.sendMessage(text, root.currentMode, root.currentTag)
+    }
+
+    // ── 파일 옵션 패널 오버레이 ─────────────────────────────────────────────
+    FileOptionsPanel {
+        id: fileOptionsPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.fileOptionsOpen
+        fontFamily: koreanFont.font.family
+        pathsJson:  root.fileOptionsPaths
+
+        onCloseRequested: {
+            root.fileOptionsOpen = false
+        }
+        onResultReady: function(message) {
+            messageModel.append({ "role": "assistant", "content": message })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+    }
+
+    // ── 폴더 분류 패널 오버레이 ──────────────────────────────────────────────
+    FolderClassifyPanel {
+        id: classifyPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.classifyPanelOpen
+        fontFamily: koreanFont.font.family
+        folderPath: root.classifyPath
+
+        onCloseRequested: {
+            root.classifyPanelOpen = false
+        }
+        onResultReady: function(message) {
+            messageModel.append({ "role": "assistant", "content": message })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+    }
+
+    // ── 파일 검색 결과 패널 오버레이 ─────────────────────────────────────────
+    FileSearchPanel {
+        id: fileSearchPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.fileSearchOpen
+        fontFamily: koreanFont.font.family
+        resultsJson: root.fileSearchResults
+        query:       root.fileSearchQuery
+
+        onCloseRequested: {
+            root.fileSearchOpen = false
+        }
     }
 }

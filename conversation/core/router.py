@@ -45,10 +45,23 @@ class ConversationRouter:
             character, world, session, count_tokens_fn=llm.count_tokens
         )
         self.rag     = WorldRetriever(config)
-        self._trigger_n: int = config.get("memory_trigger_n", 10)
+        self._trigger_n: int    = config.get("memory_trigger_n", 10)
+        self._aff_gate: float   = config.get("aff_gate_threshold", 0.6)
 
-    def handle_turn(self, user_input: str, stream: bool = True) -> str:
-        """user_input을 받아 캐릭터 응답 문자열을 반환한다."""
+    def handle_turn(
+        self,
+        user_input: str,
+        stream: bool = True,
+        recent_ops: list[str] | None = None,
+    ) -> str:
+        """user_input을 받아 캐릭터 응답 문자열을 반환한다.
+
+        Parameters
+        ----------
+        recent_ops:
+            최근 기능 모드에서 수행한 작업 요약 목록.
+            제공되면 시스템 프롬프트에 주입되어 캐릭터가 수행 내용을 인지한다.
+        """
         # 0. 장소 이동 감지 → session.location_context / act_id 업데이트
         self._handle_location(user_input)
 
@@ -66,6 +79,7 @@ class ConversationRouter:
             short_buf=short_buf,
             vdb_results=vdb_results,
             rag_results=rag_results,
+            recent_ops=recent_ops,
         )
         messages.append({"role": "user", "content": user_input})
 
@@ -74,7 +88,14 @@ class ConversationRouter:
 
         # 6. mood / affection 업데이트 (사용자 입력 기준)
         new_mood = state_mod.update_mood(self.session, user_input, self.character)
-        state_mod.update_affection(self.session, new_mood, self.character)
+        # semantic 중요도 게이팅: 잡담(0.5) 발화는 affection 변화 억제
+        importance = summarizer.score_importance(user_input)
+        if importance >= self._aff_gate:
+            state_mod.update_affection(self.session, new_mood, self.character)
+        else:
+            logger.debug(
+                f"[router] aff 게이팅 — importance={importance:.2f} < {self._aff_gate} → 변화 억제"
+            )
 
         # 7. 세션 기록
         self.session.add_turn(user_input, response)

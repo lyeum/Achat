@@ -76,8 +76,9 @@ class PromptBuilder:
         short_buf: list[dict],
         vdb_results: list[str],
         rag_results: list[str] | None = None,
+        recent_ops: list[str] | None = None,
     ) -> list[dict]:
-        """Layer A~D를 조립해 messages 리스트를 반환한다.
+        """Layer A~D(+F)를 조립해 messages 리스트를 반환한다.
 
         Layer E(현재 사용자 입력)는 호출 측에서 마지막에 append한다.
 
@@ -85,11 +86,14 @@ class PromptBuilder:
         ----------
         vdb_results : 장기 메모리 VDB 검색 결과 (Layer C — 우선순위 높음)
         rag_results : 세계관 RAG 검색 결과 (Layer B에 병합 — 우선순위 낮음)
+        recent_ops  : 최근 기능 작업 요약 목록 (Layer F — 비서 컨텍스트)
         """
         layer_b = self._layer_b(rag_results or [])
         system_parts = [self._layer_a(), layer_b]
         if vdb_results:
             system_parts.append(self._layer_c(vdb_results))
+        if recent_ops:
+            system_parts.append(self._layer_f(recent_ops))
 
         messages: list[dict] = [
             {"role": "system", "content": "\n\n".join(system_parts)}
@@ -192,6 +196,21 @@ class PromptBuilder:
                 return sliced
         # 최소 1턴(user+assistant 쌍) 보장
         return short_buf[-2:]
+
+    def _layer_f(self, recent_ops: list[str]) -> str:
+        """Layer F — 최근 기능 작업 컨텍스트 (비서 역할 지원).
+
+        기능 모드에서 수행한 작업 목록을 시스템 프롬프트에 주입해
+        캐릭터가 방금 한 작업을 인지하고 대화할 수 있게 한다.
+        최대 5개의 최신 항목만 포함한다.
+        """
+        ops_text = "\n".join(f"- {op}" for op in recent_ops[-5:])
+        return (
+            "[방금 수행한 작업]\n"
+            f"{ops_text}\n"
+            "위 작업에 대해 사용자가 질문하거나 대화를 시도할 수 있다. "
+            "작업 내용을 인지한 상태로 자연스럽게 대응한다."
+        )
 
     # ── 헬퍼 ─────────────────────────────────────────────────────────────────
 

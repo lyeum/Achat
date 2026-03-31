@@ -273,6 +273,31 @@ from ddgs.exceptions import DDGSException
 
 ---
 
+## BUG-19 · `agent/core.py` — regex fallback 두 가지 문제 ✅
+
+**파일**: `agent/core.py` (`_PROMPT_CONVERT_MODEL_RE`, `_is_content_valid`)
+**발견**: 2026-03-29
+
+### 문제 A — `_PROMPT_CONVERT_MODEL_RE`의 `\w`가 한국어 포함
+
+**증상**: `[\s\w\.]*` 패턴이 Python에서 Unicode 전체를 매칭해 모델명 뒤의 한국어 문장까지 캡처함.
+```
+입력: "stable diffusion 귀여운 고양이 그려줘"
+잘못된 매칭: "stable diffusion 귀여운 고양이 그려줘" (모델명이 문장 전체를 흡수)
+```
+
+**수정**: `(?:\s+[a-zA-Z0-9._-]+){0,2}` — ASCII 문자/숫자/점/하이픈만 매칭하도록 제한.
+
+### 문제 B — `_is_content_valid` 절대 임계값으로 한국어 혼입 미감지
+
+**증상**: `_korean_ratio(content) < 0.1` 절대 임계값이 너무 낮아 "고양이 그리기 request for Stable Diffusion model"(~16% 한국어) 같은 content를 유효로 판정.
+
+**수정**: 상대 임계값 `_korean_ratio(content) < src_ko * 0.5`로 변경. 입력 대비 content 한국어 비율이 절반 이하면 유효하지 않은 것으로 판정.
+
+테스트: `tests/test_function_tools.py::TestPromptConvertFallbackUtils` 내 BUG-19 관련 케이스
+
+---
+
 ## 우선순위 요약
 
 | 버그 | 심각도 | 영향 | 상태 |
@@ -282,6 +307,7 @@ from ddgs.exceptions import DDGSException
 | BUG-F03 parse_params() 유효성 검사 없음 | 🟡 낮음 | 비정상 content 통과 | ✅ 수정 완료 (content 비면 user_input 폴백으로 단순화, 2026-03-28) |
 | BUG-F04 크롤링 직렬 실행 지연 | 🟠 중간 | 응답 최대 30초 대기 | ✅ 수정 완료 (ThreadPoolExecutor 병렬 크롤링 → 최대 10초, 2026-03-28) |
 | BUG-F05 HTML 불완전 정제 | 🟡 낮음 | LLM context 오염 → 변환 품질 저하 | ✅ 수정 완료 (SVG/noscript/iframe/base64/JSON-LD 제거, 2026-03-28) |
+| BUG-19 regex \w 한국어 포함 + 절대 임계값 | 🟡 낮음 | 모델명 오추출 / 한국어 혼입 미감지 | ✅ 수정 완료 (ASCII-only regex + 상대 임계값, 2026-03-29) |
 
 ---
 
