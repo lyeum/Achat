@@ -3,26 +3,29 @@ import QtQuick 2.15
 Item {
     id: root
 
-    property string role: "user"      // "user" | "assistant" | "system"
+    property string role: "user"      // "user" | "assistant" | "system" | "narrator"
     property string content: ""
     property string fontFamily: ""
     property color  userBubbleColor:   "#4A90D9"
     property color  assistBubbleColor: "#3C3C3C"
 
-    // 말풍선 너비: 부모의 75% 이하
+    // 말풍선 너비: 부모의 75% 이하 (narrator는 90% 가운데 정렬)
     width: parent.width
     height: bubble.height + 8
 
     Rectangle {
         id: bubble
 
-        width:  Math.min(bubbleText.implicitWidth + 24, parent.width * 0.75)
+        width: role === "narrator"
+            ? Math.min(bubbleText.implicitWidth + 32, parent.width * 0.9)
+            : Math.min(bubbleText.implicitWidth + 24, parent.width * 0.75)
         height: bubbleText.implicitHeight + 16
-        radius: 12
+        radius: role === "narrator" ? 6 : 12
 
-        // user: 오른쪽 정렬, assistant: 왼쪽 정렬
-        anchors.right: role === "user"      ? parent.right : undefined
-        anchors.left:  role !== "user"      ? parent.left  : undefined
+        // user: 오른쪽 정렬, narrator: 가운데, assistant: 왼쪽 정렬
+        anchors.right:             role === "user"     ? parent.right     : undefined
+        anchors.left:              role === "assistant" || role === "system" ? parent.left : undefined
+        anchors.horizontalCenter:  role === "narrator" ? parent.horizontalCenter : undefined
         anchors.rightMargin: 4
         anchors.leftMargin:  4
         anchors.verticalCenter: parent.verticalCenter
@@ -30,8 +33,11 @@ Item {
         color: {
             if (role === "user")      return root.userBubbleColor
             if (role === "assistant") return root.assistBubbleColor
+            if (role === "narrator")  return "#1E2A30"   // 어두운 청회색 — 나레이션 배경
             return "#5A3A3A"  // system / error
         }
+        border.color: role === "narrator" ? "#4A6A7A" : "transparent"
+        border.width: role === "narrator" ? 1 : 0
 
         Text {
             id: bubbleText
@@ -41,9 +47,11 @@ Item {
                 verticalCenter: parent.verticalCenter
             }
             text: root.content
-            color: "#E0E0E0"
-            font.pixelSize: 13
+            color: role === "narrator" ? "#8AAABB" : "#E0E0E0"
+            font.pixelSize: role === "narrator" ? 12 : 13
             font.family: root.fontFamily
+            font.italic: role === "narrator"
+            horizontalAlignment: role === "narrator" ? Text.AlignHCenter : Text.AlignLeft
             wrapMode: Text.WordWrap
             // HTML 링크(<a href>)가 포함된 메시지를 클릭 가능하게 렌더링한다.
             // AutoText: HTML 태그가 있으면 RichText로, 없으면 PlainText로 자동 전환.
