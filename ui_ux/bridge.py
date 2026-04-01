@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import subprocess as _subprocess
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
 from PySide6.QtWidgets import QApplication
+
+_ACTION_RE = re.compile(r"^\*(.+)\*$")
 
 
 # ── 플랫폼 감지 헬퍼 ──────────────────────────────────────────────────────────
@@ -85,6 +88,21 @@ class ChatBridge(QObject):
         # 초기 배경/mood 상태
         self._current_bg: str = self._build_bg_url()
         self._current_mood: str = self._read_mood()
+
+        # NarrationMonitor 초기화 (stub 모드나 narrator 없으면 None)
+        self._narration_monitor = None
+        narrator = getattr(agent, "narrator", None)
+        if narrator is not None and not getattr(agent, "_stub", True):
+            from conversation.narration_monitor import NarrationMonitor
+            self._narration_monitor = NarrationMonitor(
+                narrator, agent.character
+            )
+
+        # 세션 스냅샷 — LLM 응답 전 상태 보존 (NarrationMonitor에 전달)
+        self._snap_mood: str       = "neutral"
+        self._snap_affection: int  = 30
+        self._snap_act_id: str | None = None
+        self._snap_user_input: str = ""
 
     # ── Property ──────────────────────────────────────────────────────────────
 
@@ -288,6 +306,20 @@ class ChatBridge(QObject):
         """
         if not text.strip() or self._worker is not None:
             return
+
+        # ── 세션 스냅샷 캡처 (LLM 응답 전 상태 저장) ─────────────────────
+        session = getattr(self._agent, "session", None)
+        if session is not None:
+            self._snap_mood       = session.mood
+            self._snap_affection  = session.affection
+            self._snap_act_id     = session.act_id
+        self._snap_user_input = text.strip()
+
+        # ── 행동 묘사 패턴 감지 (*...*) → dialogue_log용 변환 ────────────
+        action_match = _ACTION_RE.match(text.strip())
+        if action_match:
+            action_text = action_match.group(1)
+            text = f"(행동: {action_text})"
 
         # 경로가 필요한 도구는 OS 파일 탐색기로 먼저 디렉토리를 선택
         selected_path = ""
@@ -1211,6 +1243,23 @@ class ChatBridge(QObject):
         self._sync_state()
         self._sync_session_state()  # 턴 종료 시 세션 상태 디스크 동기화
 
+        # ── NarrationWorker 비동기 실행 ───────────────────────────────────
+        if self._narration_monitor is not None:
+            session = getattr(self._agent, "session", None)
+            if session is not None:
+                worker = _NarrationWorker(
+                    monitor      = self._narration_monitor,
+                    session      = session,
+                    prev_mood    = self._snap_mood,
+                    prev_affection = self._snap_affection,
+                    prev_act_id  = self._snap_act_id,
+                    user_input   = self._snap_user_input,
+                )
+                worker.signals.ready.connect(
+                    lambda txt: self.messageAdded.emit("narrator", txt)
+                )
+                QThreadPool.globalInstance().start(worker)
+
         # 학습 데이터 로깅 (enable_play_log=True 환경)
         if self._conv_logger is not None:
             session = getattr(self._agent, "session", None)
@@ -1231,3 +1280,46 @@ class ChatBridge(QObject):
     def _on_done(self) -> None:
         self._worker = None
         self.statusChanged.emit("ready")
+
+
+# ── NarrationWorker ───────────────────────────────────────────────────────────
+
+class _NarrationSignals(QObject):
+    ready = Signal(str)
+
+
+class _NarrationWorker(QRunnable):
+    """나레이션 생성을 백그라운드 스레드에서 실행한다."""
+
+    def __init__(
+        self,
+        monitor,
+        session,
+        prev_mood: str,
+        prev_affection: int,
+        prev_act_id,
+        user_input: str,
+    ):
+        super().__init__()
+        self.signals        = _NarrationSignals()
+        self._monitor       = monitor
+        self._session       = session
+        self._prev_mood     = prev_mood
+        self._prev_affection = prev_affection
+        self._prev_act_id   = prev_act_id
+        self._user_input    = user_input
+
+    def run(self) -> None:
+        try:
+            text = self._monitor.observe(
+                session        = self._session,
+                prev_mood      = self._prev_mood,
+                prev_affection = self._prev_affection,
+                prev_act_id    = self._prev_act_id,
+                user_input     = self._user_input,
+            )
+            if text:
+                self.signals.ready.emit(text)
+        except Exception as e:  # noqa: BLE001
+            from loguru import logger
+            logger.warning(f"[NarrationWorker] 오류: {e}")

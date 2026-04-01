@@ -119,7 +119,7 @@ class ConversationRouter:
         """이동 의도 감지 → YAML act 매칭 or 동적 장소 생성.
 
         session.act_id / session.location_context를 업데이트한다.
-        나레이터는 비활성화 상태 — 대화 안정화 후 conversation/narrator.py 재연결.
+        장소 도착 나레이션은 bridge.py의 NarrationMonitor(LOCATION_CHANGE 트리거)가 담당한다.
         """
         from rag.world_nav import detect_move_intent, find_or_create_location
 
