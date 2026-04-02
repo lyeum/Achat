@@ -77,16 +77,22 @@ class TestCharacterYamlRules:
             return yaml.safe_load(f)
 
     def test_speech_style_has_korean_only_rule(self, char_data):
-        """speech_style에 '한국어가 아닌 다른 언어' 관련 문장이 포함되어야 한다."""
-        speech = char_data.get("speech_style", "")
-        assert "한국어" in speech and "다른 언어" in speech, \
-            f"speech_style에 언어 규칙 없음: {speech[:80]}"
+        """rules에 '한국어가 아닌 다른 언어' 관련 문장이 포함되어야 한다.
+        (스키마 변경: 언어 규칙은 speech → rules로 이동)
+        """
+        rules = char_data.get("rules", [])
+        rules_text = " ".join(str(r) for r in rules)
+        assert "한국어" in rules_text and "다른 언어" in rules_text, \
+            f"rules에 언어 규칙 없음: {rules_text[:120]}"
 
     def test_speech_style_no_emotional_questions_to_strangers(self, char_data):
-        """speech_style에 처음 만난 상대 감정 질문 금지 지시가 있어야 한다."""
-        speech = char_data.get("speech_style", "")
-        assert "처음 만난" in speech, \
-            f"speech_style에 stranger 감정 질문 금지 없음: {speech[:80]}"
+        """rules에 처음 만난 상대 감정 질문 금지 지시가 있어야 한다.
+        (스키마 변경: stranger 제약은 speech → rules로 이동)
+        """
+        rules = char_data.get("rules", [])
+        rules_text = " ".join(str(r) for r in rules)
+        assert "처음 만난" in rules_text, \
+            f"rules에 stranger 감정 질문 금지 없음: {rules_text[:120]}"
 
     def test_rules_contain_no_other_languages(self, char_data):
         """rules 목록에 다른 언어 금지 규칙이 있어야 한다."""

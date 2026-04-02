@@ -1,0 +1,102 @@
+# ============================================================
+# 캐릭터 정의 스키마 (Character Schema)
+# ============================================================
+# 모든 CH_*.yaml 파일이 따르는 계약(contract).
+# 각 슬롯은 training/data 카테고리와 1:1 대응한다.
+#
+# 슬롯 값 형식:
+#   - preset 키워드 (아래 PRESET 테이블 참고)
+#   - 또는 직접 기술 텍스트 (자유 형식)
+# ============================================================
+
+# ── 기본 정보 ──────────────────────────────────────────────
+name: ""           # (필수) 캐릭터 이름 — 시스템 프롬프트 첫 줄에 삽입
+description: ""    # 캐릭터 외형/성격 개요 — 자유 기술, 추론 시 name 다음에 삽입
+
+# ── 말투 (speech_style/* 카테고리 대응) ───────────────────
+speech:
+  formality: ""    # 반말 | 존댓말
+  style: ""        # PRESET: blunt | soft  /  또는 직접 기술
+  persona: ""      # PRESET: cool_observant | gentle_quiet | quiet_sensitive | warm_dry
+                   #          또는 직접 기술
+
+# ── 성격 유형 (personality/* 카테고리 대응) ───────────────
+personality: ""    # PRESET: calm | cynical | tsundere  /  또는 직접 기술
+
+# ── 친밀도 tier별 행동 (affection/* 카테고리 대응) ─────────
+# 각 tier에서 캐릭터가 어떤 방식으로 대화하는지 기술
+affection:
+  stranger: ""
+  acquaintance: ""
+  familiar: ""
+  friendly: ""
+  close: ""
+  intimate: ""
+
+# ── 감정 상태별 행동 (emotion/* 카테고리 대응) ─────────────
+# 해당 감정 상태일 때 나타나는 행동·말투 변화를 기술
+# neutral은 기본 상태이므로 보통 생략
+emotion:
+  neutral: ""
+  happy: ""
+  sad: ""
+  angry: ""
+  annoyed: ""
+  curious: ""
+  embarrassed: ""
+  touched: ""
+  affectionate: ""
+
+# ── 규칙 ────────────────────────────────────────────────────
+# 항상 지켜야 할 행동 제약. 시스템 프롬프트 말미에 삽입.
+rules: []
+
+# ── 상태 초기값 및 전환 임계값 ─────────────────────────────
+state:
+  mood_default: neutral
+  affection_default: 30
+
+  affection_thresholds:       # affection 수치 → tier 매핑
+    stranger:     [0,  15]
+    acquaintance: [16, 30]
+    familiar:     [31, 50]
+    friendly:     [51, 70]
+    close:        [71, 85]
+    intimate:     [86, 100]
+
+  mood_triggers: {}           # 키워드 → mood 매핑 (캐릭터별 커스터마이즈)
+  affection_delta: {}         # mood → affection 증감
+
+# ── 대화 수위 파라미터 ─────────────────────────────────────
+# prompt_build.py _conv_hints()에서 자연어 지시문으로 변환 후 시스템 프롬프트에 삽입
+conversation:
+  response_length: {}         # tier별 0.0(짧음) ~ 1.0(길게)
+  openness: {}                # tier별 0.0(감정 숨김) ~ 1.0(솔직)
+  directness: 0.5             # 고정값 0.0(돌려 말함) ~ 1.0(직접적)
+
+# ── 기억 표현 방식 ──────────────────────────────────────────
+# VDB 검색 결과 재서술 시 참고 (prompt_build.py Layer C)
+memory_voice: ""
+
+
+# ============================================================
+# PRESET 해석 테이블
+# ============================================================
+# prompt_build.py의 _SPEECH_STYLE_PRESETS, _PERSONA_PRESETS,
+# _PERSONALITY_PRESETS 상수와 동기화 유지.
+#
+# speech.style:
+#   blunt          → "말이 짧고 직접적이다. 불필요한 설명이나 완충 표현을 하지 않는다."
+#   soft           → "말투가 부드럽고 배려가 있다. 상대의 반응을 살피며 말한다."
+#
+# speech.persona:
+#   cool_observant → "감정을 억제하고 상황을 관찰하는 말투. 반응이 냉정하고 분석적이다."
+#   gentle_quiet   → "조용하고 온화한 말투. 상대를 배려하며 천천히 말한다."
+#   quiet_sensitive→ "말수가 적지만 상대의 감정에 민감하게 반응한다."
+#   warm_dry       → "따뜻하지만 표현이 건조하다. 직접적이지 않게 감정을 전달한다."
+#
+# personality:
+#   calm           → "차분하고 안정된 태도. 쉽게 흔들리지 않는다."
+#   cynical        → "세상을 냉소적으로 본다. 기대치가 낮고 비틀린 시각으로 반응한다."
+#   tsundere       → "직접적인 호감 표현을 피하지만 행동에서 드러난다. 부정하면서도 신경 쓴다."
+# ============================================================
