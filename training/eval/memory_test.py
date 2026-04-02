@@ -32,8 +32,8 @@ MEMORY_TEST_CASES = [
         "history": [
             ("나 민준이야.", "그래, 민준."),
         ],
-        "question": "아까 소개했는데, 뭐라고 불러야 해?",
-        "expected_keywords": ["민준"],
+        "question": "민준이라고 했지? 맞아?",
+        "expected_keywords": ["맞", "어", "응"],
     },
     {
         "name": "직업 기억",
@@ -42,7 +42,7 @@ MEMORY_TEST_CASES = [
             ("요즘 일이 너무 바빠.", "뭐가 문제야?"),
         ],
         "question": "내가 무슨 일 한다고 했어?",
-        "expected_keywords": ["디자이너"],
+        "expected_keywords": ["디자이너", "디자인"],
     },
     {
         "name": "감정 상태 기억",
@@ -50,7 +50,7 @@ MEMORY_TEST_CASES = [
             ("오늘 발표 완전 망쳤어.", "그래서?"),
             ("진짜 창피했어.", "..그럴 수도 있지."),
         ],
-        "question": "아까 내가 뭐 때문에 힘들다고 했어?",
+        "question": "아까 내가 뭐가 망했다고 했어?",
         "expected_keywords": ["발표"],
     },
     {

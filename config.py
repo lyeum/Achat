@@ -31,7 +31,7 @@ _CONFIGS = {
     "dev": {
         "model_backend": "transformers",   # QLoRA 학습 / 개발용 HF 모델
         "model_name": "Qwen/Qwen2.5-3B-Instruct",
-        "adapter_path": "./output/LoRA_v9/adapter",  # LoRA 어댑터 (None이면 베이스 모델)
+        "adapter_path": "./output/LoRA_v10/adapter",  # LoRA 어댑터 (None이면 베이스 모델)
         "model_path": None,                # deploy 환경에서만 사용
         "chroma_path": "./chroma_dev",
         "session_dir": "./data/sessions",
