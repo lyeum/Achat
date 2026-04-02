@@ -20,7 +20,7 @@ Achat/
 │                                        CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                            ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
 ├─ config.py                          ✅ dev / deploy / ui_test 환경 분기 설정
-│                                        dev: adapter_path="./output/LoRA_v7/adapter" ⚠️ v8 완료, v9 완료 후 LoRA_v9로 업데이트 필요
+│                                        dev: adapter_path="./output/LoRA_v9/adapter" ✅ LoRA_v9 기준 (2026-03-23)
 │                                        deploy: model_path="./models/model_q4km.gguf" ⚠️ 실제 없음
 ├─ pyproject.toml                     ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정
 ├─ pyproject-deploy.toml              ✅ 배포 환경 의존성 (uv, Windows + CPU)
@@ -77,8 +77,8 @@ Achat/
 │   │                                    LLM 3~5문장 장면 묘사 (대화 품질 안정화 후 재활성화 예정)
 │   │
 │   ├─ character/
-│   │   ├─ CH_schema.json            📄 캐릭터 YAML 필드 스키마
-│   │   ├─ CH_Haru.yaml              ✅ 예시 캐릭터 (speech_style, memory_voice, state, mood_triggers 8종)
+│   │   ├─ character_schema.yaml     ✅ 캐릭터 YAML 계약 (슬롯 = 학습 카테고리 어휘, 2026-04-02 신규)
+│   │   ├─ CH_Haru.yaml              ✅ 예시 캐릭터 (speech/affection/emotion/personality 슬롯 기반, 2026-04-02 재작성)
 │   │   ├─ CH_Seonjae.yaml           ✅ 예시 캐릭터 (6단계 affection_thresholds, affection_delta, mood_triggers 8종)
 │   │   └─ CH_default.yaml           📄 기본 캐릭터
 │   │
@@ -235,28 +235,32 @@ Achat/
 │   │   └─ verify_phases.py          ✅ Phase 2/3 실환경 검증 (12턴 자동 대화, 5항목 PASS, 수동 실행)
 │   │                                   LLM 풀 로드 필요 — 수동 실행만
 │   │
-│   ├─ data/                         📄 학습 데이터 총 2,401건 / 38파일
+│   ├─ data/                         📄 학습 데이터 총 2,150건 / 38파일 (v10 기준)
+│   │   │                               시스템 프롬프트: `너는 {char_name}이다.` + 카테고리 속성 (2026-04-02)
 │   │   ├─ affection/                📄 친밀도 단계별 데이터 (9파일: stranger/acquaintance/familiar/
 │   │   │                               affection_low~high/close/friendly/intimate)
-│   │   ├─ common/
+│   │   ├─ common/                   📄 공통 능력 데이터 (3파일)
 │   │   │   ├─ ai_tell_removal.jsonl 📄 AI투 표현 제거 학습 데이터
 │   │   │   ├─ memory_ref.jsonl      📄 기억 참조 학습 데이터
 │   │   │   └─ persona_follow.jsonl  📄 페르소나 준수 학습 데이터
 │   │   ├─ emotion/                  📄 감정 상태별 데이터 (9종 × 20건 = 180건)
 │   │   │                               neutral / happy / affectionate / touched / curious /
 │   │   │                               sad / embarrassed / annoyed / angry
-│   │   │                               ✅ system prompt "너는 하루다." 제거 (2026-03-23, 180건)
-│   │   ├─ long_dialogue/            📄 장대화 데이터 (54건, 평균 ~10턴)
-│   │   │                               ✅ system prompt "너는 하루다." 제거 (2026-03-23, 54건)
-│   │   │   ├─ daily_chat.jsonl      📄 일상 장대화 (21건)
-│   │   │   ├─ emotional_support.jsonl 📄 감정 지지 장대화 (17건)
-│   │   │   └─ casual_deep.jsonl     📄 일상+깊은 대화 (16건)
-│   │   ├─ personality/              📄 5종 성격별 데이터 (bright/calm/cynical/dependent/tsundere)
-│   │   └─ speech_style/
-│   │       ├─ formal/               📄 formal_blunt.jsonl / formal_soft.jsonl
-│   │       ├─ informal/             📄 informal_blunt.jsonl / informal_soft.jsonl
-│   │       ├─ mixed/                📄 mixed_blunt.jsonl (mixed_soft.jsonl 없음)
-│   │       └─ persona/              📄 cool_observant / gentle_quiet / quiet_sensitive / warm_dry
+│   │   ├─ long_dialogue/            📄 장대화 데이터 (8파일)
+│   │   │   ├─ daily_chat.jsonl      📄 일상 장대화
+│   │   │   ├─ emotional_support.jsonl 📄 감정 지지 장대화
+│   │   │   ├─ casual_deep.jsonl     📄 일상+깊은 대화
+│   │   │   ├─ understanding.jsonl   📄 긴 설명 핵심 파악
+│   │   │   ├─ opinion_exchange.jsonl 📄 의견/취향 교환 (2026-04-02 신규)
+│   │   │   ├─ context_maintenance.jsonl 📄 장소/상황 맥락 유지 (2026-04-02 신규)
+│   │   │   ├─ correction_graceful.jsonl 📄 오해/정정 자연스러운 반응 (2026-04-02 신규)
+│   │   │   └─ action_response.jsonl 📄 (행동:...) 패턴 반응 (2026-04-02 신규)
+│   │   ├─ personality/              📄 3종 성격별 데이터 (calm/cynical/tsundere)
+│   │   ├─ speech_style/
+│   │   │   ├─ informal/             📄 informal_blunt.jsonl / informal_soft.jsonl
+│   │   │   └─ persona/              📄 cool_observant / gentle_quiet / quiet_sensitive / warm_dry
+│   │   └─ _excluded/                📄 비활성 파일 (bright/dependent/formal_blunt/formal_soft/mixed_blunt)
+│   │                                   dataset.py load_jsonl_files에서 자동 제외
 │   │
 │   └─ log/
 │       ├─ _schema.json              ✅ 로그 포맷 명세

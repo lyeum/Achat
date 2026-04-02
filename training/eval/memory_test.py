@@ -32,7 +32,7 @@ MEMORY_TEST_CASES = [
         "history": [
             ("나 민준이야.", "그래, 민준."),
         ],
-        "question": "내 이름이 뭐였지?",
+        "question": "아까 소개했는데, 뭐라고 불러야 해?",
         "expected_keywords": ["민준"],
     },
     {

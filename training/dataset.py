@@ -39,7 +39,10 @@ def load_jsonl_files(
     category_weights 지정 시 카테고리별 과샘플/부샘플 적용 (max_samples 이후).
     """
     per_file: list[tuple[Path, list[dict]]] = []
-    files = sorted(data_dir.rglob("*.jsonl"))
+    files = sorted(
+        p for p in data_dir.rglob("*.jsonl")
+        if "_excluded" not in p.parts
+    )
     if not files:
         logger.warning(f"JSONL 파일 없음: {data_dir}")
         return []

@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-REQUIRED_FIELDS = ["id", "name", "speech_style", "rules", "memory_voice", "state"]
+REQUIRED_FIELDS = ["id", "name", "speech", "rules", "memory_voice", "state"]
 
 
 def load_character(yaml_path: str | Path) -> dict:

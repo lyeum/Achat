@@ -13,8 +13,29 @@ BUDGET = {
     "generation": 512,
 }
 
-# affection tier → Layer A 기본 톤 지시문 (캐릭터 YAML에 tone_guide 없을 때 폴백)
-_TONE_DEFAULT: dict[str, str] = {
+# ── speech.style preset 해석 ─────────────────────────────────────────────────
+_STYLE_PRESETS: dict[str, str] = {
+    "blunt": "말이 짧고 직접적이다. 불필요한 설명이나 완충 표현을 하지 않는다.",
+    "soft":  "말투가 부드럽고 배려가 있다. 상대의 반응을 살피며 말한다.",
+}
+
+# ── speech.persona preset 해석 ───────────────────────────────────────────────
+_PERSONA_PRESETS: dict[str, str] = {
+    "cool_observant":  "감정을 억제하고 상황을 관찰하는 말투. 반응이 냉정하고 분석적이다.",
+    "gentle_quiet":    "조용하고 온화한 말투. 상대를 배려하며 천천히 말한다.",
+    "quiet_sensitive": "말수가 적지만 상대의 감정에 민감하게 반응한다.",
+    "warm_dry":        "따뜻하지만 표현이 건조하다. 직접적이지 않게 감정을 전달한다.",
+}
+
+# ── personality preset 해석 ──────────────────────────────────────────────────
+_PERSONALITY_PRESETS: dict[str, str] = {
+    "calm":     "차분하고 안정된 태도. 쉽게 흔들리지 않는다.",
+    "cynical":  "세상을 냉소적으로 본다. 기대치가 낮고 비틀린 시각으로 반응한다.",
+    "tsundere": "직접적인 호감 표현을 피하지만 행동에서 드러난다. 부정하면서도 신경 쓴다.",
+}
+
+# ── affection tier 폴백 (character YAML에 affection 슬롯 없을 때) ────────────
+_AFFECTION_FALLBACK: dict[str, str] = {
     "stranger":     "처음 만난 사이. 대화를 짧게 끊으려 하고 개인적인 반응을 거의 하지 않는다.",
     "acquaintance": "기본 대화는 가능하지만 경계가 있다. 개인적인 이야기는 아직 조심스럽다.",
     "familiar":     "조금 편해진 상태. 가끔 관심이 묻어나오지만 여전히 담담하다.",
@@ -27,8 +48,8 @@ _TONE_DEFAULT: dict[str, str] = {
     "high": "마음이 조금 열렸다. 응답이 조금 길어지고 부드러워진다.",
 }
 
-# mood → 추가 행동 힌트
-_MOOD_HINT: dict[str, str] = {
+# ── emotion 폴백 (character YAML에 emotion 슬롯 없을 때) ────────────────────
+_EMOTION_FALLBACK: dict[str, str] = {
     "happy":        "기분이 좋은 상태다. 반응이 약간 빨라지고 말이 조금 더 나온다.",
     "affectionate": "상대에게 마음이 기울어 있다. 배려가 말 속에 묻어난다.",
     "touched":      "뭔가 마음에 닿은 상태다. 말이 잠시 느려지거나 짧아질 수 있다.",
@@ -78,16 +99,7 @@ class PromptBuilder:
         rag_results: list[str] | None = None,
         recent_ops: list[str] | None = None,
     ) -> list[dict]:
-        """Layer A~D(+F)를 조립해 messages 리스트를 반환한다.
-
-        Layer E(현재 사용자 입력)는 호출 측에서 마지막에 append한다.
-
-        Parameters
-        ----------
-        vdb_results : 장기 메모리 VDB 검색 결과 (Layer C — 우선순위 높음)
-        rag_results : 세계관 RAG 검색 결과 (Layer B에 병합 — 우선순위 낮음)
-        recent_ops  : 최근 기능 작업 요약 목록 (Layer F — 비서 컨텍스트)
-        """
+        """Layer A~D(+F)를 조립해 messages 리스트를 반환한다."""
         layer_b = self._layer_b(rag_results or [])
         system_parts = [self._layer_a(), layer_b]
         if vdb_results:
@@ -104,62 +116,88 @@ class PromptBuilder:
     # ── Layer 생성 ────────────────────────────────────────────────────────────
 
     def _layer_a(self) -> str:
-        """캐릭터 시스템 프롬프트 — 학습 데이터 형식(평문 단락)에 맞춰 조립.
+        """캐릭터 시스템 프롬프트 — 스키마 슬롯 기반 조립.
 
-        학습 데이터 system prompt 형식:
-          "조용하고 차분한 태도로 대화한다. 반말을 쓰고 단답형이 많다. ..."
-        헤더/섹션 없이 단일 평문 단락으로 출력한다.
+        조립 순서:
+          너는 {name}이다.
+          {description}
+          {speech.formality}을 사용한다.
+          {speech.style}      ← preset 해석 또는 직접 텍스트
+          {speech.persona}    ← preset 해석 또는 직접 텍스트
+          {personality}       ← preset 해석 또는 직접 텍스트
+          {affection[tier]}   ← 현재 tier 행동 텍스트 (YAML 우선, 폴백 사용)
+          {emotion[mood]}     ← mood != neutral일 때만 삽입 (YAML 우선, 폴백 사용)
+          {conv_hints}        ← response_length / openness / directness → 자연어
+          {rules}             ← 각 항목을 문장으로
         """
         c = self.character
         tier = self._affection_tier()
+        mood = self.session.mood
 
-        # 톤: 캐릭터 YAML tone_guide 우선, 없으면 기본값
-        tone_guide: dict = c.get("state", {}).get("tone_guide", {})
-        tone = tone_guide.get(tier) or _TONE_DEFAULT.get(tier, _TONE_DEFAULT["mid"])
+        parts: list[str] = []
 
-        # mood 힌트 (neutral은 빈 문자열)
-        mood_hint = _MOOD_HINT.get(self.session.mood, "")
-
-        # 규칙: 문자열 리스트면 직접 조립 (build_sft_from_feedback.py와 동일 포맷)
-        rules_list = c.get("rules", [])
-        if rules_list and all(isinstance(r, str) for r in rules_list):
-            rules_brief = " ".join(rules_list)
-        elif rules_list:
-            # dict 타입 rules(CH_default.yaml 등) — 폴백 요약
-            rules_brief = "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, \"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다."
-        else:
-            rules_brief = ""
-
-        # conversation 파라미터 → 자연어 지시문 (tier별 response_length/openness + 고정 directness)
-        conv_hints = self._conv_hints(c, tier)
-
-        # 평문 단락으로 조립 (이름 + 설명 + 말투 + 톤 + mood + 대화 수위 + 규칙)
-        parts = []
+        # 1. 이름
         name = c.get("name", "")
         if name:
             parts.append(f"너는 {name}이다.")
-        desc = c.get("description", "").strip()
-        if desc:
+
+        # 2. 캐릭터 설명
+        if desc := c.get("description", "").strip():
             parts.append(desc)
-        speech = c.get("speech_style", "").strip()
-        if speech:
-            parts.append(speech)
-        if tone:
-            parts.append(tone)
-        if mood_hint:
-            parts.append(mood_hint)
-        parts.extend(conv_hints)
-        if rules_brief:
-            parts.append(rules_brief)
+
+        # 3. 말투
+        speech: dict = c.get("speech", {})
+        formality = speech.get("formality", "").strip()
+        if formality:
+            parts.append(f"{formality}을 사용한다.")
+
+        style_val = speech.get("style", "").strip()
+        if style_val:
+            parts.append(_STYLE_PRESETS.get(style_val, style_val))
+
+        persona_val = speech.get("persona", "").strip()
+        if persona_val:
+            parts.append(_PERSONA_PRESETS.get(persona_val, persona_val))
+
+        # 4. 성격
+        personality_val = c.get("personality", "").strip()
+        if personality_val:
+            parts.append(_PERSONALITY_PRESETS.get(personality_val, personality_val))
+
+        # 5. 친밀도 tier 행동
+        aff_text = (
+            c.get("affection", {}).get(tier)
+            or _AFFECTION_FALLBACK.get(tier, "")
+        )
+        if aff_text:
+            parts.append(aff_text)
+
+        # 6. 감정 상태 (neutral이면 빈 문자열 → 삽입 안 함)
+        if mood != "neutral":
+            emotion_text = (
+                c.get("emotion", {}).get(mood)
+                or _EMOTION_FALLBACK.get(mood, "")
+            )
+            if emotion_text:
+                parts.append(emotion_text)
+
+        # 7. 대화 수위 파라미터
+        parts.extend(self._conv_hints(c, tier))
+
+        # 8. 규칙
+        rules_list = c.get("rules", [])
+        if rules_list and all(isinstance(r, str) for r in rules_list):
+            parts.append(" ".join(rules_list))
+        elif rules_list:
+            parts.append(
+                "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, "
+                "\"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다."
+            )
 
         return " ".join(parts)
 
     def _layer_b(self, rag_results: list[str] | None = None) -> str:
-        """세계관 설명 + 현재 Act 상황 + RAG 검색 결과 (있을 때).
-
-        우선순위: 장기 메모리(Layer C) > 세계관 RAG
-        RAG 결과는 Layer B 말미에 병합하여 ~350tok 합산 예산 안에서 처리.
-        """
+        """세계관 설명 + 현재 Act 상황 + RAG 검색 결과."""
         world_desc = self.world.get("description", "").strip()
         act = self._current_act()
 
@@ -177,11 +215,7 @@ class PromptBuilder:
         return "\n\n".join(parts)
 
     def _layer_c(self, vdb_results: list[str]) -> str:
-        """VDB 검색 결과를 캐릭터 관점으로 재서술한다.
-
-        memory_voice 필드를 참고용 힌트로 함께 삽입해
-        모델이 캐릭터 목소리로 기억을 표현하도록 유도한다.
-        """
+        """VDB 검색 결과를 캐릭터 관점으로 재서술한다."""
         voice_hint = self.character.get("memory_voice", "").strip()
         parts = [f"- {r}" for r in vdb_results]
         hint = f"\n(기억 표현 방식: {voice_hint})" if voice_hint else ""
@@ -194,16 +228,10 @@ class PromptBuilder:
             total = sum(self._count(m["content"]) for m in sliced)
             if total <= BUDGET["layer_d"]:
                 return sliced
-        # 최소 1턴(user+assistant 쌍) 보장
         return short_buf[-2:]
 
     def _layer_f(self, recent_ops: list[str]) -> str:
-        """Layer F — 최근 기능 작업 컨텍스트 (비서 역할 지원).
-
-        기능 모드에서 수행한 작업 목록을 시스템 프롬프트에 주입해
-        캐릭터가 방금 한 작업을 인지하고 대화할 수 있게 한다.
-        최대 5개의 최신 항목만 포함한다.
-        """
+        """Layer F — 최근 기능 작업 컨텍스트."""
         ops_text = "\n".join(f"- {op}" for op in recent_ops[-5:])
         return (
             "[방금 수행한 작업]\n"
@@ -216,24 +244,15 @@ class PromptBuilder:
 
     @staticmethod
     def _conv_hints(character: dict, tier: str) -> list[str]:
-        """CH_*.yaml conversation 파라미터를 자연어 지시문 리스트로 변환한다.
-
-        response_length / openness 는 tier별 값, directness 는 고정값.
-        YAML에 conversation 필드가 없으면 빈 리스트를 반환한다.
-        """
+        """conversation 파라미터를 자연어 지시문 리스트로 변환한다."""
         conv: dict = character.get("conversation", {})
         if not conv:
             return []
 
         hints: list[str] = []
 
-        # ── response_length ───────────────────────────────────────────────────
         rl_val = conv.get("response_length", {})
-        if isinstance(rl_val, dict):
-            rl = rl_val.get(tier)
-        else:
-            rl = rl_val  # 고정값으로 쓴 경우 허용
-
+        rl = rl_val.get(tier) if isinstance(rl_val, dict) else rl_val
         if rl is not None:
             if rl < 0.15:
                 hints.append("한 문장 이내로 짧게 끊는다.")
@@ -246,13 +265,8 @@ class PromptBuilder:
             else:
                 hints.append("감정이나 생각을 여러 문장으로 표현할 수 있다.")
 
-        # ── openness ─────────────────────────────────────────────────────────
         op_val = conv.get("openness", {})
-        if isinstance(op_val, dict):
-            op = op_val.get(tier)
-        else:
-            op = op_val
-
+        op = op_val.get(tier) if isinstance(op_val, dict) else op_val
         if op is not None:
             if op < 0.1:
                 hints.append("감정을 거의 드러내지 않는다.")
@@ -265,7 +279,6 @@ class PromptBuilder:
             else:
                 hints.append("감정을 솔직하게 표현한다.")
 
-        # ── directness (tier 무관 고정값) ─────────────────────────────────────
         dr = conv.get("directness")
         if dr is not None:
             if dr < 0.3:
@@ -287,7 +300,7 @@ class PromptBuilder:
         for tier, bounds in thresholds.items():
             if bounds[0] <= aff <= bounds[1]:
                 return tier
-        return "mid"
+        return "familiar"
 
     def _current_act(self) -> Optional[dict]:
         if not (self.session.scenario_id and self.session.act_id):
@@ -301,5 +314,4 @@ class PromptBuilder:
 
     @staticmethod
     def _estimate(text: str) -> int:
-        """토크나이저 없을 때 사용하는 간이 추정 (한국어 ~2자/토큰)."""
         return max(1, len(text) // 2)
