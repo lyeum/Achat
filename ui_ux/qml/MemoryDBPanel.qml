@@ -2,37 +2,43 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-// 기억 DB 뷰어 패널 — 타이틀바 "DB" 버튼으로 열림
-// ChromaDB 컬렉션을 세션별로 그룹화해 열람, 유사 검색 미리보기 제공
+// 기억 DB 관리 패널 — SideMenuPanel "DB 조회 및 관리" 항목으로 열림
+// ChromaDB 항목을 카드 형태로 표시하며 추가·수정·삭제를 지원한다.
 Item {
     id: dbRoot
 
     property string fontFamily: ""
-    property string dbJson: "{}"          // bridge.getMemoryDB() 결과
-    property string searchResultJson: "[]" // bridge.searchMemoryPreview() 결과
+    property string dbJson:     "{}"   // bridge.getMemoryDB() 결과
 
     signal closeRequested()
-    signal searchRequested(string query)
+    signal deleteRequested(string entryId)
+    signal addRequested(string content, string metaJson)
+    signal updateRequested(string entryId, string newContent, string metaJson)
 
     // ── 파싱 ─────────────────────────────────────────────────────────────────
     property var _db: {
         try { return JSON.parse(dbRoot.dbJson) }
         catch(e) { return { collection: "", total: 0, sessions: {} } }
     }
-    property var _searchResults: {
-        try { return JSON.parse(dbRoot.searchResultJson) }
-        catch(e) { return [] }
-    }
 
-    // 세션 키 목록 (최신순 정렬)
-    property var _sessionKeys: {
-        var keys = Object.keys(_db.sessions || {})
+    // 카드 목록: 세션 정렬 후 플랫하게 펼침
+    property var _entries: {
+        var db = _db
+        var sessions = db.sessions || {}
+        var keys = Object.keys(sessions)
         keys.sort(function(a, b) { return b.localeCompare(a) })
-        return keys
+        var list = []
+        for (var i = 0; i < keys.length; i++) {
+            var arr = sessions[keys[i]]
+            for (var j = 0; j < arr.length; j++) {
+                list.push(arr[j])
+            }
+        }
+        return list
     }
 
-    // 각 세션 펼침 상태 (session_id → bool)
-    property var _expanded: ({})
+    // 추가 폼 표시 여부
+    property bool _addFormOpen: false
 
     // ── 배경 딤 ──────────────────────────────────────────────────────────────
     Rectangle {
@@ -49,383 +55,467 @@ Item {
         }
     }
 
-    // ── 사이드 패널 (오른쪽에서 슬라이드인) ──────────────────────────────────
+    // ── 패널 본체 ─────────────────────────────────────────────────────────────
     Rectangle {
         id: panel
-        width: 320
+        width: 380
         anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
         color: "#131320"
         border.color: "#2A2A40"
         border.width: 1
 
-        ColumnLayout {
-            anchors.fill: parent
+        Column {
+            anchors { top: parent.top; left: parent.left; right: parent.right }
             spacing: 0
 
             // ── 헤더 ─────────────────────────────────────────────────────────
             Rectangle {
-                Layout.fillWidth: true
-                height: 44
-                color: "#1C1C30"
-                border.color: "#2A2A40"
-                border.width: 0
+                width: parent.width; height: 48
+                color: "#0E0E1A"
+                border.color: "#2A2A40"; border.width: 0
 
-                RowLayout {
-                    anchors { fill: parent; leftMargin: 14; rightMargin: 10 }
-                    spacing: 6
+                Text {
+                    anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
+                    text: "기억 DB 조회 및 관리"
+                    color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                    font.family: dbRoot.fontFamily
+                }
 
+                // 항목 수 뱃지
+                Rectangle {
+                    anchors { right: closeBtnRect.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    width: countLabel.implicitWidth + 12; height: 20; radius: 10
+                    color: "#2A2A40"
                     Text {
-                        text: "기억 DB"
-                        color: "#C0C0E0"; font.pixelSize: 13; font.bold: true
+                        id: countLabel
+                        anchors.centerIn: parent
+                        text: (dbRoot._db.total || 0) + "개"
+                        color: "#8080C0"; font.pixelSize: 10
                         font.family: dbRoot.fontFamily
-                    }
-                    Rectangle {
-                        width: collLabel.implicitWidth + 12; height: 18; radius: 9
-                        color: "#252538"
-                        Text {
-                            id: collLabel
-                            anchors.centerIn: parent
-                            text: (_db.collection || "—") + "  " + (_db.total || 0) + "개"
-                            color: "#7070A8"; font.pixelSize: 10
-                            font.family: dbRoot.fontFamily
-                        }
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    // 닫기
-                    Rectangle {
-                        width: 20; height: 20; radius: 10
-                        color: closeHov.containsMouse ? "#C03030" : "#333348"
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { anchors.centerIn: parent; text: "✕"; color: "#CCC"; font.pixelSize: 9 }
-                        MouseArea {
-                            id: closeHov; anchors.fill: parent; hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: dbRoot.closeRequested()
-                        }
                     }
                 }
 
-                // 하단 구분선
+                Rectangle {
+                    id: closeBtnRect
+                    width: 24; height: 24; radius: 12
+                    anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                    color: closeHov.containsMouse ? "#3A3A50" : "transparent"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Text { anchors.centerIn: parent; text: "×"; color: "#B0B0B0"; font.pixelSize: 16 }
+                    MouseArea {
+                        id: closeHov; anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: dbRoot.closeRequested()
+                    }
+                }
+
                 Rectangle {
                     anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                     height: 1; color: "#2A2A40"
                 }
             }
 
-            // ── 검색 바 ──────────────────────────────────────────────────────
+            // ── 추가 버튼 행 ─────────────────────────────────────────────────
             Rectangle {
-                Layout.fillWidth: true
-                height: 40
-                color: "#1A1A2C"
+                width: parent.width; height: 40
+                color: "transparent"
 
-                RowLayout {
-                    anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
-                    spacing: 6
+                Rectangle {
+                    anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+                    width: addBtnLabel.implicitWidth + 20; height: 26; radius: 5
+                    color: addBtnHov.containsMouse ? "#2A3A6A" : "#1E2A50"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Text {
+                        id: addBtnLabel
+                        anchors.centerIn: parent
+                        text: dbRoot._addFormOpen ? "▲ 폼 닫기" : "+ 항목 추가"
+                        color: "#8AB4F8"; font.pixelSize: 11
+                        font.family: dbRoot.fontFamily
+                    }
+                    MouseArea {
+                        id: addBtnHov; anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: dbRoot._addFormOpen = !dbRoot._addFormOpen
+                    }
+                }
 
+                Rectangle {
+                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    height: 1; color: "#1E1E30"
+                }
+            }
+        }
+
+        // ── 추가 폼 ──────────────────────────────────────────────────────────
+        Rectangle {
+            id: addForm
+            anchors { top: parent.top; topMargin: 90; left: parent.left; right: parent.right }
+            height: dbRoot._addFormOpen ? addFormColumn.implicitHeight + 20 : 0
+            clip: true
+            color: "#0C0C1A"
+            border.color: "#2A2A40"; border.width: 1
+            visible: height > 0
+
+            Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
+            Column {
+                id: addFormColumn
+                anchors { top: parent.top; topMargin: 10; left: parent.left; leftMargin: 12; right: parent.right; rightMargin: 12 }
+                spacing: 8
+
+                // 내용
+                Text {
+                    text: "내용"; color: "#8080A0"; font.pixelSize: 10
+                    font.family: dbRoot.fontFamily
+                }
+                Rectangle {
+                    width: parent.width; height: 64
+                    color: "#181828"; border.color: "#2A2A40"; border.width: 1; radius: 4
+                    TextEdit {
+                        id: addContent
+                        anchors { fill: parent; margins: 6 }
+                        color: "#E0E0E0"; font.pixelSize: 11
+                        font.family: dbRoot.fontFamily
+                        wrapMode: TextEdit.Wrap
+                        placeholderText: "기억 내용을 입력하세요..."
+                        // QML 2.15에서 placeholderText는 TextEdit에 없으므로 수동 처리
+                    }
+                }
+
+                // 중요도
+                Row {
+                    spacing: 8
+                    Text { text: "중요도"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                    Slider {
+                        id: addImportance
+                        from: 0.0; to: 1.0; value: 0.5
+                        width: 140
+                        stepSize: 0.05
+                    }
+                    Text {
+                        text: addImportance.value.toFixed(2)
+                        color: "#A0A0C0"; font.pixelSize: 10
+                        font.family: dbRoot.fontFamily
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                // 태그
+                Row {
+                    spacing: 8
+                    Text { text: "태그"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
                     Rectangle {
-                        Layout.fillWidth: true
-                        height: 26; radius: 6
-                        color: "#20203A"
-                        border.color: searchField.activeFocus ? "#5A5AE0" : "#333348"
-                        border.width: 1
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
-
+                        width: 180; height: 24; radius: 4
+                        color: "#181828"; border.color: "#2A2A40"; border.width: 1
                         TextInput {
-                            id: searchField
-                            anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
-                            verticalAlignment: TextInput.AlignVCenter
-                            color: "#D0D0F0"; font.pixelSize: 12
-                            font.family: dbRoot.fontFamily
-                            clip: true
-
-                            Text {
-                                anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "유사 기억 검색..."
-                                color: "#505070"; font.pixelSize: 12
-                                font.family: dbRoot.fontFamily
-                                visible: !searchField.text && !searchField.activeFocus
-                            }
-
-                            Keys.onReturnPressed: {
-                                if (text.trim() !== "")
-                                    dbRoot.searchRequested(text.trim())
-                            }
+                            id: addTags
+                            anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                            color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily
+                            placeholderText: "쉼표로 구분"
                         }
                     }
+                }
 
+                // 위치
+                Row {
+                    spacing: 8
+                    Text { text: "위치"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
                     Rectangle {
-                        width: 34; height: 26; radius: 5
-                        color: searchBtnHov.containsMouse ? "#4A4ACA" : "#35358A"
-                        Behavior on color { ColorAnimation { duration: 100 } }
-                        Text { anchors.centerIn: parent; text: "검색"; color: "#C0C0F8"; font.pixelSize: 11; font.family: dbRoot.fontFamily }
-                        MouseArea {
-                            id: searchBtnHov; anchors.fill: parent; hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: { if (searchField.text.trim()) dbRoot.searchRequested(searchField.text.trim()) }
+                        width: 180; height: 24; radius: 4
+                        color: "#181828"; border.color: "#2A2A40"; border.width: 1
+                        TextInput {
+                            id: addLocation
+                            anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                            color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily
+                            placeholderText: "선택 사항"
                         }
                     }
                 }
 
+                // 저장 버튼
                 Rectangle {
-                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                    height: 1; color: "#2A2A40"
-                }
-            }
-
-            // ── 검색 결과 (있을 때만 표시) ───────────────────────────────────
-            Rectangle {
-                Layout.fillWidth: true
-                visible: _searchResults.length > 0
-                height: visible ? Math.min(searchResultCol.implicitHeight + 12, 160) : 0
-                color: "#161628"
-                clip: true
-
-                ScrollView {
-                    anchors { fill: parent; topMargin: 6; bottomMargin: 6 }
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-                    Column {
-                        id: searchResultCol
-                        width: panel.width - 20
-                        x: 10
-                        spacing: 4
-
-                        Text {
-                            text: "검색 결과 (" + _searchResults.length + "개)"
-                            color: "#7070A8"; font.pixelSize: 10; font.bold: true
-                            font.family: dbRoot.fontFamily
-                        }
-
-                        Repeater {
-                            model: _searchResults
-
-                            Rectangle {
-                                width: searchResultCol.width
-                                height: srContent.implicitHeight + 12
-                                radius: 5
-                                color: "#1E1E36"
-                                border.color: "#35356A"
-                                border.width: 1
-
-                                Column {
-                                    id: srContent
-                                    anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
-                                    spacing: 3
-
-                                    RowLayout {
-                                        width: parent.width
-                                        spacing: 4
-                                        Text {
-                                            text: "유사도 " + (modelData.similarity * 100).toFixed(0) + "%"
-                                            color: modelData.similarity > 0.7 ? "#6ACA6A" : "#CAAA4A"
-                                            font.pixelSize: 10; font.family: dbRoot.fontFamily
-                                        }
-                                        Text {
-                                            text: modelData.tags ? "#" + modelData.tags.replace(/,/g, " #") : ""
-                                            color: "#7090C0"; font.pixelSize: 10
-                                            font.family: dbRoot.fontFamily
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-                                    }
-                                    Text {
-                                        width: parent.width
-                                        text: modelData.content
-                                        color: "#B0B0D0"; font.pixelSize: 11
-                                        font.family: dbRoot.fontFamily
-                                        wrapMode: Text.Wrap
-                                        maximumLineCount: 2
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                    height: 1; color: "#2A2A40"
-                }
-            }
-
-            // ── 세션 목록 (스크롤) ────────────────────────────────────────────
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                clip: true
-
-                Column {
-                    id: sessionCol
-                    width: panel.width
-                    spacing: 0
-
-                    // 기억 없음
+                    width: 70; height: 26; radius: 5
+                    color: saveHov.containsMouse ? "#1A5A3A" : "#143A28"
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     Text {
-                        visible: _sessionKeys.length === 0
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        topPadding: 30
-                        text: "저장된 기억이 없습니다."
-                        color: "#505070"; font.pixelSize: 12
+                        anchors.centerIn: parent; text: "저장"
+                        color: "#60D090"; font.pixelSize: 11; font.bold: true
                         font.family: dbRoot.fontFamily
                     }
+                    MouseArea {
+                        id: saveHov; anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            var content = addContent.text.trim()
+                            if (!content) return
+                            var tags = addTags.text.split(",").map(function(s){ return s.trim() }).filter(function(s){ return s.length > 0 })
+                            var meta = {
+                                importance: addImportance.value,
+                                tags: tags,
+                                location: addLocation.text.trim(),
+                                session_id: "manual"
+                            }
+                            dbRoot.addRequested(content, JSON.stringify(meta))
+                            // 폼 초기화
+                            addContent.text = ""
+                            addTags.text    = ""
+                            addLocation.text = ""
+                            addImportance.value = 0.5
+                            dbRoot._addFormOpen = false
+                        }
+                    }
+                }
 
-                    Repeater {
-                        model: _sessionKeys
+                Item { height: 4 }
+            }
+        }
 
-                        Column {
-                            width: panel.width
-                            spacing: 0
+        // ── 카드 목록 ─────────────────────────────────────────────────────────
+        ListView {
+            id: entryList
+            anchors {
+                top: parent.top; topMargin: dbRoot._addFormOpen ? 90 + addForm.height : 90
+                left: parent.left; right: parent.right; bottom: parent.bottom
+            }
+            clip: true
+            spacing: 6
+            model: dbRoot._entries
 
-                            property string sessKey: modelData
-                            property var    entries: (_db.sessions && _db.sessions[sessKey]) ? _db.sessions[sessKey] : []
-                            property bool   open:    _expanded[sessKey] !== false  // 기본 펼침
+            Behavior on anchors.topMargin { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
-                            // 세션 헤더 행
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            delegate: Rectangle {
+                id: card
+                width: entryList.width - 16
+                x: 8
+                radius: 6
+                color: "#1A1A2E"
+                border.color: "#2A2A44"; border.width: 1
+
+                // 수정 모드 여부
+                property bool _editing: false
+                height: _editing ? editCol.implicitHeight + 20 : viewCol.implicitHeight + 20
+
+                Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+                // ── 조회 모드 ─────────────────────────────────────────────────
+                Column {
+                    id: viewCol
+                    anchors { top: parent.top; topMargin: 10; left: parent.left; leftMargin: 12; right: parent.right; rightMargin: 12 }
+                    spacing: 4
+                    visible: !card._editing
+
+                    // 내용
+                    Text {
+                        width: parent.width
+                        text: modelData.content
+                        color: "#D8D8F0"; font.pixelSize: 11
+                        font.family: dbRoot.fontFamily
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 4
+                        elide: Text.ElideRight
+                    }
+
+                    // 메타 정보 행
+                    Flow {
+                        width: parent.width
+                        spacing: 6
+
+                        // 중요도
+                        Rectangle {
+                            width: impLabel.implicitWidth + 10; height: 16; radius: 8
+                            color: {
+                                var v = modelData.importance || 0
+                                return v >= 0.8 ? "#3A2050" : v >= 0.5 ? "#1E2A40" : "#1E2820"
+                            }
+                            Text {
+                                id: impLabel
+                                anchors.centerIn: parent
+                                text: "★ " + (modelData.importance || 0).toFixed(2)
+                                color: {
+                                    var v = modelData.importance || 0
+                                    return v >= 0.8 ? "#C080FF" : v >= 0.5 ? "#8AB4F8" : "#60D090"
+                                }
+                                font.pixelSize: 9; font.family: dbRoot.fontFamily
+                            }
+                        }
+
+                        // 태그
+                        Repeater {
+                            model: (modelData.tags || "").split(",").filter(function(t){ return t.trim().length > 0 })
                             Rectangle {
-                                width: parent.width; height: 34
-                                color: sessHdrHov.containsMouse ? "#1E1E36" : "#181828"
-                                Behavior on color { ColorAnimation { duration: 100 } }
+                                width: tagTxt.implicitWidth + 10; height: 16; radius: 8; color: "#1E2040"
+                                Text { id: tagTxt; anchors.centerIn: parent; text: "#" + modelData.trim(); color: "#7090D0"; font.pixelSize: 9; font.family: dbRoot.fontFamily }
+                            }
+                        }
 
-                                RowLayout {
-                                    anchors { fill: parent; leftMargin: 12; rightMargin: 10 }
-                                    spacing: 6
+                        // 위치
+                        Text {
+                            text: modelData.location ? "📍 " + modelData.location : ""
+                            color: "#7080A0"; font.pixelSize: 9; font.family: dbRoot.fontFamily
+                            visible: (modelData.location || "").length > 0
+                        }
+                    }
 
-                                    Text {
-                                        text: parent.parent.parent.open ? "▾" : "▸"
-                                        color: "#5A5A90"; font.pixelSize: 11
-                                        font.family: dbRoot.fontFamily
-                                    }
-                                    Text {
-                                        text: sessKey.length > 28 ? sessKey.slice(-28) : sessKey
-                                        color: "#9090C0"; font.pixelSize: 11; font.bold: true
-                                        font.family: dbRoot.fontFamily
-                                        Layout.fillWidth: true
-                                        elide: Text.ElideLeft
-                                    }
-                                    Rectangle {
-                                        width: cntLbl.implicitWidth + 10; height: 16; radius: 8
-                                        color: "#25253A"
-                                        Text {
-                                            id: cntLbl
-                                            anchors.centerIn: parent
-                                            text: entries.length + "개"
-                                            color: "#6060A0"; font.pixelSize: 10
-                                            font.family: dbRoot.fontFamily
-                                        }
-                                    }
-                                }
+                    // 타임스탬프 + 버튼 행
+                    Row {
+                        width: parent.width
+                        spacing: 0
 
-                                MouseArea {
-                                    id: sessHdrHov; anchors.fill: parent
-                                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        var tmp = Object.assign({}, _expanded)
-                                        // open binding: _expanded[sessKey] !== false → false면 접힘, 나머지 펼침
-                                        tmp[sessKey] = open ? false : true
-                                        _expanded = tmp  // 재할당으로 binding 재평가 유발
-                                    }
-                                }
+                        Text {
+                            text: (modelData.timestamp || "").substring(0, 16).replace("T", " ")
+                            color: "#505070"; font.pixelSize: 9; font.family: dbRoot.fontFamily
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
 
-                                // 하단 구분선
-                                Rectangle {
-                                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                                    height: 1; color: "#222238"
+                        Item { width: parent.width - timestampW.implicitWidth - editBtn.width - delBtn.width - 8; height: 1 }
+
+                        // 수정 버튼
+                        Rectangle {
+                            id: editBtn
+                            width: 28; height: 22; radius: 4
+                            color: editBtnHov.containsMouse ? "#2A3A5A" : "transparent"
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Text { anchors.centerIn: parent; text: "✏"; font.pixelSize: 11; color: "#7090C0" }
+                            MouseArea {
+                                id: editBtnHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    editContent.text   = modelData.content
+                                    editImportance.value = modelData.importance || 0.5
+                                    editTags.text      = modelData.tags || ""
+                                    editLocation.text  = modelData.location || ""
+                                    card._editing = true
                                 }
                             }
+                        }
 
-                            // 세션 내 기억 항목
-                            Column {
-                                visible: open
-                                width: parent.width
-                                spacing: 0
-
-                                Repeater {
-                                    model: entries
-
-                                    Rectangle {
-                                        width: parent.width; height: entryContent.implicitHeight + 14
-                                        color: entryHov.containsMouse ? "#181830" : "#121220"
-                                        Behavior on color { ColorAnimation { duration: 80 } }
-
-                                        Column {
-                                            id: entryContent
-                                            anchors {
-                                                left: parent.left; right: parent.right
-                                                top: parent.top
-                                                leftMargin: 22; rightMargin: 10; topMargin: 8
-                                            }
-                                            spacing: 4
-
-                                            // 메타 행 (importance dot + tags + timestamp)
-                                            RowLayout {
-                                                width: parent.width
-                                                spacing: 4
-
-                                                // importance 색상 점
-                                                Rectangle {
-                                                    width: 8; height: 8; radius: 4
-                                                    color: {
-                                                        var imp = modelData.importance || 0
-                                                        if (imp >= 0.8) return "#6ACA6A"
-                                                        if (imp >= 0.6) return "#CAAA4A"
-                                                        return "#6A6A8A"
-                                                    }
-                                                }
-
-                                                Text {
-                                                    text: (modelData.importance * 100).toFixed(0) + "%"
-                                                    color: "#505070"; font.pixelSize: 10
-                                                    font.family: dbRoot.fontFamily
-                                                }
-
-                                                Text {
-                                                    text: modelData.tags ? "#" + modelData.tags.replace(/,/g, " #") : ""
-                                                    color: "#506890"; font.pixelSize: 10
-                                                    font.family: dbRoot.fontFamily
-                                                    elide: Text.ElideRight
-                                                    Layout.fillWidth: true
-                                                }
-
-                                                Text {
-                                                    text: modelData.timestamp ? modelData.timestamp.slice(0, 10) : ""
-                                                    color: "#404060"; font.pixelSize: 10
-                                                    font.family: dbRoot.fontFamily
-                                                }
-                                            }
-
-                                            // 본문
-                                            Text {
-                                                width: parent.width
-                                                text: modelData.content
-                                                color: "#A0A0C0"; font.pixelSize: 11
-                                                font.family: dbRoot.fontFamily
-                                                wrapMode: Text.Wrap
-                                                maximumLineCount: 3
-                                                elide: Text.ElideRight
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: entryHov; anchors.fill: parent
-                                            hoverEnabled: true; cursorShape: Qt.ArrowCursor
-                                        }
-
-                                        Rectangle {
-                                            anchors { bottom: parent.bottom; left: parent.left; right: parent.right; leftMargin: 20 }
-                                            height: 1; color: "#1C1C30"
-                                        }
-                                    }
-                                }
+                        // 삭제 버튼
+                        Rectangle {
+                            id: delBtn
+                            width: 28; height: 22; radius: 4
+                            color: delBtnHov.containsMouse ? "#4A1A1A" : "transparent"
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Text { anchors.centerIn: parent; text: "🗑"; font.pixelSize: 11; color: "#A06060" }
+                            MouseArea {
+                                id: delBtnHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: dbRoot.deleteRequested(modelData.id)
                             }
                         }
                     }
 
-                    Item { height: 12; width: 1 }
+                    // (타임스탬프 폭 측정용 숨김 Text)
+                    Text {
+                        id: timestampW
+                        visible: false
+                        text: (modelData.timestamp || "").substring(0, 16).replace("T", " ")
+                        font.pixelSize: 9
+                    }
                 }
+
+                // ── 수정 모드 ─────────────────────────────────────────────────
+                Column {
+                    id: editCol
+                    anchors { top: parent.top; topMargin: 10; left: parent.left; leftMargin: 12; right: parent.right; rightMargin: 12 }
+                    spacing: 8
+                    visible: card._editing
+
+                    // 내용
+                    Rectangle {
+                        width: parent.width; height: 64
+                        color: "#181828"; border.color: "#3A3A60"; border.width: 1; radius: 4
+                        TextEdit {
+                            id: editContent
+                            anchors { fill: parent; margins: 6 }
+                            color: "#E0E0E0"; font.pixelSize: 11
+                            font.family: dbRoot.fontFamily
+                            wrapMode: TextEdit.Wrap
+                        }
+                    }
+
+                    // 중요도
+                    Row {
+                        spacing: 8
+                        Text { text: "중요도"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                        Slider {
+                            id: editImportance
+                            from: 0.0; to: 1.0; stepSize: 0.05; width: 120
+                        }
+                        Text { text: editImportance.value.toFixed(2); color: "#A0A0C0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                    }
+
+                    // 태그
+                    Row {
+                        spacing: 8
+                        Text { text: "태그"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                        Rectangle {
+                            width: 160; height: 22; radius: 4; color: "#181828"; border.color: "#2A2A40"; border.width: 1
+                            TextInput { id: editTags; anchors { fill: parent; leftMargin: 6 }; color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
+                        }
+                    }
+
+                    // 위치
+                    Row {
+                        spacing: 8
+                        Text { text: "위치"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                        Rectangle {
+                            width: 160; height: 22; radius: 4; color: "#181828"; border.color: "#2A2A40"; border.width: 1
+                            TextInput { id: editLocation; anchors { fill: parent; leftMargin: 6 }; color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
+                        }
+                    }
+
+                    // 확인 / 취소
+                    Row {
+                        spacing: 8
+
+                        Rectangle {
+                            width: 50; height: 24; radius: 4
+                            color: confirmHov.containsMouse ? "#1A5A3A" : "#143A28"
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Text { anchors.centerIn: parent; text: "저장"; color: "#60D090"; font.pixelSize: 10; font.bold: true; font.family: dbRoot.fontFamily }
+                            MouseArea {
+                                id: confirmHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    var tags = editTags.text.split(",").map(function(s){ return s.trim() }).filter(function(s){ return s.length > 0 })
+                                    var meta = {
+                                        importance: editImportance.value,
+                                        tags: tags,
+                                        location: editLocation.text.trim(),
+                                        session_id: "manual"
+                                    }
+                                    dbRoot.updateRequested(modelData.id, editContent.text.trim(), JSON.stringify(meta))
+                                    card._editing = false
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 50; height: 24; radius: 4
+                            color: cancelHov.containsMouse ? "#3A1A1A" : "#281414"
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Text { anchors.centerIn: parent; text: "취소"; color: "#D06060"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
+                            MouseArea {
+                                id: cancelHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: card._editing = false
+                            }
+                        }
+                    }
+
+                    Item { height: 4 }
+                }
+            }
+
+            // 빈 상태 안내
+            Text {
+                anchors.centerIn: parent
+                visible: dbRoot._entries.length === 0
+                text: "저장된 기억이 없습니다."
+                color: "#505070"; font.pixelSize: 12
+                font.family: dbRoot.fontFamily
             }
         }
     }
