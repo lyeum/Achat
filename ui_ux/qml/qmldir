@@ -8,3 +8,6 @@ CustomizationPanel 1.0 CustomizationPanel.qml
 CharacterSelectPanel 1.0 CharacterSelectPanel.qml
 CharacterStatusPanel 1.0 CharacterStatusPanel.qml
 ResetConfirmPanel 1.0 ResetConfirmPanel.qml
+MemoryDBPanel 1.0 MemoryDBPanel.qml
+AdminPanel 1.0 AdminPanel.qml
+CharacterCreatePanel 1.0 CharacterCreatePanel.qml

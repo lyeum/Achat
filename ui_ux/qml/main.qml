@@ -43,6 +43,18 @@ Window {
     property string fileSearchQuery:       ""
     property string searchDirectory:       ""   // local_search 태그 선택 시 미리 저장
 
+    // 기억 DB 뷰어
+    property bool   memoryDbOpen:          false
+    property string memoryDbJson:          "{}"
+    property string memorySearchJson:      "[]"
+
+    // 관리자 패널
+    property bool   adminPanelOpen:        false
+    property string adminConvJson:         "{}"
+
+    // 캐릭터 생성 패널
+    property bool   charCreateOpen:        false
+
     // ── 테마 ──────────────────────────────────────────────────────────────────
     property string currentTheme: "ocean"
 
@@ -350,10 +362,8 @@ Window {
                 bridge.changeCharacter(charId)
             }
             onAddRequested: {
-                var newId = bridge.browseCharacterYaml()
-                if (newId !== "") {
-                    root.charListJson = bridge.getCharacterList()
-                }
+                root.charSelectOpen = false
+                root.charCreateOpen = true
             }
         }
 
@@ -380,6 +390,65 @@ Window {
                 // 초기화 후 상태창 갱신
                 if (root.charStatusOpen)
                     root.charStatusJson = bridge.getCharacterStatus()
+            }
+        }
+
+        // ── 기억 DB 뷰어 패널 오버레이 ───────────────────────────────────
+        MemoryDBPanel {
+            anchors.fill: parent
+            visible: root.memoryDbOpen && !root.isBubble
+            z: 22
+            fontFamily:       koreanFont.font.family
+            dbJson:           root.memoryDbJson
+            searchResultJson: root.memorySearchJson
+            onCloseRequested: {
+                root.memoryDbOpen  = false
+                root.memorySearchJson = "[]"
+            }
+            onSearchRequested: function(query) {
+                root.memorySearchJson = bridge.searchMemoryPreview(query)
+            }
+        }
+
+        // ── 관리자 패널 오버레이 ──────────────────────────────────────────
+        AdminPanel {
+            anchors.fill: parent
+            visible: root.adminPanelOpen && !root.isBubble
+            z: 22
+            fontFamily:  koreanFont.font.family
+            convJson:    root.adminConvJson
+            affection:   bridge ? bridge.currentAffection : 30
+            affLocked:   bridge ? bridge.affectionLocked  : false
+            onCloseRequested: root.adminPanelOpen = false
+            onAffectionSet: function(v) {
+                bridge.setAffection(v)
+                root.charStatusJson = bridge.getCharacterStatus()
+            }
+            onAffectionLocked: function(v) {
+                bridge.lockAffection(v)
+            }
+            onAffectionUnlocked: {
+                bridge.unlockAffection()
+            }
+            onConvParamChanged: function(param, tierOrKey, value) {
+                bridge.setConvParam(param, tierOrKey, value)
+                root.adminConvJson = bridge.getConvParams()
+            }
+        }
+
+        // ── 캐릭터 생성 패널 오버레이 ─────────────────────────────────────
+        CharacterCreatePanel {
+            anchors.fill: parent
+            visible: root.charCreateOpen && !root.isBubble
+            z: 25
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.charCreateOpen = false
+            onSaveRequested: function(jsonData) {
+                var newId = bridge.saveNewCharacter(jsonData)
+                if (newId !== "") {
+                    root.charListJson  = bridge.getCharacterList()
+                    root.charCreateOpen = false
+                }
             }
         }
 
@@ -446,6 +515,47 @@ Window {
                             onClicked: {
                                 root.charStatusJson = bridge.getCharacterStatus()
                                 root.charStatusOpen = true
+                            }
+                        }
+                    }
+
+                    // DB 뷰어 버튼
+                    Rectangle {
+                        width: 24; height: 20; radius: 4
+                        color: dbBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "DB"
+                            color: root._th.accent; font.pixelSize: 9; font.bold: true
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: dbBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.memoryDbJson   = bridge.getMemoryDB()
+                                root.memorySearchJson = "[]"
+                                root.memoryDbOpen   = true
+                            }
+                        }
+                    }
+
+                    // 관리자 버튼
+                    Rectangle {
+                        width: 32; height: 20; radius: 4
+                        color: adminBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "관리"
+                            color: root._th.accent; font.pixelSize: 9; font.bold: true
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: adminBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.adminConvJson = bridge.getConvParams()
+                                root.adminPanelOpen = true
                             }
                         }
                     }
@@ -580,11 +690,18 @@ Window {
 
                     delegate: ChatBubble {
                         width: chatList.width - 8
-                        role: model.role
-                        content: model.content
+                        role:       model.role
+                        content:    model.content
+                        modelIndex: model.index
+                        editable:   model.role === "assistant" || model.role === "narrator"
                         fontFamily: koreanFont.font.family
                         userBubbleColor:   root._th.accent
                         assistBubbleColor: root._th.bubbleAssist
+
+                        onEditConfirmed: function(idx, oldText, newText) {
+                            messageModel.setProperty(idx, "content", newText)
+                            if (bridge) bridge.editMessage(idx, oldText, newText)
+                        }
                     }
 
                     ScrollBar.vertical: ScrollBar {
