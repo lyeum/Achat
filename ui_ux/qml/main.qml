@@ -350,6 +350,14 @@ Window {
                 root.charListJson    = bridge.getCharacterList()
                 root.resetConfirmOpen = true
             }
+            onMemoryDBRequested: {
+                root.memoryDbJson = bridge.getMemoryDB()
+                root.memoryDbOpen = true
+            }
+            onAdminRequested: {
+                root.adminConvJson  = bridge.getConvParams()
+                root.adminPanelOpen = true
+            }
         }
 
         // ── 캐릭터 변경 패널 오버레이 ─────────────────────────────────────
@@ -411,31 +419,6 @@ Window {
             }
             onUpdateRequested: function(entryId, newContent, metaJson) {
                 bridge.updateMemoryEntry(entryId, newContent, metaJson)
-            }
-        }
-
-        // ── 사이드 메뉴 패널 오버레이 ─────────────────────────────────────
-        SideMenuPanel {
-            anchors.fill: parent
-            visible: root.sideMenuOpen && !root.isBubble
-            z: 25
-            fontFamily: koreanFont.font.family
-            onCloseRequested: root.sideMenuOpen = false
-            onOpenMemoryDB: {
-                root.memoryDbJson = bridge.getMemoryDB()
-                root.memoryDbOpen = true
-                root.sideMenuOpen = false
-            }
-            onOpenSettings: {
-                root.charListJson  = bridge.getCharacterList()
-                root.worldListJson = bridge.getWorldList()
-                root.settingsOpen  = true
-                root.sideMenuOpen  = false
-            }
-            onOpenAdmin: {
-                root.adminConvJson  = bridge.getConvParams()
-                root.adminPanelOpen = true
-                root.sideMenuOpen   = false
             }
         }
 
@@ -590,7 +573,11 @@ Window {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.sideMenuOpen = true
+                            onClicked: {
+                                root.charListJson  = bridge.getCharacterList()
+                                root.worldListJson = bridge.getWorldList()
+                                root.settingsOpen  = true
+                            }
                         }
                     }
 

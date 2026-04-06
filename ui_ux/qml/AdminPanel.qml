@@ -46,11 +46,9 @@ Item {
     Rectangle {
         id: modal
         width: 290
-        anchors {
-            top: parent.top
-            topMargin: 48
-            horizontalCenter: parent.horizontalCenter
-        }
+        // 드래그로 이동 가능 — 초기 위치는 상단 중앙
+        x: (adminRoot.width - width) / 2
+        y: 48
         height: Math.min(scrollView.contentHeight + headerRect.height + 8, adminRoot.height - 56)
         color: "#141420"
         radius: 12
@@ -58,7 +56,7 @@ Item {
         border.width: 1
         clip: true
 
-        // ── 헤더 ─────────────────────────────────────────────────────────────
+        // ── 헤더 (드래그 핸들) ───────────────────────────────────────────────
         Rectangle {
             id: headerRect
             anchors { top: parent.top; left: parent.left; right: parent.right }
@@ -71,8 +69,8 @@ Item {
             }
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
-                text: "관리자"
-                color: "#C0C0E0"; font.pixelSize: 13; font.bold: true
+                text: "관리자  (드래그로 이동)"
+                color: "#C0C0E0"; font.pixelSize: 12; font.bold: true
                 font.family: adminRoot.fontFamily
             }
             Rectangle {
@@ -80,11 +78,29 @@ Item {
                 width: 20; height: 20; radius: 10
                 color: closeHov.containsMouse ? "#C03030" : "#333348"
                 Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "✕"; color: "#CCC"; font.pixelSize: 9 }
+                Text { anchors.centerIn: parent; text: "X"; color: "#CCC"; font.pixelSize: 10; font.bold: true }
                 MouseArea {
                     id: closeHov; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: adminRoot.closeRequested()
+                }
+            }
+            // 헤더 드래그 → 모달 이동
+            MouseArea {
+                anchors { left: parent.left; right: parent.right; leftMargin: 0; rightMargin: 32 }
+                height: parent.height
+                cursorShape: Qt.SizeAllCursor
+                property point _start
+                onPressed: _start = Qt.point(mouse.x, mouse.y)
+                onPositionChanged: {
+                    if (pressed) {
+                        var dx = mouse.x - _start.x
+                        var dy = mouse.y - _start.y
+                        var nx = modal.x + dx
+                        var ny = modal.y + dy
+                        modal.x = Math.max(0, Math.min(nx, adminRoot.width  - modal.width))
+                        modal.y = Math.max(0, Math.min(ny, adminRoot.height - modal.height))
+                    }
                 }
             }
         }
@@ -184,7 +200,7 @@ Item {
                         Behavior on color { ColorAnimation { duration: 100 } }
                         Text {
                             anchors.centerIn: parent
-                            text: adminRoot.affLocked ? "🔒 잠금 해제" : "🔓 잠금"
+                            text: adminRoot.affLocked ? "[ 잠금 해제 ]" : "[ 잠금 ]"
                             color: adminRoot.affLocked ? "#E06060" : "#60C080"
                             font.pixelSize: 11; font.family: adminRoot.fontFamily
                         }

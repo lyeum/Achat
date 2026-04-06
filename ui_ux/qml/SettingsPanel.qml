@@ -19,6 +19,8 @@ Item {
     signal newSessionRequested(bool keepMemory)
     signal resetConfirmRequested()
     signal themeChangeRequested(string themeId)
+    signal memoryDBRequested()
+    signal adminRequested()
 
     // ── 섹션 펼침 상태 ────────────────────────────────────────────────────────
     property bool secCharExpanded:   true   // 캐릭터: 기본 펼침
@@ -26,6 +28,7 @@ Item {
     property bool secCustomExpanded: false
     property bool secSessionExpanded: false
     property bool secThemeExpanded:  false
+    property bool secDataExpanded:   false  // 데이터 섹션
 
     // ── 배경 딤 (클릭으로 닫기) ──────────────────────────────────────────────
     Rectangle {
@@ -438,6 +441,49 @@ Item {
                                         onClicked: settingsRoot.themeChangeRequested("forest")
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // 데이터 섹션 (기억 DB / 관리자)
+                // ══════════════════════════════════════════════════════════════
+                SectionHeader {
+                    label: "데이터"
+                    fontFamily: settingsRoot.fontFamily
+                    expanded: settingsRoot.secDataExpanded
+                    onToggled: settingsRoot.secDataExpanded = !settingsRoot.secDataExpanded
+                }
+
+                Item {
+                    width: parent.width
+                    height: settingsRoot.secDataExpanded ? dataCol.implicitHeight : 0
+                    clip: true
+                    Behavior on height { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+
+                    Column {
+                        id: dataCol
+                        width: parent.width
+                        spacing: 0
+
+                        SettingsButton {
+                            width: dataCol.width
+                            label: "기억 DB 조회 / 편집"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.memoryDBRequested()
+                            }
+                        }
+
+                        SettingsButton {
+                            width: dataCol.width
+                            label: "관리자 패널"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.adminRequested()
                             }
                         }
                     }

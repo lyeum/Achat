@@ -344,7 +344,7 @@ Item {
                             Text {
                                 id: impLabel
                                 anchors.centerIn: parent
-                                text: "★ " + (modelData.importance || 0).toFixed(2)
+                                text: "중요도 " + (modelData.importance || 0).toFixed(2)
                                 color: {
                                     var v = modelData.importance || 0
                                     return v >= 0.8 ? "#C080FF" : v >= 0.5 ? "#8AB4F8" : "#60D090"
@@ -387,7 +387,7 @@ Item {
                             anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                             color: delBtnHov.containsMouse ? "#4A1A1A" : "transparent"
                             Behavior on color { ColorAnimation { duration: 100 } }
-                            Text { anchors.centerIn: parent; text: "🗑"; font.pixelSize: 11; color: "#A06060" }
+                            Text { anchors.centerIn: parent; text: "삭제"; font.pixelSize: 9; color: "#A06060"; font.bold: true }
                             MouseArea {
                                 id: delBtnHov; anchors.fill: parent
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -402,7 +402,7 @@ Item {
                             anchors { right: delBtn.left; rightMargin: 2; verticalCenter: parent.verticalCenter }
                             color: editBtnHov.containsMouse ? "#2A3A5A" : "transparent"
                             Behavior on color { ColorAnimation { duration: 100 } }
-                            Text { anchors.centerIn: parent; text: "✏"; font.pixelSize: 11; color: "#7090C0" }
+                            Text { anchors.centerIn: parent; text: "수정"; font.pixelSize: 9; color: "#7090C0"; font.bold: true }
                             MouseArea {
                                 id: editBtnHov; anchors.fill: parent
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
