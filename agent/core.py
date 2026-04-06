@@ -129,7 +129,6 @@ class Agent:
             self.long_term = None
             self.session = None
             self.router = None
-            self.narrator = None
             # stub 모드: LLM 없음 — 도구에 None 주입
             self._tools: dict[str, BaseTool] = {
                 t.name: t for t in _STATIC_TOOLS
@@ -164,10 +163,6 @@ class Agent:
             long_term=self.long_term,
             config=self.cfg,
         )
-
-        # Narrator 초기화 (NarrationMonitor가 bridge에서 사용)
-        from conversation.narrator import Narrator
-        self.narrator = Narrator(self.character, self.world, self.llm)
 
         # 도구 목록 (LLM 로딩 후 구성 — LLM + config/character 주입)
         self._tools = {t.name: t for t in _STATIC_TOOLS}
