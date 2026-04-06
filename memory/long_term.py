@@ -231,6 +231,82 @@ class LongTermMemory:
             for doc, meta, dist in zip(docs, metas, dists)
         ]
 
+    def delete_entry(self, character_id: str, entry_id: str) -> bool:
+        """ID로 항목 하나를 삭제한다. 성공하면 True."""
+        col = self._collection(character_id)
+        try:
+            existing = col.get(ids=[entry_id])
+            if not existing["ids"]:
+                logger.warning(f"[long_term] 삭제 대상 없음: {entry_id}")
+                return False
+            col.delete(ids=[entry_id])
+            logger.info(f"[long_term] 항목 삭제: {entry_id}")
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[long_term] 삭제 실패: {entry_id} — {e}")
+            return False
+
+    def add_entry(self, character_id: str, content: str, metadata: dict) -> str:
+        """새 항목을 추가하고 생성된 entry_id를 반환한다.
+
+        metadata 권장 키: importance(float), tags(list[str]|str),
+                          location(str), session_id(str)
+        """
+        import uuid
+
+        entry_id = f"mem_{character_id.lower()}_{uuid.uuid4().hex[:8]}"
+        entry = {
+            "id": entry_id,
+            "content": content,
+            "metadata": {
+                "character_id": character_id,
+                "session_id":   metadata.get("session_id", "manual"),
+                "turn_range":   metadata.get("turn_range", ""),
+                "importance":   float(metadata.get("importance", 0.5)),
+                "tags":         metadata.get("tags", []),
+                "location":     metadata.get("location", ""),
+                "timestamp":    metadata.get(
+                    "timestamp",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            },
+        }
+        try:
+            self.store(entry)
+            logger.info(f"[long_term] 항목 추가: {entry_id}")
+            return entry_id
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[long_term] 추가 실패: {e}")
+            return ""
+
+    def update_entry(
+        self, character_id: str, entry_id: str, new_content: str, new_metadata: dict
+    ) -> bool:
+        """기존 항목을 동일 ID로 덮어쓴다 (upsert). 성공하면 True."""
+        entry = {
+            "id": entry_id,
+            "content": new_content,
+            "metadata": {
+                "character_id": character_id,
+                "session_id":   new_metadata.get("session_id", "manual"),
+                "turn_range":   new_metadata.get("turn_range", ""),
+                "importance":   float(new_metadata.get("importance", 0.5)),
+                "tags":         new_metadata.get("tags", []),
+                "location":     new_metadata.get("location", ""),
+                "timestamp":    new_metadata.get(
+                    "timestamp",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            },
+        }
+        try:
+            self.store(entry)
+            logger.info(f"[long_term] 항목 수정: {entry_id}")
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[long_term] 수정 실패: {entry_id} — {e}")
+            return False
+
     def seed(self, entries: list[dict]) -> None:
         """M_default.json 초기 데이터를 일괄 삽입한다 (이미 있으면 upsert로 덮어씀)."""
         for entry in entries:
