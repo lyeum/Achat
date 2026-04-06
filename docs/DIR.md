@@ -73,8 +73,12 @@ Achat/
 │   │                                    monitor 서브프로세스 자동 실행
 │   │                                    세션 상태 .session_state.json 기록
 │   │                                    ConversationLogger 연동
-│   ├─ narrator.py                    ✅ Narrator 클래스 (비활성화) — describe_arrival / describe_session_start
-│   │                                    LLM 3~5문장 장면 묘사 (대화 품질 안정화 후 재활성화 예정)
+│   ├─ narrator.py                    ⚠️ 구 LLM 나레이터 (제거됨) — describe_arrival / describe_session_start
+│   │                                    LLM 호출 오버헤드로 제거. narration_hardcoded.py가 대체.
+│   ├─ narration_hardcoded.py         ✅ 하드코딩 키워드 트리거 나레이션 — find_trigger()
+│   │                                    키워드(카페/공원/비/커피 등) → 미리 작성된 묘사 텍스트 반환
+│   ├─ narration_monitor.py           ✅ NarrationMonitor — check_keyword()
+│   │                                    세션 내 키워드당 1회 제한, _fired_keywords 추적
 │   │
 │   ├─ character/
 │   │   ├─ character_schema.yaml     ✅ 캐릭터 YAML 계약 (슬롯 = 학습 카테고리 어휘, 2026-04-02 신규)
@@ -128,8 +132,10 @@ Achat/
 ├─ memory/
 │   ├─ __init__.py                   ✅ 패키지 초기화
 │   ├─ long_term.py                  ✅ ChromaDB store/query (bge-m3, threshold 0.52, importance≥0.5)
+│   │                                   CRUD 메서드 추가: delete_entry / add_entry / update_entry
 │   ├─ short_term.py                 ✅ get_recent() — 슬라이딩 윈도우
-│   └─ summarizer.py                 ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
+│   ├─ summarizer.py                 ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
+│   └─ embedding.py                  ✅ 임베딩 모델 lazy-load + CPU 분리 헬퍼 (VRAM 절감)
 │
 ├─ output/
 │   ├─ LoRA_v7/                      📄 LoRA_v7 학습 결과 (.gitignore 처리)
@@ -177,11 +183,21 @@ Achat/
 │   ├─ test_bridge_slots.py          ✅ ChatBridge 슬롯 단위 테스트
 │   │                                   stub agent + QCoreApplication 헤드리스 실행
 │   │                                   monkeypatch로 _ICONS_DIR / _CHAR_PARTS_DIR / 스크린 mock
-│   │                                   getCharacterStatus / resetCharacter 테스트 포함
-│   └─ test_ui_structure.py          ✅ QML 파일 존재·qmldir 등록·프로퍼티·시그널 검증
-│                                       버그 회귀 방지 테스트 포함
-│                                       (pipBubbleOpen 바인딩 루프, delegate scope, panelRect 클릭 등)
-│                                       CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel 검증 포함
+│   │                                   getCharacterStatus / resetCharacter / CRUD 슬롯 테스트 포함
+│   ├─ test_ui_structure.py          ✅ QML 파일 존재·qmldir 등록·프로퍼티·시그널 검증
+│   │                                   버그 회귀 방지 테스트 포함
+│   │                                   (pipBubbleOpen 바인딩 루프, delegate scope, panelRect 클릭 등)
+│   │                                   CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel
+│   │                                   SideMenuPanel / AdminPanel / CharacterCreatePanel / MemoryDBPanel 검증 포함
+│   ├─ test_narration.py             ✅ NarrationMonitor.check_keyword() 세션 1회 제한
+│   │                                   narration_hardcoded.find_trigger() 키워드 매칭
+│   │                                   bridge._ACTION_RE *...* 패턴 감지 테스트
+│   ├─ test_dialogue_quality.py      ✅ PromptBuilder Layer A 이름 형식, rules 포함, tier 톤
+│   │                                   SFT 변환, reviewed_only 필터, haru_stranger.jsonl 구조 검증
+│   ├─ test_function_tools.py        ✅ PromptGuideStore 저장/검색/삭제, regex fallback, 한국어 비율
+│   │                                   (TestWebSearchTool 제거됨 — web_search.py 삭제)
+│   └─ test_integration_flows.py     ✅ LocalSearchFullFlow / FolderClassifyFullFlow / FileOptionsFullFlow
+│                                       (TestWebSearchFullFlow 제거됨 — web_search.py 삭제)
 │
 ├─ tools/
 │   ├─ __init__.py                   ✅ BaseTool re-export
@@ -195,8 +211,8 @@ Achat/
 │   │   └─ renamer.py                ✅ 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
 │   └─ search/
 │       ├─ __init__.py               ✅ 패키지 초기화
-│       ├─ local_search.py           ✅ SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, ~/.cache/achat/)
-│       └─ web_search.py             ✅ 인터넷 검색 — DuckDuckGo Instant Answer API
+│       └─ local_search.py           ✅ SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, ~/.cache/achat/)
+│                                       (web_search.py 삭제됨 — RAM/VRAM 절감 및 외부 의존성 제거)
 │
 ├─ training/
 │   ├─ 학습.md                       ✅ 학습 실행 가이드 (Step 0~6, GPU/CPU 옵션, 평가까지)
@@ -283,6 +299,7 @@ Achat/
     ├─ bridge.py                     ✅ ChatBridge(QObject) — QML↔Python 시그널/슬롯 브리지
     │                                   Signal: messageAdded / statusChanged / characterNameChanged
     │                                           backgroundChanged / moodChanged / imageImported
+    │                                           memoryChanged (CRUD 후 QML 실시간 갱신)
     │                                   Property: characterName / characterId / currentBackground / currentMood
     │                                   Slot: sendMessage(text, mode) / snapToEdge / changeCharacter / changeWorld
     │                                         getCharacterList / getWorldList
@@ -291,6 +308,8 @@ Achat/
     │                                         newSession(keep_memory) / listSessions(char_id)
     │                                         getCharacterStatus / resetCharacter(char_id)
     │                                         getTheme / saveTheme(theme_id)
+    │                                         deleteMemoryEntry(entry_id) / addMemoryEntry(content, meta_json)
+    │                                         updateMemoryEntry(entry_id, new_content, meta_json)
     │                                   경로 상수:
     │                                     _ICONS_DIR      = ui_ux/assets/icons/
     │                                     _CHAR_PARTS_DIR = ui_ux/assets/characters/
@@ -333,15 +352,17 @@ Achat/
         ├─ qmldir                    ✅ AchatUI 모듈 선언
         │                               Style(singleton) / ChatBubble / PipWindow / SettingsPanel /
         │                               CharacterDisplay / CustomizationPanel /
-        │                               CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel
+        │                               CharacterSelectPanel / CharacterStatusPanel / ResetConfirmPanel /
+        │                               MemoryDBPanel / AdminPanel / CharacterCreatePanel / SideMenuPanel
         ├─ Style.qml                 ✅ 디자인 토큰 singleton — 색상/폰트/간격/애니메이션 상수
         ├─ main.qml                  ✅ 프레임리스 플로팅 Window (432×624 ↔ 160×160 PIP 전환)
         │                               DragHandler, HoverHandler, 한글 폰트 로더
         │                               테마 시스템: currentTheme + _themes(ocean/solar/forest) + _th shortcut
-        │                               타이틀바: charNameLabel + "캐릭터 변경" + "상태" + ≡ + PIP + ✕
-        │                               isBubble / pipBubbleOpen / settingsOpen /
-        │                               charSelectOpen / charStatusOpen / resetConfirmOpen /
+        │                               타이틀바: charNameLabel + "캐릭터 변경" + "상태" + ≡(사이드메뉴) + PIP + ✕
+        │                               isBubble / pipBubbleOpen / settingsOpen / sideMenuOpen /
+        │                               charSelectOpen / charStatusOpen / resetConfirmOpen / memoryDBOpen /
         │                               customPartsJson / allPartsListJson / backgroundImageUrl / currentMood
+        │                               Connections(bridge.memoryChanged → getMemoryDB() 재호출)
         ├─ ChatBubble.qml            ✅ 재사용 말풍선 컴포넌트 (role로 좌/우 정렬·색상 제어)
         │                               userBubbleColor / assistBubbleColor 프로퍼티 (테마 색상 주입)
         ├─ PipWindow.qml             ✅ PIP 마스코트 모드 (아이콘 + 위로 확장 말풍선)
@@ -351,6 +372,18 @@ Achat/
         │                               캐릭터 / 세계관+act / 커스터마이징 / 초기화 / 테마 섹션
         │                               closeRequested / emotionPanelRequested / characterBuildRequested /
         │                               newSessionRequested / resetConfirmRequested / themeChangeRequested 시그널
+        ├─ SideMenuPanel.qml         ✅ 오른쪽 슬라이드인 사이드 내비게이션 패널 (z:25, 220px)
+        │                               DB / 설정 / 관리 세 섹션 아코디언 구조
+        │                               closeRequested / openMemoryDB / openSettings / openAdmin 시그널
+        │                               슬라이드인 애니메이션 (NumberAnimation rightMargin -220→0)
+        ├─ MemoryDBPanel.qml         ✅ ChromaDB 장기 메모리 CRUD 패널 (z:20)
+        │                               플랫 카드 목록 (이전: 세션 그룹 아코디언)
+        │                               카드별 ✏ 인라인 수정 폼 / 🗑 삭제 버튼
+        │                               추가 폼: 내용 + 중요도 Slider + 태그/위치 TextInput
+        │                               deleteRequested / addRequested / updateRequested 시그널
+        │                               bridge.memoryChanged → getMemoryDB() 실시간 갱신
+        ├─ AdminPanel.qml            ✅ 관리자 패널 — affection 직접 조작 (z:20)
+        ├─ CharacterCreatePanel.qml  ✅ 캐릭터 생성 패널 — 신규 캐릭터 YAML 등록 (z:20)
         ├─ CharacterDisplay.qml      ✅ 레이어 합성 캐릭터 표시 (128×160 px, z:2)
         │                               icons/{id}/{id}.png 우선 → 없으면 5레이어 파츠 합성
         │                               감정 오버레이: icons/{id}/emotion/{mood}.png
