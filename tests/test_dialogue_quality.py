@@ -478,3 +478,96 @@ class TestAffectionSemanticGating:
         from memory.summarizer import score_importance
         score = score_importance("내 이름은 민준이야")
         assert score >= 0.6  # high → 게이팅 통과
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# J. _conv_hints input_length_weight 적용 검증
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestConvHintsInputLengthWeight:
+    """PromptBuilder._conv_hints() static method의 input_length_weight 동작 검증.
+
+    _conv_hints(character, tier, user_input_len) → list[str]
+    각 단계별 한국어 지시 문장을 반환한다.
+    """
+
+    def _make_char(self, conv_overrides: dict) -> dict:
+        return {
+            "id": "Haru",
+            "name": "하루",
+            "conversation": {
+                "response_length": {"stranger": 0.3},
+                "openness": {"stranger": 0.2},
+                "directness": 0.5,
+                **conv_overrides,
+            },
+        }
+
+    def _hints(self, char: dict, user_input_len: int) -> list[str]:
+        from conversation.core.prompt_build import PromptBuilder
+        return PromptBuilder._conv_hints(char, "stranger", user_input_len)
+
+    def test_short_input_gets_short_response_hint(self):
+        """입력 길이 0, weight 없음 → stranger 기본값 0.3 → '한두 문장' 힌트."""
+        char = self._make_char({})
+        hints = self._hints(char, 0)
+        assert any("한두 문장" in h for h in hints), \
+            f"한두 문장 힌트 없음: {hints}"
+
+    def test_long_input_boosts_response_length_tier(self):
+        """250자 입력 + weight=0.3 → rl=0.6 → '서너 문장' 이상 힌트."""
+        # rl = min(1.0, 0.3 + 0.3 * 1.0) = 0.6 → "서너 문장 정도로 답할 수 있다."
+        char = self._make_char({"input_length_weight": {"response_length": 0.3}})
+        hints_short = self._hints(char, 0)
+        hints_long = self._hints(char, 250)
+        # 짧은 입력은 "한두 문장", 긴 입력은 "서너 문장" 또는 그 이상
+        assert any("한두 문장" in h for h in hints_short), \
+            f"짧은 입력에서 한두 문장 힌트 없음: {hints_short}"
+        assert any("서너 문장" in h or "여러 문장" in h for h in hints_long), \
+            f"긴 입력에서 서너 문장 이상 힌트 없음: {hints_long}"
+
+    def test_zero_length_no_boost_applied(self):
+        """입력 길이 0 → length_factor=0 → weight 미적용, 기본 힌트 유지."""
+        char = self._make_char({"input_length_weight": {"response_length": 0.9}})
+        hints = self._hints(char, 0)
+        # 0.3에 해당하는 힌트여야 함
+        assert any("한두 문장" in h for h in hints), \
+            f"weight 미적용 힌트 불일치: {hints}"
+
+    def test_dict_weight_response_only_leaves_openness_unchanged(self):
+        """response_length 가중치만 지정 → openness 힌트가 변하지 않는다.
+
+        openness 힌트는 "드러내", "솔직", "묻어", "자연스럽게" 중 하나를 포함한다.
+        response_length 힌트("여러 문장으로 표현할 수 있다" 등)와 구분한다.
+        """
+        char = self._make_char({"input_length_weight": {"response_length": 0.5}})
+        hints_short = self._hints(char, 0)
+        hints_long = self._hints(char, 250)
+
+        _OPENNESS_KEYWORDS = ("드러내", "솔직", "묻어", "자연스럽게")
+
+        def openness_hint(hints: list) -> str:
+            for h in hints:
+                if any(kw in h for kw in _OPENNESS_KEYWORDS):
+                    return h
+            return ""
+
+        assert openness_hint(hints_short) == openness_hint(hints_long), \
+            "response_length 전용 weight인데 openness 힌트가 변경됨"
+
+    def test_scalar_weight_boosts_response_length(self):
+        """input_length_weight가 float 스칼라 → response_length에 적용된다."""
+        # rl = min(1.0, 0.3 + 0.4 * 1.0) = 0.7 → "감정이나 생각을 여러 문장으로 표현할 수 있다."
+        char = self._make_char({"input_length_weight": 0.4})
+        hints_short = self._hints(char, 0)
+        hints_long = self._hints(char, 250)
+        assert any("한두 문장" in h for h in hints_short)
+        assert any("여러 문장" in h or "서너 문장" in h for h in hints_long)
+
+    def test_clamped_to_max_sentence(self):
+        """weight=0.9 + rl=0.3 + factor=1.0 → rl=1.0 → 최장 힌트 문장."""
+        # rl clamps to 1.0 → "감정이나 생각을 여러 문장으로 표현할 수 있다."
+        char = self._make_char({"input_length_weight": {"response_length": 0.9}})
+        hints = self._hints(char, 300)
+        assert any("여러 문장" in h for h in hints), \
+            f"클램프 후 최장 힌트 없음: {hints}"
