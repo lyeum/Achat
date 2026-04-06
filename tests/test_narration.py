@@ -37,12 +37,12 @@ class TestFindTrigger:
         assert result is None
 
     def test_longer_keyword_matched_first(self):
-        """'해변'이 '바다'보다 길므로 '해변'이 먼저 매칭된다."""
+        """'도서관'(3글자)이 '바다'(2글자)보다 길므로 '도서관'이 먼저 매칭된다."""
         from conversation.narration_hardcoded import find_trigger
-        result = find_trigger("해변에서 바다를 봤어")
+        result = find_trigger("도서관에서 바다 내음이 났어")
         assert result is not None
         kw, _ = result
-        assert kw == "해변"
+        assert kw == "도서관"
 
     def test_weather_keyword_matched(self):
         from conversation.narration_hardcoded import find_trigger
