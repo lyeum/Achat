@@ -98,10 +98,11 @@ class PromptBuilder:
         vdb_results: list[str],
         rag_results: list[str] | None = None,
         recent_ops: list[str] | None = None,
+        user_input: str = "",
     ) -> list[dict]:
         """Layer A~D(+F)를 조립해 messages 리스트를 반환한다."""
         layer_b = self._layer_b(rag_results or [])
-        system_parts = [self._layer_a(), layer_b]
+        system_parts = [self._layer_a(user_input_len=len(user_input)), layer_b]
         if vdb_results:
             system_parts.append(self._layer_c(vdb_results))
         if recent_ops:
@@ -115,7 +116,7 @@ class PromptBuilder:
 
     # ── Layer 생성 ────────────────────────────────────────────────────────────
 
-    def _layer_a(self) -> str:
+    def _layer_a(self, user_input_len: int = 0) -> str:
         """캐릭터 시스템 프롬프트 — 스키마 슬롯 기반 조립.
 
         조립 순서:
@@ -182,7 +183,7 @@ class PromptBuilder:
                 parts.append(emotion_text)
 
         # 7. 대화 수위 파라미터
-        parts.extend(self._conv_hints(c, tier))
+        parts.extend(self._conv_hints(c, tier, user_input_len))
 
         # 8. 규칙
         rules_list = c.get("rules", [])
@@ -243,16 +244,32 @@ class PromptBuilder:
     # ── 헬퍼 ─────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _conv_hints(character: dict, tier: str) -> list[str]:
-        """conversation 파라미터를 자연어 지시문 리스트로 변환한다."""
+    def _conv_hints(character: dict, tier: str, user_input_len: int = 0) -> list[str]:
+        """conversation 파라미터를 자연어 지시문 리스트로 변환한다.
+
+        user_input_len > 0 이면 input_length_weight를 적용해 rl/op 상한을 완화한다.
+        input_length_weight는 카테고리별 dict (response_length / openness) 또는 숫자.
+        """
         conv: dict = character.get("conversation", {})
         if not conv:
             return []
 
         hints: list[str] = []
 
+        # 입력 길이 가중치 파싱 — {response_length: 0.3, openness: 0.1} 또는 숫자
+        ilw_raw = conv.get("input_length_weight", {})
+        if isinstance(ilw_raw, (int, float)):
+            ilw: dict = {"response_length": float(ilw_raw)}
+        else:
+            ilw = ilw_raw if isinstance(ilw_raw, dict) else {}
+
+        # 길이 팩터: 50자 미만 → 0, 200자 이상 → 1.0
+        length_factor = max(0.0, min(1.0, (user_input_len - 50) / 150)) if user_input_len > 50 else 0.0
+
         rl_val = conv.get("response_length", {})
         rl = rl_val.get(tier) if isinstance(rl_val, dict) else rl_val
+        if rl is not None and length_factor > 0:
+            rl = min(1.0, rl + ilw.get("response_length", 0.0) * length_factor)
         if rl is not None:
             if rl < 0.15:
                 hints.append("한 문장 이내로 짧게 끊는다.")
@@ -267,6 +284,8 @@ class PromptBuilder:
 
         op_val = conv.get("openness", {})
         op = op_val.get(tier) if isinstance(op_val, dict) else op_val
+        if op is not None and length_factor > 0:
+            op = min(1.0, op + ilw.get("openness", 0.0) * length_factor)
         if op is not None:
             if op < 0.1:
                 hints.append("감정을 거의 드러내지 않는다.")
