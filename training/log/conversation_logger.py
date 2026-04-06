@@ -145,6 +145,7 @@ class ConversationLogger:
         self._last_mood  = "neutral"
         self._turn_start = 0   # 현재 버퍼가 시작된 절대 턴 번호
         self._turn_total = 0   # 세션 전체 턴 수
+        self._written_files: list[Path] = []  # 이 세션에서 기록한 JSONL 파일 경로
 
     def on_turn(
         self,
@@ -170,6 +171,44 @@ class ConversationLogger:
         """세션 종료 시 잔여 버퍼 저장 (최소 2턴 이상일 때)."""
         if len(self._buffer) >= 4:
             self._flush()
+
+    def edit_turn(self, old_content: str, new_content: str) -> None:
+        """이미 기록된 assistant 응답을 수정된 텍스트로 교체한다.
+
+        1. 아직 버퍼에 있으면 버퍼에서 직접 수정.
+        2. 이미 flush된 경우 기록된 JSONL 파일을 재작성한다.
+        """
+        # 1. 버퍼 먼저 탐색
+        for msg in self._buffer:
+            if msg.get("role") == "assistant" and msg.get("content") == old_content:
+                msg["content"] = new_content
+                return
+
+        # 2. 기록된 파일 역순 탐색 (최근 파일부터)
+        for file_path in reversed(self._written_files):
+            if not file_path.exists():
+                continue
+            raw = file_path.read_text(encoding="utf-8")
+            lines = raw.splitlines()
+            changed = False
+            new_lines = []
+            for line in lines:
+                if not line.strip():
+                    new_lines.append(line)
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    new_lines.append(line)
+                    continue
+                for msg in entry.get("messages", []):
+                    if msg.get("role") == "assistant" and msg.get("content") == old_content:
+                        msg["content"] = new_content
+                        changed = True
+                new_lines.append(json.dumps(entry, ensure_ascii=False))
+            if changed:
+                file_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                return
 
     def _flush(self) -> None:
         if not self._buffer:
@@ -209,6 +248,8 @@ class ConversationLogger:
 
         with out_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if out_file not in self._written_files:
+            self._written_files.append(out_file)
 
         # 콘솔 표시
         print(
