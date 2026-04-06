@@ -572,10 +572,8 @@ class BaseTool:
 - LLM이 `{"query": "...", "scope": "local", "path": "/home"}` 파싱
 - 검색 결과 요약 → 사용자에게 응답
 
-#### 7-7. `tools/search/web_search.py` — 인터넷 검색
-- DuckDuckGo 비공식 API (rate limit 주의) 또는 SearXNG 셀프호스팅
-- LLM이 `{"query": "...", "scope": "web"}` 파싱
-- 검색 결과 상위 N개 요약 → 응답
+#### ~~7-7. `tools/search/web_search.py` — 인터넷 검색~~ (삭제됨, 2026-04-06)
+- RAM/VRAM 절감 및 외부 의존성 제거 목적으로 삭제. `local_search.py`만 유지.
 
 #### 7-8. `agent/core.py` — 기능 모드 분기 확장
 ```python
@@ -597,7 +595,7 @@ def handle_input(self, user_input: str, mode: str) -> str:
 - [x] 이름 변환: 패턴 규칙 적용 실행 (`tools/folder/renamer.py`)
 - [x] 프롬프트 변환: rule-based 변환 구현, 기능 세션 격리 (`tools/prompt_converter.py`)
 - [x] 로컬 검색: SQLite FTS5 인덱싱 + MATCH 쿼리 결과 반환 (`tools/search/local_search.py`)
-- [x] 웹 검색: DuckDuckGo Instant Answer API (urllib, 추가 의존성 없음) (`tools/search/web_search.py`)
+- [x] ~~웹 검색: DuckDuckGo Instant Answer API~~ → 삭제됨 (2026-04-06)
 - [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 구현 (도구 선택 → LLM 파싱 → execute)
 
 ---
@@ -627,9 +625,9 @@ def handle_input(self, user_input: str, mode: str) -> str:
 - `_handle_location(user_input)` — detect_move_intent → YAML act 매칭 또는 find_or_create_location
 - `handle_turn()` — 서술자(Narrator) 비활성화, str 반환
 
-#### 8-6. `conversation/narrator.py` — 서술자 구현 (비활성화)
-- `Narrator` 클래스 — `describe_arrival()` / `describe_session_start()` (LLM 3~5문장)
-- 현재 비활성화 — 대화 품질 안정 후 router에서 재활성화 예정
+#### 8-6. ~~`conversation/narrator.py` — 서술자 구현~~ (제거됨, 2026-04-06)
+- LLM Narrator 제거 완료. `narration_hardcoded.py` + `NarrationMonitor`로 대체.
+- VRAM 절감 + 응답 지연 제거 목적. LLM 호출 없는 키워드 트리거 방식 채택.
 
 #### 8-7. `training/log/conversation_logger.py` — 대화 데이터 자동 수집
 - 카테고리 분류: `feedback_neg`, `feedback_pos`, `memory`, `emotion`, `advice`, `persona`, `daily`
