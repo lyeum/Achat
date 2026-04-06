@@ -694,8 +694,8 @@ class TestOpenUrl:
 
 class TestHelpAndTagIntro:
     def test_get_help_text_known_key(self, bridge):
-        text = bridge.getHelpText("web_search")
-        assert "#웹 검색" in text
+        text = bridge.getHelpText("local_search")
+        assert "#파일 검색" in text
 
     def test_get_help_text_file_convert(self, bridge):
         text = bridge.getHelpText("file_convert")

@@ -59,6 +59,7 @@ class ChatBridge(QObject):
     moodChanged          = Signal(str)        # neutral | happy | annoyed | sad
     affectionChanged     = Signal(int)        # 0~100 — admin 조작 or 잠금 해제 시 emit
     imageImported        = Signal(str, str)   # slot_type, result (icon→URL, parts→filename)
+    memoryChanged        = Signal()           # DB CRUD 성공 시 emit → QML 자동 갱신
 
     def __init__(self, agent):
         super().__init__()
@@ -1179,7 +1180,6 @@ class ChatBridge(QObject):
         "prompt_convert": "#프롬프트 변환 — ChromaDB 가이드 기반 프롬프트 자동 변환",
         "folder_classify": "#폴더 분류 — 날짜/확장자별로 파일을 하위 폴더로 자동 정리",
         "local_search":   "#파일 검색 — 폴더 내 파일명·내용 키워드 검색 (서브폴더 포함)",
-        "web_search":     "#웹 검색 — DuckDuckGo 인터넷 검색 (클릭 가능한 하이퍼링크 제공)",
         "help":           "#? — 각 기능에 대한 간략한 설명을 표시합니다",
     }
 
@@ -1243,6 +1243,55 @@ class ChatBridge(QObject):
             return json.dumps(long_term.query_preview(query, char_id), ensure_ascii=False)
         except Exception as e:  # noqa: BLE001
             return json.dumps([], ensure_ascii=False)
+
+    # ── ChromaDB CRUD ─────────────────────────────────────────────────────────
+
+    def _long_term_and_char(self):
+        """(long_term, char_id) 쌍을 반환. 없으면 (None, "")."""
+        char_id = (self._agent.character or {}).get("id", "")
+        long_term = getattr(self._agent, "long_term", None)
+        return long_term, char_id
+
+    @Slot(str, result=bool)
+    def deleteMemoryEntry(self, entry_id: str) -> bool:
+        """항목을 ID로 삭제한다. 성공하면 memoryChanged emit."""
+        long_term, char_id = self._long_term_and_char()
+        if long_term is None or not char_id:
+            return False
+        ok = long_term.delete_entry(char_id, entry_id)
+        if ok:
+            self.memoryChanged.emit()
+        return ok
+
+    @Slot(str, str, result=str)
+    def addMemoryEntry(self, content: str, meta_json: str) -> str:
+        """새 항목을 추가한다. 성공하면 memoryChanged emit. 반환: 생성된 entry_id."""
+        long_term, char_id = self._long_term_and_char()
+        if long_term is None or not char_id or not content.strip():
+            return ""
+        try:
+            metadata = json.loads(meta_json) if meta_json.strip() else {}
+        except Exception:  # noqa: BLE001
+            metadata = {}
+        entry_id = long_term.add_entry(char_id, content.strip(), metadata)
+        if entry_id:
+            self.memoryChanged.emit()
+        return entry_id
+
+    @Slot(str, str, str, result=bool)
+    def updateMemoryEntry(self, entry_id: str, new_content: str, meta_json: str) -> bool:
+        """기존 항목을 수정한다. 성공하면 memoryChanged emit."""
+        long_term, char_id = self._long_term_and_char()
+        if long_term is None or not char_id or not entry_id:
+            return False
+        try:
+            metadata = json.loads(meta_json) if meta_json.strip() else {}
+        except Exception:  # noqa: BLE001
+            metadata = {}
+        ok = long_term.update_entry(char_id, entry_id, new_content.strip(), metadata)
+        if ok:
+            self.memoryChanged.emit()
+        return ok
 
     # ── 대화 파라미터 관리자 ──────────────────────────────────────────────────
 

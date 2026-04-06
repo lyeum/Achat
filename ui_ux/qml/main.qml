@@ -43,7 +43,10 @@ Window {
     property string fileSearchQuery:       ""
     property string searchDirectory:       ""   // local_search 태그 선택 시 미리 저장
 
-    // 기억 DB 뷰어
+    // 사이드 메뉴
+    property bool   sideMenuOpen:          false
+
+    // 기억 DB 관리 패널
     property bool   memoryDbOpen:          false
     property string memoryDbJson:          "{}"
     property string memorySearchJson:      "[]"
@@ -393,20 +396,56 @@ Window {
             }
         }
 
-        // ── 기억 DB 뷰어 패널 오버레이 ───────────────────────────────────
+        // ── 기억 DB 관리 패널 오버레이 ───────────────────────────────────
         MemoryDBPanel {
             anchors.fill: parent
             visible: root.memoryDbOpen && !root.isBubble
             z: 22
-            fontFamily:       koreanFont.font.family
-            dbJson:           root.memoryDbJson
-            searchResultJson: root.memorySearchJson
-            onCloseRequested: {
-                root.memoryDbOpen  = false
-                root.memorySearchJson = "[]"
+            fontFamily: koreanFont.font.family
+            dbJson:     root.memoryDbJson
+            onCloseRequested: root.memoryDbOpen = false
+            onDeleteRequested: function(entryId) {
+                bridge.deleteMemoryEntry(entryId)
             }
-            onSearchRequested: function(query) {
-                root.memorySearchJson = bridge.searchMemoryPreview(query)
+            onAddRequested: function(content, metaJson) {
+                bridge.addMemoryEntry(content, metaJson)
+            }
+            onUpdateRequested: function(entryId, newContent, metaJson) {
+                bridge.updateMemoryEntry(entryId, newContent, metaJson)
+            }
+        }
+
+        // ── 사이드 메뉴 패널 오버레이 ─────────────────────────────────────
+        SideMenuPanel {
+            anchors.fill: parent
+            visible: root.sideMenuOpen && !root.isBubble
+            z: 25
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.sideMenuOpen = false
+            onOpenMemoryDB: {
+                root.memoryDbJson = bridge.getMemoryDB()
+                root.memoryDbOpen = true
+                root.sideMenuOpen = false
+            }
+            onOpenSettings: {
+                root.charListJson  = bridge.getCharacterList()
+                root.worldListJson = bridge.getWorldList()
+                root.settingsOpen  = true
+                root.sideMenuOpen  = false
+            }
+            onOpenAdmin: {
+                root.adminConvJson  = bridge.getConvParams()
+                root.adminPanelOpen = true
+                root.sideMenuOpen   = false
+            }
+        }
+
+        // ── bridge.memoryChanged → DB 패널 자동 갱신 ─────────────────────
+        Connections {
+            target: bridge
+            function onMemoryChanged() {
+                if (root.memoryDbOpen)
+                    root.memoryDbJson = bridge.getMemoryDB()
             }
         }
 
@@ -519,27 +558,6 @@ Window {
                         }
                     }
 
-                    // DB 뷰어 버튼
-                    Rectangle {
-                        width: 24; height: 20; radius: 4
-                        color: dbBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Text {
-                            anchors.centerIn: parent; text: "DB"
-                            color: root._th.accent; font.pixelSize: 9; font.bold: true
-                            font.family: koreanFont.font.family
-                        }
-                        MouseArea {
-                            id: dbBtnHov; anchors.fill: parent
-                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.memoryDbJson   = bridge.getMemoryDB()
-                                root.memorySearchJson = "[]"
-                                root.memoryDbOpen   = true
-                            }
-                        }
-                    }
-
                     // 관리자 버튼
                     Rectangle {
                         width: 32; height: 20; radius: 4
@@ -573,11 +591,7 @@ Window {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.charListJson  = bridge.getCharacterList()
-                                root.worldListJson = bridge.getWorldList()
-                                root.settingsOpen  = true
-                            }
+                            onClicked: root.sideMenuOpen = true
                         }
                     }
 
@@ -736,7 +750,6 @@ Window {
                                 { key: "prompt_convert",  label: "#프롬프트 변환",  color: "#7A6BAA" },
                                 { key: "folder_classify", label: "#폴더 분류",      color: "#3D8A72" },
                                 { key: "local_search",    label: "#파일 검색",      color: "#6A8A3D" },
-                                { key: "web_search",      label: "#웹 검색",        color: "#8A4A7A" },
                                 { key: "help",            label: "#?",              color: "#7A7A7A" },
                             ]
 
@@ -778,7 +791,7 @@ Window {
                                         } else {
                                             // #? 도움말 태그: 즉시 도움말 표시 후 해제
                                             if (modelData.key === "help") {
-                                                var helpKeys = ["file_convert","folder_classify","local_search","web_search","prompt_convert"]
+                                                var helpKeys = ["file_convert","folder_classify","local_search","prompt_convert"]
                                                 var helpLines = []
                                                 for (var hi = 0; hi < helpKeys.length; hi++) {
                                                     var ht = bridge.getHelpText(helpKeys[hi])
@@ -931,7 +944,6 @@ Window {
         "prompt_convert":  "변환할 프롬프트를 입력하세요...",
         "folder_classify": "분류 기준을 입력하세요...",
         "local_search":    "검색어를 입력하세요...",
-        "web_search":      "검색할 내용을 입력하세요...",
         "help":            "궁금하신 기능의 이름을 입력하세요...",
     })
 
