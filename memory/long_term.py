@@ -14,18 +14,25 @@ class LongTermMemory:
 
     def __init__(self, config: dict):
         import chromadb
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
         self.cfg = config
         self.threshold: float = config.get("vdb_threshold", 0.7)
         self.top_k: int = config.get("vdb_top_k", 2)
-
-        embed_model = config.get("embedding_model", "BAAI/bge-m3")
-        self._ef = SentenceTransformerEmbeddingFunction(model_name=embed_model)
+        self._ef = None  # lazy: 첫 _collection() 호출 시 로드
 
         chroma_path = config.get("chroma_path", "./chroma_dev")
         self._client = chromadb.PersistentClient(path=chroma_path)
         logger.info(f"[long_term] ChromaDB 초기화: {chroma_path}")
+
+    def _load_ef(self):
+        """임베딩 함수를 처음 사용할 때만 로드한다 (lazy)."""
+        if self._ef is None:
+            from memory.embedding import get_embedding_function
+            self._ef = get_embedding_function(
+                self.cfg.get("embedding_model", "BAAI/bge-m3"),
+                self.cfg.get("embedding_device", "cpu"),
+            )
+        return self._ef
 
     def _collection(self, character_id: str):
         """캐릭터별 컬렉션을 가져오거나 생성한다.
@@ -35,7 +42,7 @@ class LongTermMemory:
         """
         return self._client.get_or_create_collection(
             name=f"{character_id.lower()}_memory",
-            embedding_function=self._ef,
+            embedding_function=self._load_ef(),
             metadata={"hnsw:space": "cosine"},
         )
 
@@ -151,6 +158,78 @@ class LongTermMemory:
             col.delete(ids=all_ids)
             logger.info(f"[long_term] 전체 기억 삭제: {character_id} ({len(all_ids)}개)")
         return len(all_ids)
+
+    def get_all(self, character_id: str) -> dict:
+        """전체 기억을 세션별로 그룹화해 반환한다 (DB 뷰어용).
+
+        Returns
+        -------
+        {
+            "collection": "haru_memory",
+            "total": 23,
+            "sessions": {
+                "session-abc": [
+                    {"id": ..., "content": ..., "importance": 0.85,
+                     "tags": "이름,취미", "location": "cafe",
+                     "timestamp": "2025-01-18T09:30:00", "turn_range": "3-8"},
+                    ...
+                ],
+                ...
+            }
+        }
+        """
+        col = self._collection(character_id)
+        total = col.count()
+        if total == 0:
+            return {"collection": f"{character_id.lower()}_memory", "total": 0, "sessions": {}}
+
+        result = col.get(include=["documents", "metadatas"])
+        sessions: dict = {}
+        for doc_id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"]):
+            sess = meta.get("session_id", "unknown")
+            if sess not in sessions:
+                sessions[sess] = []
+            sessions[sess].append({
+                "id":         doc_id,
+                "content":    doc,
+                "importance": meta.get("importance", 0.0),
+                "tags":       meta.get("tags", ""),
+                "location":   meta.get("location", ""),
+                "timestamp":  meta.get("timestamp", ""),
+                "turn_range": meta.get("turn_range", ""),
+            })
+
+        for sess in sessions:
+            sessions[sess].sort(key=lambda x: x["timestamp"], reverse=True)
+
+        return {"collection": f"{character_id.lower()}_memory", "total": total, "sessions": sessions}
+
+    def query_preview(self, text: str, character_id: str, top_k: int = 5) -> list[dict]:
+        """유사 기억 검색 미리보기 — threshold 무관하게 상위 top_k개를 반환한다."""
+        col = self._collection(character_id)
+        n = col.count()
+        if n == 0:
+            return []
+
+        results = col.query(
+            query_texts=[text],
+            n_results=min(top_k, n),
+            include=["documents", "metadatas", "distances"],
+        )
+
+        docs  = results["documents"][0]
+        metas = results["metadatas"][0]
+        dists = results["distances"][0]
+
+        return [
+            {
+                "content":    doc,
+                "importance": meta.get("importance", 0.0),
+                "tags":       meta.get("tags", ""),
+                "similarity": round(1.0 - dist, 3),
+            }
+            for doc, meta, dist in zip(docs, metas, dists)
+        ]
 
     def seed(self, entries: list[dict]) -> None:
         """M_default.json 초기 데이터를 일괄 삽입한다 (이미 있으면 upsert로 덮어씀)."""
