@@ -177,8 +177,14 @@ Item {
                         color: "#E0E0E0"; font.pixelSize: 11
                         font.family: dbRoot.fontFamily
                         wrapMode: TextEdit.Wrap
-                        placeholderText: "기억 내용을 입력하세요..."
-                        // QML 2.15에서 placeholderText는 TextEdit에 없으므로 수동 처리
+                    }
+                    // TextEdit에는 placeholderText 없음 — 빈 상태일 때 오버레이 힌트
+                    Text {
+                        anchors { left: parent.left; top: parent.top; margins: 6 }
+                        text: "기억 내용을 입력하세요..."
+                        color: "#505070"; font.pixelSize: 11
+                        font.family: dbRoot.fontFamily
+                        visible: addContent.text.length === 0
                     }
                 }
 
@@ -281,8 +287,6 @@ Item {
             spacing: 6
             model: dbRoot._entries
 
-            Behavior on anchors.topMargin { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: Rectangle {
@@ -358,43 +362,21 @@ Item {
                         }
                     }
 
-                    // 타임스탬프 + 버튼 행
-                    Row {
-                        width: parent.width
-                        spacing: 0
+                    // 타임스탬프 + 버튼 행 (Row 대신 Item+anchors — Row 안에서 anchor 사용 불가)
+                    Item {
+                        width: parent.width; height: 24
 
                         Text {
+                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                             text: (modelData.timestamp || "").substring(0, 16).replace("T", " ")
                             color: "#505070"; font.pixelSize: 9; font.family: dbRoot.fontFamily
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        Item { width: parent.width - timestampW.implicitWidth - editBtn.width - delBtn.width - 8; height: 1 }
-
-                        // 수정 버튼
-                        Rectangle {
-                            id: editBtn
-                            width: 28; height: 22; radius: 4
-                            color: editBtnHov.containsMouse ? "#2A3A5A" : "transparent"
-                            Behavior on color { ColorAnimation { duration: 100 } }
-                            Text { anchors.centerIn: parent; text: "✏"; font.pixelSize: 11; color: "#7090C0" }
-                            MouseArea {
-                                id: editBtnHov; anchors.fill: parent
-                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    editContent.text   = modelData.content
-                                    editImportance.value = modelData.importance || 0.5
-                                    editTags.text      = modelData.tags || ""
-                                    editLocation.text  = modelData.location || ""
-                                    card._editing = true
-                                }
-                            }
                         }
 
                         // 삭제 버튼
                         Rectangle {
                             id: delBtn
                             width: 28; height: 22; radius: 4
+                            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                             color: delBtnHov.containsMouse ? "#4A1A1A" : "transparent"
                             Behavior on color { ColorAnimation { duration: 100 } }
                             Text { anchors.centerIn: parent; text: "🗑"; font.pixelSize: 11; color: "#A06060" }
@@ -404,14 +386,27 @@ Item {
                                 onClicked: dbRoot.deleteRequested(modelData.id)
                             }
                         }
-                    }
 
-                    // (타임스탬프 폭 측정용 숨김 Text)
-                    Text {
-                        id: timestampW
-                        visible: false
-                        text: (modelData.timestamp || "").substring(0, 16).replace("T", " ")
-                        font.pixelSize: 9
+                        // 수정 버튼
+                        Rectangle {
+                            id: editBtn
+                            width: 28; height: 22; radius: 4
+                            anchors { right: delBtn.left; rightMargin: 2; verticalCenter: parent.verticalCenter }
+                            color: editBtnHov.containsMouse ? "#2A3A5A" : "transparent"
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Text { anchors.centerIn: parent; text: "✏"; font.pixelSize: 11; color: "#7090C0" }
+                            MouseArea {
+                                id: editBtnHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    editContent.text     = modelData.content
+                                    editImportance.value = modelData.importance || 0.5
+                                    editTags.text        = modelData.tags || ""
+                                    editLocation.text    = modelData.location || ""
+                                    card._editing = true
+                                }
+                            }
+                        }
                     }
                 }
 

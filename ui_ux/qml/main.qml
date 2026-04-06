@@ -49,7 +49,6 @@ Window {
     // 기억 DB 관리 패널
     property bool   memoryDbOpen:          false
     property string memoryDbJson:          "{}"
-    property string memorySearchJson:      "[]"
 
     // 관리자 패널
     property bool   adminPanelOpen:        false
