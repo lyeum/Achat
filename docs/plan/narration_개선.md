@@ -1,8 +1,15 @@
 # 나레이션 시스템 개선 계획
 
 > 작성일: 2026-04-01
-> 상태: 계획 (미구현)
-> 목표: 대화 로그 실시간 모니터링 기반 나레이션 자동 삽입 + 사용자 행동 묘사 입력 지원
+> 상태: **방향 전환** (2026-04-06)
+> 원래 목표: LLM 기반 나레이션 자동 삽입 + 사용자 행동 묘사 입력 지원
+>
+> **변경 사항**: LLM Narrator(`conversation/narrator.py`) 제거 완료.
+> VRAM/RAM 절감 및 응답 지연 제거 목적. 대신 `narration_hardcoded.py` + `NarrationMonitor`를 사용.
+> - `narration_hardcoded.find_trigger()`: 키워드 → 미리 작성된 묘사 텍스트, LLM 호출 없음
+> - `NarrationMonitor.check_keyword()`: 세션 내 키워드당 1회 제한
+> - `bridge.py`의 `_ACTION_RE`: `*...*` 패턴 → `(행동: ...)` 변환
+> - 테스트 27개 `tests/test_narration.py`에서 검증 완료
 
 ---
 
