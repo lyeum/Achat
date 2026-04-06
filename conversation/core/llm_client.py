@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from loguru import logger
@@ -11,6 +12,10 @@ class LLMClient:
     config.py의 model_backend 값에 따라 자동으로 로딩 방식을 선택한다.
     - "llama_cpp"   : GGUF 모델 + llama-cpp-python (배포 환경)
     - "transformers": HuggingFace 모델 + 4-bit BnB (개발 환경 추론 테스트용)
+
+    generate()는 내부 락으로 직렬화된다.
+    대화/function 호출이 동시에 실행되면 VRAM 이중 점유로 OOM이 발생하므로
+    동시 호출 시 먼저 온 요청이 끝날 때까지 대기한다.
     """
 
     def __init__(self, config: Optional[dict] = None):
@@ -20,6 +25,7 @@ class LLMClient:
         self.backend: str = self.cfg["model_backend"]
         self._model = None
         self._tokenizer = None
+        self._generate_lock = threading.Lock()
         self._load()
 
     # ── 로딩 ─────────────────────────────────────────────────────────────────
@@ -39,28 +45,53 @@ class LLMClient:
         if not model_path:
             raise ValueError("deploy 환경에서 model_path가 설정되지 않았습니다.")
         logger.info(f"[llm_client] llama_cpp 로딩: {model_path}")
-        self._model = Llama(model_path=model_path, n_ctx=4096, verbose=False)
+        import multiprocessing
+        n_threads = self.cfg.get("n_threads", multiprocessing.cpu_count())
+        self._model = Llama(model_path=model_path, n_ctx=4096, n_threads=n_threads, verbose=False)
+        logger.info(f"[llm_client] llama_cpp 스레드: {n_threads}")
 
     def _load_transformers(self) -> None:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         model_name = self.cfg.get("model_name")
         if not model_name:
             raise ValueError("dev 환경에서 model_name이 설정되지 않았습니다.")
 
         adapter_path = self.cfg.get("adapter_path")
-        logger.info(f"[llm_client] transformers 로딩: {model_name}")
+        quantization = self.cfg.get("quantization", "int4")  # "int4" | "int8" | "none"
+        logger.info(f"[llm_client] transformers 로딩: {model_name} (quantization={quantization})")
         if adapter_path:
             logger.info(f"[llm_client] LoRA 어댑터: {adapter_path}")
 
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-        ).to(self._device)
+
+        if quantization == "int4" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,  # 이중 양자화 — 추가 ~0.4 bpw 절감
+                bnb_4bit_quant_type="nf4",       # NormalFloat4 — 학습 분포 기반 최적 양자화
+            )
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=bnb_cfg,
+                low_cpu_mem_usage=True,
+            )
+        elif quantization == "int8" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=bnb_cfg,
+                low_cpu_mem_usage=True,
+            )
+        else:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+            ).to(self._device)
 
         if adapter_path:
             from peft import PeftModel  # type: ignore
@@ -85,9 +116,10 @@ class LLMClient:
         mode='function': JSON 파라미터 추출용 — greedy decoding, 강한 repetition_penalty.
         mode='chat'    : 대화용 — sampling, 기본 repetition_penalty (기본값).
         """
-        if self.backend == "llama_cpp":
-            return self._generate_llama(messages, stream, max_tokens)
-        return self._generate_transformers(messages, max_tokens, mode=mode)
+        with self._generate_lock:
+            if self.backend == "llama_cpp":
+                return self._generate_llama(messages, stream, max_tokens)
+            return self._generate_transformers(messages, max_tokens, mode=mode)
 
     def _generate_llama(
         self, messages: list[dict], stream: bool, max_tokens: int
