@@ -173,7 +173,7 @@ Item {
                     color: "#181828"; border.color: "#2A2A40"; border.width: 1; radius: 4
                     TextEdit {
                         id: addContent
-                        anchors { fill: parent; margins: 6 }
+                        anchors.fill: parent; anchors.margins: 6
                         color: "#E0E0E0"; font.pixelSize: 11
                         font.family: dbRoot.fontFamily
                         wrapMode: TextEdit.Wrap
@@ -215,9 +215,13 @@ Item {
                         color: "#181828"; border.color: "#2A2A40"; border.width: 1
                         TextInput {
                             id: addTags
-                            anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                            anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6
                             color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily
-                            placeholderText: "쉼표로 구분"
+                        }
+                        Text {
+                            anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                            visible: addTags.text.length === 0
+                            text: "쉼표로 구분"; color: "#505070"; font.pixelSize: 10; font.family: dbRoot.fontFamily
                         }
                     }
                 }
@@ -231,9 +235,13 @@ Item {
                         color: "#181828"; border.color: "#2A2A40"; border.width: 1
                         TextInput {
                             id: addLocation
-                            anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                            anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6
                             color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily
-                            placeholderText: "선택 사항"
+                        }
+                        Text {
+                            anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                            visible: addLocation.text.length === 0
+                            text: "선택 사항"; color: "#505070"; font.pixelSize: 10; font.family: dbRoot.fontFamily
                         }
                     }
                 }
@@ -423,7 +431,7 @@ Item {
                         color: "#181828"; border.color: "#3A3A60"; border.width: 1; radius: 4
                         TextEdit {
                             id: editContent
-                            anchors { fill: parent; margins: 6 }
+                            anchors.fill: parent; anchors.margins: 6
                             color: "#E0E0E0"; font.pixelSize: 11
                             font.family: dbRoot.fontFamily
                             wrapMode: TextEdit.Wrap
@@ -447,7 +455,7 @@ Item {
                         Text { text: "태그"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
                         Rectangle {
                             width: 160; height: 22; radius: 4; color: "#181828"; border.color: "#2A2A40"; border.width: 1
-                            TextInput { id: editTags; anchors { fill: parent; leftMargin: 6 }; color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
+                            TextInput { id: editTags; anchors.fill: parent; anchors.leftMargin: 6; color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
                         }
                     }
 
@@ -457,7 +465,7 @@ Item {
                         Text { text: "위치"; color: "#8080A0"; font.pixelSize: 10; font.family: dbRoot.fontFamily; anchors.verticalCenter: parent.verticalCenter }
                         Rectangle {
                             width: 160; height: 22; radius: 4; color: "#181828"; border.color: "#2A2A40"; border.width: 1
-                            TextInput { id: editLocation; anchors { fill: parent; leftMargin: 6 }; color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
+                            TextInput { id: editLocation; anchors.fill: parent; anchors.leftMargin: 6; color: "#E0E0E0"; font.pixelSize: 10; font.family: dbRoot.fontFamily }
                         }
                     }
 
