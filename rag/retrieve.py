@@ -14,17 +14,24 @@ class WorldRetriever:
 
     def __init__(self, config: dict):
         import chromadb
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
+        self._cfg = config
         self.threshold: float = config.get("vdb_threshold", 0.7)
         self.n_results: int   = config.get("vdb_top_k", 2)
-
-        embed_model = config.get("embedding_model", "BAAI/bge-m3")
-        self._ef = SentenceTransformerEmbeddingFunction(model_name=embed_model)
+        self._ef = None  # lazy: 첫 query/add_document 호출 시 로드
 
         chroma_path = config.get("chroma_path", "./chroma_dev")
         self._client = chromadb.PersistentClient(path=chroma_path)
         self._col_name = "world_knowledge"
+
+    def _load_ef(self):
+        if self._ef is None:
+            from memory.embedding import get_embedding_function
+            self._ef = get_embedding_function(
+                self._cfg.get("embedding_model", "BAAI/bge-m3"),
+                self._cfg.get("embedding_device", "cpu"),
+            )
+        return self._ef
 
     def query(self, text: str) -> list[str]:
         """text와 유사한 세계관 청크를 반환한다.
@@ -38,7 +45,7 @@ class WorldRetriever:
             return []
 
         col = self._client.get_collection(
-            name=self._col_name, embedding_function=self._ef
+            name=self._col_name, embedding_function=self._load_ef()
         )
         if col.count() == 0:
             return []
@@ -72,12 +79,12 @@ class WorldRetriever:
         if self._col_name not in existing:
             col = self._client.create_collection(
                 name=self._col_name,
-                embedding_function=self._ef,
+                embedding_function=self._load_ef(),
                 metadata={"hnsw:space": "cosine"},
             )
         else:
             col = self._client.get_collection(
-                name=self._col_name, embedding_function=self._ef
+                name=self._col_name, embedding_function=self._load_ef()
             )
 
         col.upsert(ids=[doc_id], documents=[text], metadatas=[metadata])

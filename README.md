@@ -174,7 +174,6 @@ LLM은 자연어 해석 및 파라미터 추출만 담당, 실행은 rule-based 
 | 종류 | 방식 |
 |---|---|
 | 로컬 검색 | SQLite FTS5 파일 인덱싱 (서브폴더 포함 os.walk, 권한 오류 자동 건너뜀) |
-| 인터넷 검색 | DuckDuckGo (ddgs) — 의미 관련도 정렬 후 HTML 하이퍼링크로 결과 제공 |
 
 ---
 
@@ -260,8 +259,7 @@ Achat/
 │   │   └─ renamer.py             # 이름 일괄 변환
 │   ├─ prompt_converter.py        # 프롬프트 변환
 │   └─ search/
-│       ├─ local_search.py        # 로컬 파일 인덱싱 + FTS 검색
-│       └─ web_search.py          # 인터넷 검색 (DuckDuckGo / SearXNG)
+│       └─ local_search.py        # 로컬 파일 인덱싱 + FTS 검색 (web_search.py 삭제됨)
 │
 ├─ training/                       # LoRA 파인튜닝
 │   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, EWCTrainer, GPU/CPU 자동 전환)
@@ -274,7 +272,7 @@ Achat/
 │   │   ├─ memory_test.py         # 기억 유지 정확도 (5케이스, 자동 실행)
 │   │   ├─ speed_bench.py         # 추론 속도 벤치마크 (수동)
 │   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 12턴 (수동)
-│   ├─ data/                      # 학습 데이터 (2,401건, 38파일)
+│   ├─ data/                      # 학습 데이터 (2,150건, 38파일, v10 기준)
 │   │   ├─ affection/             # 친밀도 단계별 (6단계: stranger~intimate)
 │   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow
 │   │   ├─ emotion/               # 감정 상태별 (9종: neutral/happy/affectionate/touched/curious/sad/embarrassed/annoyed/angry)
@@ -285,7 +283,8 @@ Achat/
 │
 ├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
 │   ├─ LoRA_v8/                   # v8 (eval best 1.353, 5 epoch 과적합)
-│   └─ LoRA_v9/adapter/           # 현재 어댑터 (eval best 1.511, 3 epoch, EWC λ=500)
+│   ├─ LoRA_v9/adapter/           # v9 (eval best 1.511, 3 epoch, EWC λ=500)
+│   └─ LoRA_v10/adapter/          # 현재 어댑터 (eval best 1.512, 3 epoch, character_schema 기반)
 │
 ├─ data/
 │   └─ lora/
@@ -320,7 +319,7 @@ Achat/
 | 폴더 정리 도구 | ✅ 가능 | pathlib / shutil 기반 rule-based, 이미지 확장자 변환은 Pillow |
 | 프롬프트 변환 도구 | ✅ 가능 | ChromaDB 가이드 캐싱 + 크롤링 폴백 |
 | 로컬 검색 도구 | ✅ 가능 | SQLite FTS5, os.walk 서브폴더 재귀 탐색 |
-| 인터넷 검색 도구 | ✅ 가능 | ddgs 기반, LLM 없이 하이퍼링크 직접 반환, 관련도 정렬 |
+| 인터넷 검색 도구 | ❌ 제거됨 | RAM/VRAM 절감 및 외부 의존성 제거 목적 (2026-04-06) |
 | JSON 파라미터 추출 (3B) | ⚠️ 주의 | prompt_convert만 LLM 추출 사용. 나머지 도구는 직접 다이얼로그로 LLM 없이 동작 |
 | RTX 5060 Ti BnB | ✅ 미사용 | Blackwell SM 10.x 호환 이슈로 BitsAndBytes 대신 bfloat16 풀 파라미터 채택 |
 
@@ -406,7 +405,7 @@ Achat/
 - [x] `training/학습.md` — 학습 구조 리뷰, 실행 가이드, 개선안 (EWC/카테고리 가중치 구현 완료)
 - [x] `training/eval/ai_tell_checker.py` / `training/eval/memory_test.py` / `training/eval/speed_bench.py` / `training/eval/verify_phases.py` 구현 (구 `eval/` 폴더에서 `training/eval/`로 이동)
 - [x] `training/train_monitor.py` — 과적합 모니터링 + 조기 종료 + VRAM 해제 래퍼 구현
-- [x] 학습 데이터 확장: `emotion/` (9종 × 20건 = 180건) + `long_dialogue/` (54건) 추가 → 총 2,401건 (38파일)
+- [x] 학습 데이터 확장: `emotion/` (9종 × 20건 = 180건) + `long_dialogue/` (54건) 추가 → 총 2,150건 (38파일, v10 — _excluded 비활성 데이터 제외)
 - [x] CPU smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
 - [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 2,167건, assistant masking, eval best 1.687)
 - [x] (실행 검증) LoRA_v8 GPU 학습 완료 (5 epoch, 2,401건, category_weights, eval best 1.353 / 과적합 발생)
@@ -439,11 +438,15 @@ Achat/
 - [x] `tools/folder/renamer.py` — 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
 - [x] `tools/prompt_converter.py` — 프롬프트 변환 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형) + ChromaDB 가이드 캐싱
 - [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, **os.walk 서브폴더 재귀**)
-- [x] `tools/search/web_search.py` — DuckDuckGo 검색 + 의미 관련도 정렬 + **HTML 하이퍼링크 직접 반환** (LLM 2-step 제거)
+- [x] ~~`tools/search/web_search.py`~~ — 삭제됨 (2026-04-06, RAM/VRAM 절감)
 - [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 + `_recent_ops` 기록 → Layer F 대화 연속성
-- [x] `ui_ux/bridge.py` — 플랫폼 분기 (`_is_wsl`, `_is_windows`), `openFile(WSL2 powershell)`, `openUrl()`, `getHelpText()`, `_unload_llm()` OOM 수정
-- [x] `ui_ux/qml/main.qml` — 태그 클릭 즉시 다이얼로그, `#?` 도움말 태그, `searchDirectory` 재사용
-- [x] `ui_ux/qml/ChatBubble.qml` — `Text.AutoText` + `bridge.openUrl()` 하이퍼링크 클릭
+- [x] `ui_ux/bridge.py` — 플랫폼 분기 (`_is_wsl`, `_is_windows`), `openFile(WSL2 powershell)`, `openUrl()`, `getHelpText()`, `_unload_llm()` OOM 수정, `memoryChanged` Signal + CRUD 슬롯 3개
+- [x] `ui_ux/qml/SideMenuPanel.qml` — ≡ 버튼 → 220px 아코디언 사이드 메뉴 (DB/설정/관리)
+- [x] `ui_ux/qml/MemoryDBPanel.qml` — ChromaDB CRUD 패널 (카드 목록 + 인라인 수정 + 추가 폼)
+- [x] `ui_ux/qml/AdminPanel.qml` / `CharacterCreatePanel.qml` — 관리자 패널 신규
+- [x] `ui_ux/qml/main.qml` — `sideMenuOpen` 프로퍼티, CRUD Signal 연결, `memoryChanged` Connections
+- [x] `memory/long_term.py` — `delete_entry` / `add_entry` / `update_entry` CRUD 메서드
+- [x] `conversation/narration_hardcoded.py` / `narration_monitor.py` — LLM 없는 키워드 트리거 나레이션
 
 ---
 

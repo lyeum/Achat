@@ -59,6 +59,7 @@ class ChatBridge(QObject):
     moodChanged          = Signal(str)        # neutral | happy | annoyed | sad
     affectionChanged     = Signal(int)        # 0~100 — admin 조작 or 잠금 해제 시 emit
     imageImported        = Signal(str, str)   # slot_type, result (icon→URL, parts→filename)
+    memoryChanged        = Signal()           # DB CRUD 성공 시 emit → QML 자동 갱신
 
     def __init__(self, agent):
         super().__init__()
@@ -89,20 +90,6 @@ class ChatBridge(QObject):
         self._current_bg: str = self._build_bg_url()
         self._current_mood: str = self._read_mood()
 
-        # NarrationMonitor 초기화 (stub 모드나 narrator 없으면 None)
-        self._narration_monitor = None
-        narrator = getattr(agent, "narrator", None)
-        if narrator is not None and not getattr(agent, "_stub", True):
-            from conversation.narration_monitor import NarrationMonitor
-            self._narration_monitor = NarrationMonitor(
-                narrator, agent.character
-            )
-
-        # 세션 스냅샷 — LLM 응답 전 상태 보존 (NarrationMonitor에 전달)
-        self._snap_mood: str       = "neutral"
-        self._snap_affection: int  = 30
-        self._snap_act_id: str | None = None
-        self._snap_user_input: str = ""
 
     # ── Property ──────────────────────────────────────────────────────────────
 
@@ -306,14 +293,6 @@ class ChatBridge(QObject):
         """
         if not text.strip() or self._worker is not None:
             return
-
-        # ── 세션 스냅샷 캡처 (LLM 응답 전 상태 저장) ─────────────────────
-        session = getattr(self._agent, "session", None)
-        if session is not None:
-            self._snap_mood       = session.mood
-            self._snap_affection  = session.affection
-            self._snap_act_id     = session.act_id
-        self._snap_user_input = text.strip()
 
         # ── 행동 묘사 패턴 감지 (*...*) → dialogue_log용 변환 ────────────
         action_match = _ACTION_RE.match(text.strip())
@@ -1201,7 +1180,6 @@ class ChatBridge(QObject):
         "prompt_convert": "#프롬프트 변환 — ChromaDB 가이드 기반 프롬프트 자동 변환",
         "folder_classify": "#폴더 분류 — 날짜/확장자별로 파일을 하위 폴더로 자동 정리",
         "local_search":   "#파일 검색 — 폴더 내 파일명·내용 키워드 검색 (서브폴더 포함)",
-        "web_search":     "#웹 검색 — DuckDuckGo 인터넷 검색 (클릭 가능한 하이퍼링크 제공)",
         "help":           "#? — 각 기능에 대한 간략한 설명을 표시합니다",
     }
 
@@ -1238,27 +1216,140 @@ class ChatBridge(QObject):
 
     # ── 내부 콜백 ─────────────────────────────────────────────────────────────
 
+    # ── ChromaDB 뷰어 ────────────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def getMemoryDB(self) -> str:
+        """현재 캐릭터의 장기 기억 DB 전체를 JSON으로 반환 (MemoryDBPanel용)."""
+        char_id = (self._agent.character or {}).get("id", "")
+        long_term = getattr(self._agent, "long_term", None)
+        if long_term is None or not char_id:
+            return json.dumps({"collection": "", "total": 0, "sessions": {}}, ensure_ascii=False)
+        try:
+            return json.dumps(long_term.get_all(char_id), ensure_ascii=False)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"error": str(e), "total": 0, "sessions": {}}, ensure_ascii=False)
+
+    @Slot(str, result=str)
+    def searchMemoryPreview(self, query: str) -> str:
+        """현재 DB에서 유사 기억 검색 미리보기를 JSON으로 반환."""
+        if not query.strip():
+            return json.dumps([], ensure_ascii=False)
+        char_id = (self._agent.character or {}).get("id", "")
+        long_term = getattr(self._agent, "long_term", None)
+        if long_term is None or not char_id:
+            return json.dumps([], ensure_ascii=False)
+        try:
+            return json.dumps(long_term.query_preview(query, char_id), ensure_ascii=False)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps([], ensure_ascii=False)
+
+    # ── ChromaDB CRUD ─────────────────────────────────────────────────────────
+
+    def _long_term_and_char(self):
+        """(long_term, char_id) 쌍을 반환. 없으면 (None, "")."""
+        char_id = (self._agent.character or {}).get("id", "")
+        long_term = getattr(self._agent, "long_term", None)
+        return long_term, char_id
+
+    @Slot(str, result=bool)
+    def deleteMemoryEntry(self, entry_id: str) -> bool:
+        """항목을 ID로 삭제한다. 성공하면 memoryChanged emit."""
+        long_term, char_id = self._long_term_and_char()
+        if long_term is None or not char_id:
+            return False
+        ok = long_term.delete_entry(char_id, entry_id)
+        if ok:
+            self.memoryChanged.emit()
+        return ok
+
+    @Slot(str, str, result=str)
+    def addMemoryEntry(self, content: str, meta_json: str) -> str:
+        """새 항목을 추가한다. 성공하면 memoryChanged emit. 반환: 생성된 entry_id."""
+        long_term, char_id = self._long_term_and_char()
+        if long_term is None or not char_id or not content.strip():
+            return ""
+        try:
+            metadata = json.loads(meta_json) if meta_json.strip() else {}
+        except Exception:  # noqa: BLE001
+            metadata = {}
+        entry_id = long_term.add_entry(char_id, content.strip(), metadata)
+        if entry_id:
+            self.memoryChanged.emit()
+        return entry_id
+
+    @Slot(str, str, str, result=bool)
+    def updateMemoryEntry(self, entry_id: str, new_content: str, meta_json: str) -> bool:
+        """기존 항목을 수정한다. 성공하면 memoryChanged emit."""
+        long_term, char_id = self._long_term_and_char()
+        if long_term is None or not char_id or not entry_id:
+            return False
+        try:
+            metadata = json.loads(meta_json) if meta_json.strip() else {}
+        except Exception:  # noqa: BLE001
+            metadata = {}
+        ok = long_term.update_entry(char_id, entry_id, new_content.strip(), metadata)
+        if ok:
+            self.memoryChanged.emit()
+        return ok
+
+    # ── 대화 파라미터 관리자 ──────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def getConvParams(self) -> str:
+        """현재 캐릭터의 conversation 파라미터를 JSON으로 반환."""
+        char = getattr(self._agent, "character", None) or {}
+        return json.dumps(char.get("conversation", {}), ensure_ascii=False)
+
+    @Slot(str, str, float)
+    def setConvParam(self, param: str, tier_or_key: str, value: float) -> None:
+        """대화 파라미터를 메모리에서 즉시 변경한다 (YAML 비저장).
+
+        param        : "response_length" | "openness" | "directness"
+        tier_or_key  : tier명 (response_length/openness) 또는 "_" (directness 단일값)
+        value        : 0.0 ~ 1.0
+        """
+        char = getattr(self._agent, "character", None)
+        if char is None:
+            return
+        conv = char.setdefault("conversation", {})
+        value = max(0.0, min(1.0, float(value)))
+        if param in ("response_length", "openness"):
+            if not isinstance(conv.get(param), dict):
+                conv[param] = {}
+            conv[param][tier_or_key] = value
+        elif param == "directness":
+            conv["directness"] = value
+        # router.builder가 character 참조를 공유하므로 다음 assemble()에 즉시 반영
+
+    # ── 캐릭터 생성 ───────────────────────────────────────────────────────────
+
+    @Slot(str, result=str)
+    def saveNewCharacter(self, json_data: str) -> str:
+        """JSON으로 캐릭터 정의를 받아 CH_{id}.yaml로 저장한다.
+
+        Returns: 저장된 char_id (성공), "" (실패)
+        """
+        import yaml as _yaml
+        try:
+            data = json.loads(json_data)
+            char_id = data.get("id", "").strip()
+            if not char_id:
+                return ""
+            dest = _CHARACTER_DIR / f"CH_{char_id}.yaml"
+            dest.write_text(
+                _yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False),
+                encoding="utf-8",
+            )
+            return char_id
+        except Exception as e:  # noqa: BLE001
+            self.messageAdded.emit("system", f"[캐릭터 저장 실패] {e}")
+            return ""
+
     def _on_response(self, response: str) -> None:
         self.messageAdded.emit("assistant", response)
         self._sync_state()
         self._sync_session_state()  # 턴 종료 시 세션 상태 디스크 동기화
-
-        # ── NarrationWorker 비동기 실행 ───────────────────────────────────
-        if self._narration_monitor is not None:
-            session = getattr(self._agent, "session", None)
-            if session is not None:
-                worker = _NarrationWorker(
-                    monitor      = self._narration_monitor,
-                    session      = session,
-                    prev_mood    = self._snap_mood,
-                    prev_affection = self._snap_affection,
-                    prev_act_id  = self._snap_act_id,
-                    user_input   = self._snap_user_input,
-                )
-                worker.signals.ready.connect(
-                    lambda txt: self.messageAdded.emit("narrator", txt)
-                )
-                QThreadPool.globalInstance().start(worker)
 
         # 학습 데이터 로깅 (enable_play_log=True 환경)
         if self._conv_logger is not None:
@@ -1274,6 +1365,34 @@ class ChatBridge(QObject):
                     affection=session.affection,
                 )
 
+    @Slot(int, str, str)
+    def editMessage(self, qml_index: int, old_content: str, new_content: str) -> None:
+        """사용자가 수정한 assistant/narrator 메시지를 세션 로그와 학습 데이터에 반영한다.
+
+        Parameters
+        ----------
+        qml_index:
+            messageModel 내 메시지 인덱스 (QML에서 전달).
+        old_content:
+            수정 전 원본 텍스트.
+        new_content:
+            수정 후 텍스트.
+        """
+        if old_content == new_content:
+            return
+
+        # 1. session.dialogue_log 업데이트
+        session = getattr(self._agent, "session", None)
+        if session is not None:
+            for msg in session.dialogue_log:
+                if msg.get("role") == "assistant" and msg.get("content") == old_content:
+                    msg["content"] = new_content
+                    break
+
+        # 2. conversation_logger 버퍼 및 저장 파일 업데이트
+        if self._conv_logger is not None:
+            self._conv_logger.edit_turn(old_content, new_content)
+
     def _on_error(self, msg: str) -> None:
         self.messageAdded.emit("system", f"[오류] {msg}")
 
@@ -1281,45 +1400,3 @@ class ChatBridge(QObject):
         self._worker = None
         self.statusChanged.emit("ready")
 
-
-# ── NarrationWorker ───────────────────────────────────────────────────────────
-
-class _NarrationSignals(QObject):
-    ready = Signal(str)
-
-
-class _NarrationWorker(QRunnable):
-    """나레이션 생성을 백그라운드 스레드에서 실행한다."""
-
-    def __init__(
-        self,
-        monitor,
-        session,
-        prev_mood: str,
-        prev_affection: int,
-        prev_act_id,
-        user_input: str,
-    ):
-        super().__init__()
-        self.signals        = _NarrationSignals()
-        self._monitor       = monitor
-        self._session       = session
-        self._prev_mood     = prev_mood
-        self._prev_affection = prev_affection
-        self._prev_act_id   = prev_act_id
-        self._user_input    = user_input
-
-    def run(self) -> None:
-        try:
-            text = self._monitor.observe(
-                session        = self._session,
-                prev_mood      = self._prev_mood,
-                prev_affection = self._prev_affection,
-                prev_act_id    = self._prev_act_id,
-                user_input     = self._user_input,
-            )
-            if text:
-                self.signals.ready.emit(text)
-        except Exception as e:  # noqa: BLE001
-            from loguru import logger
-            logger.warning(f"[NarrationWorker] 오류: {e}")

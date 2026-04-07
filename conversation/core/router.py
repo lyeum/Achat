@@ -80,6 +80,7 @@ class ConversationRouter:
             vdb_results=vdb_results,
             rag_results=rag_results,
             recent_ops=recent_ops,
+            user_input=user_input,
         )
         messages.append({"role": "user", "content": user_input})
 
@@ -119,7 +120,7 @@ class ConversationRouter:
         """이동 의도 감지 → YAML act 매칭 or 동적 장소 생성.
 
         session.act_id / session.location_context를 업데이트한다.
-        장소 도착 나레이션은 bridge.py의 NarrationMonitor(LOCATION_CHANGE 트리거)가 담당한다.
+        장소 이동 시 캐릭터 응답의 *묘사* 포맷으로 자연스럽게 반영된다.
         """
         from rag.world_nav import detect_move_intent, find_or_create_location
 

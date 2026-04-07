@@ -105,3 +105,9 @@ conversation:
     close:        0.6
     intimate:     0.75
   directness: 0.6
+  # 유저 입력이 길수록 응답 길이/감정 개방도 제한을 완화하는 가중치
+  # response_length: 50자→0, 200자→+0.3 (최대 1.0 클램프)
+  # openness: 50자→0, 200자→+0.1
+  input_length_weight:
+    response_length: 0.3
+    openness: 0.1

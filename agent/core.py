@@ -50,10 +50,8 @@ from tools.folder.converter import ConverterTool
 from tools.folder.renamer import RenamerTool
 from tools.prompt_converter import PromptConverterTool
 from tools.search.local_search import LocalSearchTool
-from tools.search.web_search import WebSearchTool
 
 # LLM 주입 불필요 도구 — 모듈 로드 시 즉시 생성
-# WebSearchTool은 LLM + character 주입이 필요하므로 Agent.__init__에서 생성
 _STATIC_TOOLS: list[BaseTool] = [
     ClassifierTool(),
     ConverterTool(),
@@ -68,7 +66,6 @@ _KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("이름", "rename", "renamer", "파일명"), "file_rename"),
     (("분류", "정리", "폴더"), "folder_classify"),
     (("이미지", "image", "png", "jpg", "jpeg", "webp", "bmp", "tiff"), "image_convert"),
-    (("인터넷", "웹 검색", "web", "구글", "검색해줘", "찾아봐"), "web_search"),
     (("검색", "search", "찾아", "파일 찾"), "local_search"),
 ]
 
@@ -129,13 +126,11 @@ class Agent:
             self.long_term = None
             self.session = None
             self.router = None
-            self.narrator = None
             # stub 모드: LLM 없음 — 도구에 None 주입
             self._tools: dict[str, BaseTool] = {
                 t.name: t for t in _STATIC_TOOLS
             }
             self._tools[PromptConverterTool.name] = PromptConverterTool(llm=None, config=self.cfg)
-            self._tools[WebSearchTool.name] = WebSearchTool()
             return
 
         world_id = self.world.get("world_id")
@@ -165,14 +160,9 @@ class Agent:
             config=self.cfg,
         )
 
-        # Narrator 초기화 (NarrationMonitor가 bridge에서 사용)
-        from conversation.narrator import Narrator
-        self.narrator = Narrator(self.character, self.world, self.llm)
-
         # 도구 목록 (LLM 로딩 후 구성 — LLM + config/character 주입)
         self._tools = {t.name: t for t in _STATIC_TOOLS}
         self._tools[PromptConverterTool.name] = PromptConverterTool(llm=self.llm, config=self.cfg)
-        self._tools[WebSearchTool.name] = WebSearchTool()
 
         logger.info(
             f"[agent] 초기화 완료 — 캐릭터: {self.character['name']} "
@@ -343,7 +333,6 @@ class Agent:
         "file_convert":    "파일 변환",
         "image_convert":   "이미지 변환",
         "local_search":    "파일 검색",
-        "web_search":      "웹 검색",
         "prompt_convert":  "프롬프트 변환",
     }
 

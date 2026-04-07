@@ -34,6 +34,9 @@ REQUIRED_QML_FILES = [
     "ChatBubble.qml",
     "Style.qml",
     "qmldir",
+    "MemoryDBPanel.qml",
+    "AdminPanel.qml",
+    "CharacterCreatePanel.qml",
 ]
 
 
@@ -52,6 +55,9 @@ REQUIRED_QMLDIR_ENTRIES = [
     "SettingsPanel",
     "CharacterDisplay",
     "CustomizationPanel",
+    "MemoryDBPanel",
+    "AdminPanel",
+    "CharacterCreatePanel",
 ]
 
 
@@ -123,6 +129,24 @@ class TestMainQml:
 
     def test_has_character_build_panel_component(self):
         assert "CharacterBuildPanel {" in self.src
+
+    def test_has_memory_db_open_property(self):
+        assert "memoryDbOpen" in self.src
+
+    def test_has_admin_panel_open_property(self):
+        assert "adminPanelOpen" in self.src
+
+    def test_has_char_create_open_property(self):
+        assert "charCreateOpen" in self.src
+
+    def test_has_memory_db_panel_component(self):
+        assert "MemoryDBPanel {" in self.src
+
+    def test_has_admin_panel_component(self):
+        assert "AdminPanel {" in self.src
+
+    def test_has_character_create_panel_component(self):
+        assert "CharacterCreatePanel {" in self.src
 
     def test_has_character_display_component(self):
         assert "CharacterDisplay {" in self.src

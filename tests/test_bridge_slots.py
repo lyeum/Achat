@@ -36,6 +36,7 @@ def stub_agent():
     agent.world = {"world_id": "seaside_world"}
     agent.router = None
     agent.llm = None
+    agent.long_term = None
     return agent
 
 
@@ -693,8 +694,8 @@ class TestOpenUrl:
 
 class TestHelpAndTagIntro:
     def test_get_help_text_known_key(self, bridge):
-        text = bridge.getHelpText("web_search")
-        assert "#웹 검색" in text
+        text = bridge.getHelpText("local_search")
+        assert "#파일 검색" in text
 
     def test_get_help_text_file_convert(self, bridge):
         text = bridge.getHelpText("file_convert")
@@ -727,3 +728,241 @@ class TestHelpAndTagIntro:
         saved = _json.loads(prefs_path.read_text(encoding="utf-8"))
         assert saved["theme"] == "solar"
         assert saved["shown_tag_intro"] is True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 13. getMemoryDB
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestGetMemoryDB:
+    def test_returns_valid_json(self, bridge):
+        result = bridge.getMemoryDB()
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_has_required_keys(self, bridge):
+        parsed = json.loads(bridge.getMemoryDB())
+        for key in ("collection", "total", "sessions"):
+            assert key in parsed, f"키 '{key}' 누락"
+
+    def test_total_is_int(self, bridge):
+        parsed = json.loads(bridge.getMemoryDB())
+        assert isinstance(parsed["total"], int)
+
+    def test_sessions_is_dict(self, bridge):
+        parsed = json.loads(bridge.getMemoryDB())
+        assert isinstance(parsed["sessions"], dict)
+
+    def test_no_crash_when_long_term_unavailable(self, stub_agent):
+        """long_term 모듈이 없어도 예외 없이 빈 구조 반환."""
+        stub_agent.character = {"id": "Ghost", "name": "고스트"}
+        from ui_ux.bridge import ChatBridge
+        b = ChatBridge(stub_agent)
+        result = b.getMemoryDB()
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 14. searchMemoryPreview
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSearchMemoryPreview:
+    def test_returns_valid_json(self, bridge):
+        result = bridge.searchMemoryPreview("테스트 검색어")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
+
+    def test_empty_query_returns_empty_list(self, bridge):
+        result = bridge.searchMemoryPreview("")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
+
+    def test_result_items_have_content(self, bridge):
+        """결과가 있는 경우 각 항목에 content 키가 있어야 한다."""
+        result = bridge.searchMemoryPreview("이름")
+        parsed = json.loads(result)
+        for item in parsed:
+            assert "content" in item, "content 키 누락"
+
+    def test_result_items_have_similarity(self, bridge):
+        """결과가 있는 경우 각 항목에 similarity 키가 있어야 한다."""
+        result = bridge.searchMemoryPreview("이름")
+        parsed = json.loads(result)
+        for item in parsed:
+            assert "similarity" in item, "similarity 키 누락"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 15. getConvParams
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestGetConvParams:
+    def test_returns_valid_json(self, bridge):
+        result = bridge.getConvParams()
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_returns_empty_dict_when_no_conversation(self, stub_agent):
+        """character에 'conversation' 키가 없으면 {} 반환."""
+        stub_agent.character = {"id": "Haru", "name": "하루"}
+        from ui_ux.bridge import ChatBridge
+        b = ChatBridge(stub_agent)
+        parsed = json.loads(b.getConvParams())
+        assert isinstance(parsed, dict)
+
+    def test_returns_conversation_dict_when_present(self, stub_agent):
+        """character에 'conversation' 키가 있으면 그 내용을 반환한다."""
+        stub_agent.character = {
+            "id": "Haru",
+            "name": "하루",
+            "conversation": {"response_length": 0.5, "openness": 0.3, "directness": 0.6},
+        }
+        from ui_ux.bridge import ChatBridge
+        b = ChatBridge(stub_agent)
+        parsed = json.loads(b.getConvParams())
+        assert parsed.get("response_length") == 0.5
+        assert parsed.get("directness") == 0.6
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 16. setConvParam
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSetConvParam:
+    @pytest.fixture
+    def bridge_with_conv(self, stub_agent):
+        stub_agent.character = {
+            "id": "Haru",
+            "name": "하루",
+            "conversation": {
+                "response_length": {"stranger": 0.3, "acquaintance": 0.4},
+                "openness": {"stranger": 0.2},
+                "directness": 0.5,
+            },
+        }
+        from ui_ux.bridge import ChatBridge
+        return ChatBridge(stub_agent)
+
+    def test_set_response_length_tier(self, bridge_with_conv):
+        """response_length의 특정 tier 값을 변경한다."""
+        bridge_with_conv.setConvParam("response_length", "stranger", 0.8)
+        conv = bridge_with_conv._agent.character["conversation"]
+        assert conv["response_length"]["stranger"] == pytest.approx(0.8)
+
+    def test_set_openness_tier(self, bridge_with_conv):
+        bridge_with_conv.setConvParam("openness", "stranger", 0.7)
+        conv = bridge_with_conv._agent.character["conversation"]
+        assert conv["openness"]["stranger"] == pytest.approx(0.7)
+
+    def test_set_directness_scalar(self, bridge_with_conv):
+        """directness는 tier 없이 스칼라로 저장한다."""
+        bridge_with_conv.setConvParam("directness", "_", 0.9)
+        conv = bridge_with_conv._agent.character["conversation"]
+        assert conv["directness"] == pytest.approx(0.9)
+
+    def test_set_unknown_param_no_crash(self, bridge_with_conv):
+        """알 수 없는 param도 예외 없이 처리."""
+        bridge_with_conv.setConvParam("unknown_param", "stranger", 0.5)  # must not raise
+
+    def test_set_creates_conversation_key_if_missing(self, stub_agent):
+        """character에 conversation 키가 없어도 동작한다."""
+        stub_agent.character = {"id": "Haru", "name": "하루"}
+        from ui_ux.bridge import ChatBridge
+        b = ChatBridge(stub_agent)
+        b.setConvParam("directness", "_", 0.7)  # must not raise
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 17. saveNewCharacter
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSaveNewCharacter:
+    _VALID_CHAR = {
+        "id": "TestHero",
+        "name": "테스트 히어로",
+        "speech_style": "반말을 사용한다.",
+        "rules": ["AI임을 언급하지 않는다."],
+        "memory_voice": "담담하게",
+        "state": {"mood_default": "neutral", "affection_default": 0},
+    }
+
+    def test_valid_json_returns_char_id(self, bridge, tmp_path, monkeypatch):
+        """유효한 JSON → 캐릭터 파일 생성 후 char_id 반환."""
+        import ui_ux.bridge as bmod
+        monkeypatch.setattr(bmod, "_CHARACTER_DIR", tmp_path)
+        result = bridge.saveNewCharacter(json.dumps(self._VALID_CHAR))
+        assert result == "TestHero"
+        assert (tmp_path / "CH_TestHero.yaml").exists()
+
+    def test_yaml_content_is_correct(self, bridge, tmp_path, monkeypatch):
+        """저장된 YAML에 name 필드가 올바르게 포함된다."""
+        import yaml as _yaml
+        import ui_ux.bridge as bmod
+        monkeypatch.setattr(bmod, "_CHARACTER_DIR", tmp_path)
+        bridge.saveNewCharacter(json.dumps(self._VALID_CHAR))
+        saved = _yaml.safe_load((tmp_path / "CH_TestHero.yaml").read_text(encoding="utf-8"))
+        assert saved["name"] == "테스트 히어로"
+
+    def test_invalid_json_returns_empty_string(self, bridge):
+        """잘못된 JSON → "" 반환."""
+        result = bridge.saveNewCharacter("not json {{{")
+        assert result == ""
+
+    def test_missing_id_returns_empty_string(self, bridge):
+        """id 필드 없는 JSON → "" 반환."""
+        data = dict(self._VALID_CHAR)
+        del data["id"]
+        result = bridge.saveNewCharacter(json.dumps(data))
+        assert result == ""
+
+    def test_empty_id_returns_empty_string(self, bridge):
+        """id가 빈 문자열 → "" 반환."""
+        data = dict(self._VALID_CHAR)
+        data["id"] = "   "
+        result = bridge.saveNewCharacter(json.dumps(data))
+        assert result == ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# editMessage
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestEditMessage:
+    def test_no_op_when_content_unchanged(self, bridge):
+        """old_content == new_content면 아무것도 하지 않는다."""
+        bridge.editMessage(0, "같은 내용", "같은 내용")  # must not raise
+
+    def test_updates_session_dialogue_log(self, stub_agent):
+        """session.dialogue_log에서 일치하는 assistant 메시지를 교체한다."""
+        from conversation.core.session import ConversationSession
+        from unittest.mock import MagicMock
+        from ui_ux.bridge import ChatBridge
+
+        stub_agent.session = MagicMock()
+        stub_agent.session.dialogue_log = [
+            {"role": "user",      "content": "안녕"},
+            {"role": "assistant", "content": "원본 응답"},
+        ]
+        b = ChatBridge(stub_agent)
+        b.editMessage(1, "원본 응답", "수정된 응답")
+        assert stub_agent.session.dialogue_log[1]["content"] == "수정된 응답"
+
+    def test_does_not_update_user_messages(self, stub_agent):
+        """role=user 메시지는 변경하지 않는다."""
+        from unittest.mock import MagicMock
+        from ui_ux.bridge import ChatBridge
+
+        stub_agent.session = MagicMock()
+        stub_agent.session.dialogue_log = [
+            {"role": "user",      "content": "원본 응답"},
+            {"role": "assistant", "content": "다른 내용"},
+        ]
+        b = ChatBridge(stub_agent)
+        b.editMessage(0, "원본 응답", "바뀐 내용")
+        # user 메시지는 바뀌지 않아야 함
+        assert stub_agent.session.dialogue_log[0]["content"] == "원본 응답"
+
+    def test_no_crash_without_session(self, bridge):
+        """session=None이어도 예외 없이 종료한다."""
+        bridge.editMessage(0, "원본", "수정")  # must not raise
