@@ -20,7 +20,7 @@ os.environ.setdefault("ACHAT_ENV", "ui_test")
 
 _CHAR_DIR = ROOT / "conversation" / "character"
 _HARU_YAML = _CHAR_DIR / "CH_Haru.yaml"
-_HARU_STRANGER = ROOT / "data" / "lora" / "conversation" / "haru_stranger.jsonl"
+_HARU_STRANGER = ROOT / "training" / "data" / "affection" / "stranger.jsonl"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -251,7 +251,7 @@ class TestBuildSftFromFeedback:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# F. data/lora/conversation/haru_stranger.jsonl 구조 검증
+# F. training/data/affection/stranger.jsonl 구조 검증
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestHaruStrangerJsonl:
