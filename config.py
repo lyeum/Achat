@@ -21,23 +21,24 @@ _CONFIGS = {
         "chroma_path": "./chroma_dev",
         "session_dir": "./data/sessions",
         "short_term_n": 5,
-        "memory_trigger_n": 10,
+        "memory_trigger_n": 5,
         "embedding_model": None,
         "vdb_top_k": 2,
         "vdb_threshold": 0.7,
         "aff_gate_threshold": 0.6,         # affection 변화 허용 최소 중요도
         "enable_play_log": False,
+        "default_world_id": "seaside_world",
     },
     "dev": {
         "model_backend": "transformers",   # QLoRA 학습 / 개발용 HF 모델
         "model_name": "Qwen/Qwen2.5-3B-Instruct",
-        "adapter_path": "./output/LoRA_v10/adapter",  # LoRA 어댑터 (None이면 베이스 모델)
+        "adapter_path": "./output/LoRA_v11/adapter",  # LoRA 어댑터 (None이면 베이스 모델)
         "quantization": "int4",            # "int4" | "int8" | "none"
         "model_path": None,                # deploy 환경에서만 사용
         "chroma_path": "./chroma_dev",
         "session_dir": "./data/sessions",
         "short_term_n": 5,                 # 단기 버퍼 최근 N턴
-        "memory_trigger_n": 10,            # 요약 → VDB 저장 트리거 간격
+        "memory_trigger_n": 5,            # 요약 → VDB 저장 트리거 간격
         "embedding_model": "BAAI/bge-m3",
         "embedding_device": "cpu",         # LLM이 VRAM 대부분 점유 → 임베딩은 CPU
         "vdb_top_k": 2,
@@ -45,6 +46,7 @@ _CONFIGS = {
                                  # 세계관 관련 질문 ~0.55, 무관 질문 ~0.48 → 0.52로 분리
         "aff_gate_threshold": 0.6,         # mid 이상(감정/취미) 발화에만 affection 반영
         "enable_play_log": True,           # dev에서만 학습 데이터 수집
+        "default_world_id": "seaside_world",
     },
     "deploy": {
         "model_backend": "llama_cpp",      # GGUF CPU 추론
@@ -53,13 +55,14 @@ _CONFIGS = {
         "chroma_path": "./chroma_deploy",
         "session_dir": "./data/sessions",
         "short_term_n": 5,
-        "memory_trigger_n": 10,
+        "memory_trigger_n": 5,
         "embedding_model": "BAAI/bge-m3",
         "embedding_device": "cpu",
         "vdb_top_k": 2,
         "vdb_threshold": 0.52,
         "aff_gate_threshold": 0.6,
         "enable_play_log": False,          # 배포 환경에서는 학습 데이터 불필요
+        "default_world_id": "seaside_world",
     },
 }
 

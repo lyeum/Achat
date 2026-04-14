@@ -29,9 +29,12 @@ _PERSONA_PRESETS: dict[str, str] = {
 
 # ── personality preset 해석 ──────────────────────────────────────────────────
 _PERSONALITY_PRESETS: dict[str, str] = {
-    "calm":     "차분하고 안정된 태도. 쉽게 흔들리지 않는다.",
-    "cynical":  "세상을 냉소적으로 본다. 기대치가 낮고 비틀린 시각으로 반응한다.",
-    "tsundere": "직접적인 호감 표현을 피하지만 행동에서 드러난다. 부정하면서도 신경 쓴다.",
+    "calm":       "차분하고 안정된 태도. 쉽게 흔들리지 않는다.",
+    "warm":       "따뜻하고 공감 능력이 높다. 상대를 배려하는 태도가 자연스럽게 드러난다.",
+    "energetic":  "활발하고 주도적이다. 반응이 빠르고 주변 분위기를 이끄는 경향이 있다.",
+    "cynical":    "세상을 냉소적으로 본다. 기대치가 낮고 비틀린 시각으로 반응한다.",
+    "tsundere":   "직접적인 호감 표현을 피하지만 행동에서 드러난다. 부정하면서도 신경 쓴다.",
+    "melancholic": "감성적이고 내면적이다. 혼자만의 생각에 잠기는 경향이 있고, 감정을 천천히 드러낸다.",
 }
 
 # ── affection tier 폴백 (character YAML에 affection 슬롯 없을 때) ────────────
@@ -142,14 +145,31 @@ class PromptBuilder:
         if name:
             parts.append(f"너는 {name}이다.")
 
-        # 2. 캐릭터 설명
+        # 2. 캐릭터 설명 — "예:" 포함 시 발화 예시 줄을 분리해 강조
         if desc := c.get("description", "").strip():
-            parts.append(desc)
+            lines = desc.splitlines()
+            base_lines, example_lines = [], []
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("예:"):
+                    example_lines.append(stripped)
+                else:
+                    base_lines.append(stripped)
+            if base_lines:
+                parts.append(" ".join(l for l in base_lines if l))
+            if example_lines:
+                parts.append("[발화 패턴] " + " / ".join(
+                    ex.removeprefix("예:").strip() for ex in example_lines
+                ))
 
         # 3. 말투
         speech: dict = c.get("speech", {})
         formality = speech.get("formality", "").strip()
-        if formality:
+        if formality == "존댓말":
+            parts.append("반드시 존댓말(경어체)로만 말한다. 반말을 절대 사용하지 않는다.")
+        elif formality == "반말":
+            parts.append("반드시 반말로만 말한다. 존댓말을 사용하지 않는다.")
+        elif formality:
             parts.append(f"{formality}을 사용한다.")
 
         style_val = speech.get("style", "").strip()

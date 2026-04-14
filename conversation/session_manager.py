@@ -31,6 +31,10 @@ class SessionState:
     last_active: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # 세계관 트리거 상태 (세션 변경 시 초기화)
+    fired_stories: list = field(default_factory=list)        # 발동된 story item_title 목록
+    visited_places: list = field(default_factory=list)       # 방문한 장소 목록
+    explained_cultures: list = field(default_factory=list)   # 세션 내 설명된 culture 항목
 
 
 @dataclass
@@ -41,6 +45,7 @@ class SessionMeta:
     char_id: str
     created_at: str
     last_active: str
+    world_id: Optional[str] = None
 
 
 class SessionManager:
@@ -54,6 +59,8 @@ class SessionManager:
             └── {session_id}/
                 └── state.json            ← 세션 상태 스냅샷
     """
+
+    MAX_SESSIONS = 3  # 캐릭터당 유지할 최대 세션 수
 
     def __init__(self, state_dir: Path):
         self._root = Path(state_dir)
@@ -100,6 +107,7 @@ class SessionManager:
             "char_id":     state.char_id,
             "created_at":  state.created_at,
             "last_active": state.last_active,
+            "world_id":    state.world_id,
         }
         for i, item in enumerate(index):
             if item["session_id"] == state.session_id:
@@ -207,11 +215,51 @@ class SessionManager:
 
     def list_sessions(self, char_id: str) -> list[SessionMeta]:
         """해당 캐릭터의 세션 목록을 반환한다."""
-        return [SessionMeta(**item) for item in self._load_index(char_id)]
+        result = []
+        for item in self._load_index(char_id):
+            # 구버전 인덱스(world_id 없음) 하위호환
+            item.setdefault("world_id", None)
+            result.append(SessionMeta(**item))
+        return result
+
+    def activate_for_world(self, char_id: str, world_id: str) -> SessionState:
+        """(char_id, world_id) 쌍에 해당하는 세션을 찾아 활성화한다.
+
+        일치하는 세션이 없으면 새로 생성한다.
+        """
+        index = self._load_index(char_id)
+        # world_id가 일치하는 세션 중 가장 최근 것
+        candidates = [
+            i for i in index if i.get("world_id") == world_id
+        ]
+        if candidates:
+            latest = max(candidates, key=lambda x: x.get("last_active", ""))
+            state = self._load_state(char_id, latest["session_id"])
+            if state:
+                self._save_active(char_id, state.session_id)
+                return state
+        # 없으면 신규 생성 (world_id 포함)
+        return self._create_session(char_id, world_id=world_id)
 
     # ── 내부 ──────────────────────────────────────────────────────────────────
 
-    def _create_session(self, char_id: str) -> SessionState:
+    def _evict_session(self, char_id: str, session_id: str) -> None:
+        """세션 디렉토리와 인덱스 항목을 제거한다."""
+        import shutil
+        session_dir = self._char_dir(char_id) / session_id
+        if session_dir.exists():
+            shutil.rmtree(session_dir)
+        index = self._load_index(char_id)
+        index = [i for i in index if i["session_id"] != session_id]
+        self._save_index(char_id, index)
+
+    def _create_session(self, char_id: str, world_id: str | None = None) -> SessionState:
+        # 최대 세션 수 초과 시 가장 오래된 세션 제거
+        index = self._load_index(char_id)
+        if len(index) >= self.MAX_SESSIONS:
+            oldest = min(index, key=lambda x: x.get("last_active", ""))
+            self._evict_session(char_id, oldest["session_id"])
+
         now = datetime.now(timezone.utc).isoformat()
         session_id = (
             "s_"
@@ -221,6 +269,7 @@ class SessionManager:
         state = SessionState(
             session_id=session_id,
             char_id=char_id,
+            world_id=world_id,
             created_at=now,
             last_active=now,
         )
