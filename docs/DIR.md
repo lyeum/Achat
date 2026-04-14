@@ -1,6 +1,6 @@
 # DIR — 파일시스템 현황 참조 문서
 
-> 이 문서는 실제 파일시스템 기준으로 작성됩니다. 최종 업데이트: 2026-04-09 (개선5 구현 반영)
+> 이 문서는 실제 파일시스템 기준으로 작성됩니다. 최종 업데이트: 2026-04-14 (v11 학습 완료 + 불필요 파일 정리)
 > 코드·설계와 불일치하는 항목은 ⚠️로 표시합니다.
 >
 > 범례: ✅ 완료 | 🔲 비어있음(구현 예정) | 📄 데이터/설정 파일 | ⚠️ 불일치/정리 필요
@@ -20,7 +20,7 @@ Achat/
 │                                        CUDA 여유 메모리 확인 및 경고
 ├─ run.bat                            ✅ Windows 배포 실행 스크립트 (모델 파일 존재 확인 + uv run)
 ├─ config.py                          ✅ dev / deploy / ui_test 환경 분기 설정
-│                                        dev: adapter_path="./output/LoRA_v9/adapter" ✅ LoRA_v9 기준 (2026-03-23)
+│                                        dev: adapter_path="./output/LoRA_v11/adapter" ✅ LoRA_v11 기준 (2026-04-14)
 │                                        deploy: model_path="./models/model_q4km.gguf" ⚠️ 실제 없음
 │                                        모든 환경: default_world_id="seaside_world" (2026-04-09)
 │                                        모든 환경: memory_trigger_n=5 (2026-04-09, 이전 10)
@@ -48,7 +48,9 @@ Achat/
 │   │   ├─ training_개선.md           ✅ EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획
 │   │   ├─ UI설계-clear.md             ✅ QML + PySide6 UI 설계 상세 (1~6단계 구현 완료)
 │   │   ├─ UI_테스트.md               ✅ UI 전체 수동 테스트 체크리스트 + 자동 테스트 실행 가이드
-│   │   └─ 개선5.md                   ✅ 개선5 구현 계획 (항목1~10 모두 완료, 2026-04-09)
+│   │   ├─ 개선5.md                   ✅ 개선5 구현 계획 (항목1~10 모두 완료, 2026-04-09)
+│   │   ├─ 개선6.md                   📄 개선6 계획 (작성 중)
+│   │   └─ 학습데이터_개선.md         ✅ v11 학습 데이터 카테고리 재설계 완료 (2026-04-14)
 │   └─ BUG/
 │       ├─ BUG_1-clear.md              ✅ 인수인계 문서 (환경 셋업, 해결된 이슈 기록)
 │       └─ BUG_small-clear.md          ✅ 소규모 버그 수정 기록
@@ -78,24 +80,16 @@ Achat/
 │   │                                    monitor 서브프로세스 자동 실행
 │   │                                    세션 상태 .session_state.json 기록
 │   │                                    ConversationLogger 연동
-│   ├─ narrator.py                    ⚠️ 구 LLM 나레이터 (제거됨) — describe_arrival / describe_session_start
-│   │                                    LLM 호출 오버헤드로 제거. narration_hardcoded.py가 대체.
 │   ├─ narration_hardcoded.py         ✅ 하드코딩 키워드 트리거 나레이션 — find_trigger()
 │   │                                    키워드(카페/공원/비/커피 등) → 미리 작성된 묘사 텍스트 반환
 │   ├─ narration_monitor.py           ✅ NarrationMonitor — check_keyword()
 │   │                                    세션 내 키워드당 1회 제한, _fired_keywords 추적
 │   │
-│   ├─ narration/                     ← 신규 패키지 (2026-04-09)
-│   │   ├─ __init__.py               ✅ 패키지 초기화
-│   │   └─ world_trigger.py          ✅ 세계관 트리거 판단 + 나레이션 생성 (2026-04-09)
-│   │                                    check_story_trigger(session, user_input, rag) — 코사인 유사도 ≥ 0.55
-│   │                                    check_place_trigger(session, place_id) — visited_places 기반 1회
-│   │                                    check_culture_trigger(session, rag) — explained_cultures 소거법
 │   │
 │   ├─ character/
 │   │   ├─ character_schema.yaml     ✅ 캐릭터 YAML 계약 (슬롯 = 학습 카테고리 어휘, 2026-04-02 신규)
 │   │   ├─ CH_Haru.yaml              ✅ 예시 캐릭터 (speech/affection/emotion/personality 슬롯 기반, 2026-04-02 재작성)
-│   │   ├─ CH_Seonjae.yaml           ✅ 예시 캐릭터 (6단계 affection_thresholds, affection_delta, mood_triggers 8종)
+│   │   ├─ CH_MookHyeon.yaml         📄 신규 캐릭터 (작성 중)
 │   │   └─ CH_default.yaml           📄 기본 캐릭터
 │   │
 │   ├─ core/
@@ -137,10 +131,18 @@ Achat/
 │                                       act_1: location=beach / act_2: location=breakwater
 │                                       character_overrides.rules 필드 추가 (2026-04-09) — 세계관별 추가 행동 규칙
 │
+├─ narration/                         ✅ 세계관 트리거 패키지 (루트 레벨, 2026-04-09)
+│   ├─ __init__.py                   ✅ 패키지 초기화
+│   └─ world_trigger.py              ✅ 세계관 트리거 판단 + 나레이션 생성
+│                                       check_story_trigger(session, user_input, rag) — 코사인 유사도 ≥ 0.55
+│                                       check_place_trigger(session, place_id) — visited_places 기반 1회
+│                                       check_culture_trigger(session, rag) — explained_cultures 소거법
+│
 ├─ data/
 │   └─ lora/
 │       ├─ conversation/
 │       │   └─ .gitkeep              🔲 build_dataset.py 실행 후 생성 (현재 비어있음)
+│       │                               (haru_stranger.jsonl, haru_action_input.jsonl 삭제됨 — training/data/로 이동)
 │       └─ function/
 │           ├─ folder_organize.jsonl  📄 폴더 정리 기능 학습 데이터
 │           ├─ prompt_convert.jsonl   📄 프롬프트 변환 기능 학습 데이터
@@ -165,18 +167,23 @@ Achat/
 │   │   ├─ fisher.pt                 ✅ ewc.py 실행 완료 (LoRA_v9 학습에 사용)
 │   │   ├─ ref_params.pt             ✅ ewc.py 실행 완료
 │   │   └─ train.log
-│   └─ LoRA_v9/                      📄 LoRA_v9 학습 결과 (.gitignore 처리)
-│       ├─ adapter/                  ✅ 현재 최신 어댑터 (config.py 참조, eval best 1.511, 3 epoch EWC λ=500)
-│       │   ├─ adapter_config.json
-│       │   ├─ adapter_model.safetensors
-│       │   └─ tokenizer.json / tokenizer_config.json
-│       ├─ loss_curve_epoch01~03.png ← epoch별 자동 저장
-│       ├─ loss_curve_final.png
-│       └─ train.log                 ← 학습 전체 로그
+│   ├─ LoRA_v9/                      📄 LoRA_v9 학습 결과 (.gitignore 처리)
+│   │   ├─ adapter/                  ✅ (eval best 1.511, 3 epoch EWC λ=500 — v11로 대체)
+│   │   ├─ loss_curve_epoch01~03.png
+│   │   ├─ loss_curve_final.png
+│   │   └─ train.log
+│   └─ LoRA_v11/                     📄 LoRA_v11 학습 결과 (.gitignore 처리) ← 현재 최신
+│       ├─ adapter/                  ✅ 현재 최신 어댑터 (config.py 참조)
+│       │                               checkpoint-700 복사 (eval best 1.5387, epoch 1.97)
+│       │   ├─ adapter_config.json   ← r=32, alpha=64
+│       │   └─ adapter_model.safetensors
+│       ├─ checkpoint-700/           ✅ best checkpoint (eval_loss 1.5387, epoch 1.97)
+│       ├─ loss_curve_epoch01.png    ← epoch 1 완료 시
+│       ├─ loss_curve_epoch02.png    ← epoch 2 완료 시 (학습 중단 전 마지막)
+│       └─ train.log
 │
 ├─ rag/
 │   ├─ __init__.py                   ✅ 패키지 초기화
-│   ├─ al.txt                        📄 세계관 분위기 텍스트 메모 (바닷가/영화관/새벽 묘사)
 │   ├─ index.py                      ✅ index_world() — 섹션 기반 청킹 + ChromaDB 인덱싱 (2026-04-09)
 │   │                                   _parse_world_md() 신규: # WorldName / ## section / ### item_title 파싱
 │   │                                   story 섹션 전용 트리거 키워드: [...] 파싱
@@ -189,11 +196,8 @@ Achat/
 │   │                                   find_or_create_location() — RAG 검색 → LLM 생성 → add_document 저장
 │   └─ sources/
 │       └─ world/
-│           ├─ Seaside.md            ✅ 통합 세계관 소스 (2026-04-09, 신규) — ## culture / ## place / ## story
-│           │                           기존 culture.md + place.md + story.md 통합 대체
-│           ├─ culture.md            📄 (구 파일 — Seaside.md로 통합됨)
-│           ├─ place.md              📄 (구 파일 — Seaside.md로 통합됨)
-│           └─ story.md              📄 (구 파일 — Seaside.md로 통합됨)
+│           └─ Seaside.md            ✅ 통합 세계관 소스 — ## culture / ## place / ## story
+│                                       (culture.md / place.md / story.md 삭제됨 — 중복 인덱싱 방지)
 │
 ├─ scripts/
 │   ├─ build_dataset.py              ✅ training/log/*.jsonl → data/lora/conversation/ 빌드
@@ -216,12 +220,14 @@ Achat/
 │   │                                   narration_hardcoded.find_trigger() 키워드 매칭
 │   │                                   bridge._ACTION_RE *...* 패턴 감지 테스트
 │   ├─ test_dialogue_quality.py      ✅ PromptBuilder Layer A 이름 형식, rules 포함, tier 톤
-│   │                                   SFT 변환, reviewed_only 필터, haru_stranger.jsonl 구조 검증
+│   │                                   SFT 변환, reviewed_only 필터, training/data/affection/stranger.jsonl 구조 검증
 │   ├─ test_function_tools.py        ✅ PromptGuideStore 저장/검색/삭제, regex fallback, 한국어 비율
 │   │                                   (TestWebSearchTool 제거됨 — web_search.py 삭제)
 │   ├─ test_integration_flows.py     ✅ LocalSearchFullFlow / FolderClassifyFullFlow / FileOptionsFullFlow
 │   │                                   (TestWebSearchFullFlow 제거됨 — web_search.py 삭제)
-│   └─ test_improvement5.py          ✅ 개선5 전체 커버 (35개 테스트, 2026-04-09)
+│   ├─ test_improvement4.py          ✅ 개선4 항목 검증 (deleteCharacter, getDefaultWorld 슬롯 등)
+│   ├─ test_improvement5.py          ✅ 개선5 전체 커버 (35개 테스트, 2026-04-09)
+│   └─ test_integration_improvement5.py ✅ 개선5 통합 테스트 (나레이션 버블 emit, Seaside.md world_id 등)
 │                                       TestConversationSessionTriggerFields (3개) — fired_stories/visited_places/explained_cultures
 │                                       TestRouterModeParameter (3개) — mode="chat"/"function" 분기
 │                                       TestSessionManagerWorldId (4개) — SessionMeta.world_id / activate_for_world()
@@ -261,6 +267,8 @@ Achat/
 │   │                                   EWCPenalty(fisher_path, ref_params_path, lambda_, device)
 │   │                                   → penalty(model): λ/2 × Σ F_i × (θ_i - θ*_i)²
 │   ├─ train_monitor.py              ✅ 학습 모니터링 래퍼 — 학습 명령어를 입력받아 subprocess로 실행
+│   │                                   find_latest_state(): checkpoint-*/trainer_state.json 중 최신 파일 탐색
+│   │                                   (HuggingFace Trainer는 학습 중 체크포인트 서브디렉토리에 state 저장)
 │   │                                   trainer_state.json 폴링(기본 15초) → 과적합 감지 시 SIGTERM
 │   │                                   종료 조건: eval_loss N회 연속 상승(--n_rise) or gap 초과(--gap)
 │   │                                   VRAM 해제 후 3가지 출력: 학습 상황 / 종료 조건 / 입력 명령어
@@ -287,31 +295,37 @@ Achat/
 │   │   └─ verify_phases.py          ✅ Phase 2/3 실환경 검증 (12턴 자동 대화, 5항목 PASS, 수동 실행)
 │   │                                   LLM 풀 로드 필요 — 수동 실행만
 │   │
-│   ├─ data/                         📄 학습 데이터 총 2,150건 / 38파일 (v10 기준)
+│   ├─ data/                         📄 학습 데이터 총 3,170건 / 57파일 (v11 기준, 2026-04-14)
 │   │   │                               시스템 프롬프트: `너는 {char_name}이다.` + 카테고리 속성 (2026-04-02)
-│   │   ├─ affection/                📄 친밀도 단계별 데이터 (9파일: stranger/acquaintance/familiar/
-│   │   │                               affection_low~high/close/friendly/intimate)
-│   │   ├─ common/                   📄 공통 능력 데이터 (3파일)
+│   │   ├─ affection/                📄 친밀도 단계별 데이터 (15파일)
+│   │   │                               stranger/acquaintance/familiar/affection_low~high/close/friendly/intimate
+│   │   │   └─ formal/               📄 존댓말 캐릭터 친밀도 6단계 (각 30건, 계 180건, v11 신규)
+│   │   ├─ common/                   📄 공통 능력 데이터 (4파일)
 │   │   │   ├─ ai_tell_removal.jsonl 📄 AI투 표현 제거 학습 데이터
 │   │   │   ├─ memory_ref.jsonl      📄 기억 참조 학습 데이터
-│   │   │   └─ persona_follow.jsonl  📄 페르소나 준수 학습 데이터
-│   │   ├─ emotion/                  📄 감정 상태별 데이터 (9종 × 20건 = 180건)
+│   │   │   ├─ persona_follow.jsonl  📄 페르소나 준수 학습 데이터
+│   │   │   └─ world_trigger_response.jsonl 📄 세계관 위치/배경 반응 (50건, v11 신규)
+│   │   ├─ emotion/                  📄 감정 상태별 데이터 (10파일)
 │   │   │                               neutral / happy / affectionate / touched / curious /
-│   │   │                               sad / embarrassed / annoyed / angry
-│   │   ├─ long_dialogue/            📄 장대화 데이터 (8파일)
-│   │   │   ├─ daily_chat.jsonl      📄 일상 장대화
+│   │   │                               sad / embarrassed / annoyed / angry (각 40건)
+│   │   │                               + transition (감정 전환 멀티턴 40건, v11 신규)
+│   │   ├─ long_dialogue/            📄 장대화 데이터 (9파일)
+│   │   │   ├─ daily_chat.jsonl      📄 일상 장대화 (51건)
 │   │   │   ├─ emotional_support.jsonl 📄 감정 지지 장대화
 │   │   │   ├─ casual_deep.jsonl     📄 일상+깊은 대화
 │   │   │   ├─ understanding.jsonl   📄 긴 설명 핵심 파악
-│   │   │   ├─ opinion_exchange.jsonl 📄 의견/취향 교환 (2026-04-02 신규)
-│   │   │   ├─ context_maintenance.jsonl 📄 장소/상황 맥락 유지 (2026-04-02 신규)
-│   │   │   ├─ correction_graceful.jsonl 📄 오해/정정 자연스러운 반응 (2026-04-02 신규)
-│   │   │   └─ action_response.jsonl 📄 (행동:...) 패턴 반응 (2026-04-02 신규)
-│   │   ├─ personality/              📄 3종 성격별 데이터 (calm/cynical/tsundere)
+│   │   │   ├─ opinion_exchange.jsonl 📄 의견/취향 교환
+│   │   │   ├─ context_maintenance.jsonl 📄 장소/상황 맥락 유지
+│   │   │   ├─ correction_graceful.jsonl 📄 오해/정정 자연스러운 반응
+│   │   │   ├─ action_response.jsonl 📄 (행동:...) 패턴 반응
+│   │   │   └─ topic_continuity.jsonl 📄 화제 전환 없는 주제 유지 (v11 신규)
+│   │   ├─ personality/              📄 6종 성격별 데이터 (calm/cynical/tsundere/energetic/melancholic/warm)
+│   │   │                               cynical/tsundere: 서술 개선 (v11) | energetic/melancholic/warm: 신규 (v11)
 │   │   ├─ speech_style/
 │   │   │   ├─ informal/             📄 informal_blunt.jsonl / informal_soft.jsonl
+│   │   │   ├─ formal/               📄 formal_blunt.jsonl / formal_soft.jsonl (v11 신규, affection/formal과 분리)
 │   │   │   └─ persona/              📄 cool_observant / gentle_quiet / quiet_sensitive / warm_dry
-│   │   └─ _excluded/                📄 비활성 파일 (bright/dependent/formal_blunt/formal_soft/mixed_blunt)
+│   │   └─ _excluded/                📄 비활성 파일 (bright/dependent/mixed_blunt)
 │   │                                   dataset.py load_jsonl_files에서 자동 제외
 │   │
 │   └─ log/
@@ -465,7 +479,7 @@ Achat/
 | # | 항목 | 위치 | 설명 | 우선순위 |
 |---|---|---|---|---|
 | ~~1~~ | ~~오타 빈 파일 잔존~~ | — | ✅ 해당 없음 — 이 작업공간에 `chracter_load.py` 없음 | 해결 |
-| ~~2~~ | ~~config.py 어댑터 경로 불일치~~ | — | ✅ `./output/LoRA_v9/adapter` 경로 일치 | 해결 |
+| ~~2~~ | ~~config.py 어댑터 경로 불일치~~ | — | ✅ `./output/LoRA_v11/adapter` 경로 일치 (2026-04-14) | 해결 |
 | ~~3~~ | ~~build_dataset.py glob 버그~~ | — | ✅ `glob("**/*.jsonl")` 수정 완료 (2026-03-22) | 해결 |
 | ~~4~~ | ~~배경 이미지 위치 불일치~~ | — | ✅ `background/seaside_world/beach.png` 로 이동 완료 (2026-03-22) | 해결 |
 | ~~5~~ | ~~런타임 로그 gitignore 미적용~~ | `.gitignore` | ✅ training/log/daily|emotion|feedback_neg|feedback_pos|memory/ + data/sessions/ 패턴 추가, git rm --cached 완료 (2026-03-28) | 해결 |
@@ -478,7 +492,7 @@ Achat/
 
 | 상태 | 항목 수 | 설명 |
 |---|---|---|
-| ✅ 완료 | 100+ | 전체 대화 엔진, UI, RAG, 학습 파이프라인, 테스트 + 개선5 (2026-04-09) |
+| ✅ 완료 | 100+ | 전체 대화 엔진, UI, RAG, 학습 파이프라인, 테스트 + 개선5 + v11 학습 완료 (2026-04-14) |
 | 📄 데이터/설정 | 30+ | YAML/JSON 스키마, 학습 데이터, 런타임 로그 |
 | 🔲 구현 예정 / 비어있음 | 8 | characters/ 파츠 PNG, emotion/ 오버레이 PNG, icons 앱 아이콘, advice·persona 로그 폴더, data/lora/conversation |
 | ⚠️ 정리 필요 | 3 | 위 "알려진 문제" 표 참조 (이전 6개 중 3개 해결됨) |
