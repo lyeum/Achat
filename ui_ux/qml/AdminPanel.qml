@@ -69,7 +69,7 @@ Item {
             }
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
-                text: "관리자  (드래그로 이동)"
+                text: "관리자"
                 color: "#C0C0E0"; font.pixelSize: 12; font.bold: true
                 font.family: adminRoot.fontFamily
             }
@@ -115,6 +115,7 @@ Item {
             }
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            contentWidth: availableWidth  // Flickable 수평 스크롤 비활성화 → 슬라이더 이벤트 보호
 
             Column {
                 id: contentCol
@@ -139,35 +140,48 @@ Item {
                     width: parent.width
                     spacing: 8
 
-                    Slider {
-                        id: affSlider
-                        Layout.fillWidth: true
-                        from: 0; to: 100
-                        stepSize: 1
-                        value: adminRoot.affection
-                        enabled: !adminRoot.affLocked
+                    Item {
+                        id: affTrack
+                        Layout.fillWidth: true; height: 22
                         opacity: adminRoot.affLocked ? 0.4 : 1.0
+                        property real trackVal: adminRoot.affection / 100.0
+                        property bool _dragging: false
 
-                        background: Rectangle {
-                            x: affSlider.leftPadding; y: affSlider.topPadding + affSlider.availableHeight / 2 - height / 2
-                            width: affSlider.availableWidth; height: 4; radius: 2; color: "#252538"
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width; height: 4; radius: 2; color: "#252538"
                             Rectangle {
-                                width: affSlider.visualPosition * parent.width
-                                height: parent.height; radius: parent.radius
-                                color: "#5A5ACA"
+                                width: affTrack.trackVal * parent.width
+                                height: parent.height; radius: parent.radius; color: "#5A5ACA"
+                                Behavior on width { enabled: !affTrack._dragging; NumberAnimation { duration: 80 } }
                             }
                         }
-                        handle: Rectangle {
-                            x: affSlider.leftPadding + affSlider.visualPosition * (affSlider.availableWidth - width)
-                            y: affSlider.topPadding + affSlider.availableHeight / 2 - height / 2
+                        Rectangle {
+                            x: affTrack.trackVal * (affTrack.width - width)
+                            anchors.verticalCenter: parent.verticalCenter
                             width: 14; height: 14; radius: 7
-                            color: affSlider.pressed ? "#7A7AEA" : "#5A5ACA"
+                            color: affMa.pressed ? "#7A7AEA" : "#5A5ACA"
                             border.color: "#9090FF"; border.width: 1
+                        }
+                        MouseArea {
+                            id: affMa
+                            anchors.fill: parent
+                            preventStealing: true
+                            enabled: !adminRoot.affLocked
+                            cursorShape: Qt.SizeHorCursor
+                            onPressed:  affTrack._dragging = true
+                            onReleased: affTrack._dragging = false
+                            onPositionChanged: {
+                                if (pressed) {
+                                    var v = Math.round(mouseX / affTrack.width * 100)
+                                    affTrack.trackVal = Math.max(0, Math.min(1.0, v / 100.0))
+                                }
+                            }
                         }
                     }
 
                     Text {
-                        text: Math.round(affSlider.value)
+                        text: Math.round(affTrack.trackVal * 100)
                         color: "#A0A0D0"; font.pixelSize: 12; font.bold: true
                         font.family: adminRoot.fontFamily
                         Layout.preferredWidth: 28
@@ -190,7 +204,7 @@ Item {
                         MouseArea {
                             id: applyHov; anchors.fill: parent; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: adminRoot.affectionSet(Math.round(affSlider.value))
+                            onClicked: adminRoot.affectionSet(Math.round(affTrack.trackVal * 100))
                         }
                     }
 
@@ -209,7 +223,7 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 if (adminRoot.affLocked) adminRoot.affectionUnlocked()
-                                else adminRoot.affectionLocked(Math.round(affSlider.value))
+                                else adminRoot.affectionLocked(Math.round(affTrack.trackVal * 100))
                             }
                         }
                     }
@@ -230,54 +244,51 @@ Item {
                 Repeater {
                     model: adminRoot._tiers
 
-                    RowLayout {
-                        width: contentCol.width
-                        spacing: 6
-
-                        Text {
-                            text: adminRoot._tierKo[index]
-                            color: "#606080"; font.pixelSize: 10
-                            font.family: adminRoot.fontFamily
-                            Layout.preferredWidth: 32
+                    Item {
+                        id: rlRow
+                        width: contentCol.width; height: 24
+                        property int tierIndex: index
+                        property real curVal: {
+                            var rl = adminRoot._conv.response_length
+                            if (!rl) return 0.4
+                            return (typeof rl === "object") ? (rl[modelData] !== undefined ? rl[modelData] : 0.4) : rl
                         }
+                        function selIdx() { return curVal <= 0.35 ? 0 : curVal <= 0.65 ? 1 : 2 }
+                        readonly property var _rlVals: [0.2, 0.5, 0.8]
 
-                        Slider {
-                            id: rlSlider
-                            Layout.fillWidth: true
-                            from: 0.0; to: 1.0; stepSize: 0.05
-                            value: {
-                                var rl = adminRoot._conv.response_length
-                                if (!rl) return 0.4
-                                return (typeof rl === "object") ? (rl[modelData] !== undefined ? rl[modelData] : 0.4) : rl
+                        RowLayout {
+                            anchors.fill: parent; spacing: 4
+
+                            Text {
+                                text: adminRoot._tierKo[rlRow.tierIndex]
+                                color: "#606080"; font.pixelSize: 10
+                                font.family: adminRoot.fontFamily
+                                Layout.preferredWidth: 36
                             }
 
-                            background: Rectangle {
-                                x: rlSlider.leftPadding; y: rlSlider.topPadding + rlSlider.availableHeight / 2 - height / 2
-                                width: rlSlider.availableWidth; height: 3; radius: 2; color: "#252538"
+                            Repeater {
+                                model: ["짧게", "보통", "길게"]
                                 Rectangle {
-                                    width: rlSlider.visualPosition * parent.width
-                                    height: parent.height; radius: parent.radius
-                                    color: "#4A8ACA"
+                                    Layout.fillWidth: true; height: 22; radius: 4
+                                    property bool sel: rlRow.selIdx() === index
+                                    color: sel ? "#2A4A7A" : "#1C1C30"
+                                    border.color: sel ? "#4A8ACA" : "#2A2A42"; border.width: 1
+                                    Behavior on color { ColorAnimation { duration: 80 } }
+                                    Text {
+                                        anchors.centerIn: parent; text: modelData
+                                        color: parent.sel ? "#8AC0F8" : "#505078"
+                                        font.pixelSize: 10; font.family: adminRoot.fontFamily
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            var tier = adminRoot._tiers[rlRow.tierIndex]
+                                            var val  = rlRow._rlVals[index]
+                                            adminRoot.convParamChanged("response_length", tier, val)
+                                        }
+                                    }
                                 }
                             }
-                            handle: Rectangle {
-                                x: rlSlider.leftPadding + rlSlider.visualPosition * (rlSlider.availableWidth - width)
-                                y: rlSlider.topPadding + rlSlider.availableHeight / 2 - height / 2
-                                width: 12; height: 12; radius: 6; color: "#4A8ACA"
-                            }
-
-                            onPressedChanged: {
-                                if (!pressed)
-                                    adminRoot.convParamChanged("response_length", modelData, value)
-                            }
-                        }
-
-                        Text {
-                            text: rlSlider.value.toFixed(2)
-                            color: "#7090B0"; font.pixelSize: 10
-                            font.family: adminRoot.fontFamily
-                            Layout.preferredWidth: 30
-                            horizontalAlignment: Text.AlignRight
                         }
                     }
                 }
@@ -297,54 +308,51 @@ Item {
                 Repeater {
                     model: adminRoot._tiers
 
-                    RowLayout {
-                        width: contentCol.width
-                        spacing: 6
-
-                        Text {
-                            text: adminRoot._tierKo[index]
-                            color: "#606080"; font.pixelSize: 10
-                            font.family: adminRoot.fontFamily
-                            Layout.preferredWidth: 32
+                    Item {
+                        id: opRow
+                        width: contentCol.width; height: 24
+                        property int tierIndex: index
+                        property real curVal: {
+                            var op = adminRoot._conv.openness
+                            if (!op) return 0.3
+                            return (typeof op === "object") ? (op[modelData] !== undefined ? op[modelData] : 0.3) : op
                         }
+                        function selIdx() { return curVal <= 0.25 ? 0 : curVal <= 0.6 ? 1 : 2 }
+                        readonly property var _opVals: [0.1, 0.4, 0.8]
 
-                        Slider {
-                            id: opSlider
-                            Layout.fillWidth: true
-                            from: 0.0; to: 1.0; stepSize: 0.05
-                            value: {
-                                var op = adminRoot._conv.openness
-                                if (!op) return 0.3
-                                return (typeof op === "object") ? (op[modelData] !== undefined ? op[modelData] : 0.3) : op
+                        RowLayout {
+                            anchors.fill: parent; spacing: 4
+
+                            Text {
+                                text: adminRoot._tierKo[opRow.tierIndex]
+                                color: "#606080"; font.pixelSize: 10
+                                font.family: adminRoot.fontFamily
+                                Layout.preferredWidth: 36
                             }
 
-                            background: Rectangle {
-                                x: opSlider.leftPadding; y: opSlider.topPadding + opSlider.availableHeight / 2 - height / 2
-                                width: opSlider.availableWidth; height: 3; radius: 2; color: "#252538"
+                            Repeater {
+                                model: ["낮음", "보통", "높음"]
                                 Rectangle {
-                                    width: opSlider.visualPosition * parent.width
-                                    height: parent.height; radius: parent.radius
-                                    color: "#CA6A9A"
+                                    Layout.fillWidth: true; height: 22; radius: 4
+                                    property bool sel: opRow.selIdx() === index
+                                    color: sel ? "#4A2A5A" : "#1C1C30"
+                                    border.color: sel ? "#9A4ACA" : "#2A2A42"; border.width: 1
+                                    Behavior on color { ColorAnimation { duration: 80 } }
+                                    Text {
+                                        anchors.centerIn: parent; text: modelData
+                                        color: parent.sel ? "#C08AF8" : "#505078"
+                                        font.pixelSize: 10; font.family: adminRoot.fontFamily
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            var tier = adminRoot._tiers[opRow.tierIndex]
+                                            var val  = opRow._opVals[index]
+                                            adminRoot.convParamChanged("openness", tier, val)
+                                        }
+                                    }
                                 }
                             }
-                            handle: Rectangle {
-                                x: opSlider.leftPadding + opSlider.visualPosition * (opSlider.availableWidth - width)
-                                y: opSlider.topPadding + opSlider.availableHeight / 2 - height / 2
-                                width: 12; height: 12; radius: 6; color: "#CA6A9A"
-                            }
-
-                            onPressedChanged: {
-                                if (!pressed)
-                                    adminRoot.convParamChanged("openness", modelData, value)
-                            }
-                        }
-
-                        Text {
-                            text: opSlider.value.toFixed(2)
-                            color: "#9A6080"; font.pixelSize: 10
-                            font.family: adminRoot.fontFamily
-                            Layout.preferredWidth: 30
-                            horizontalAlignment: Text.AlignRight
                         }
                     }
                 }
@@ -371,33 +379,47 @@ Item {
                         font.family: adminRoot.fontFamily
                     }
 
-                    Slider {
-                        id: drSlider
-                        Layout.fillWidth: true
-                        from: 0.0; to: 1.0; stepSize: 0.05
-                        value: {
+                    // 커스텀 슬라이더 (preventStealing: true → ScrollView 이벤트 탈취 방지)
+                    Item {
+                        id: drTrack
+                        Layout.fillWidth: true; height: 20
+                        property real drVal: {
                             var dr = adminRoot._conv.directness
                             return (dr !== undefined) ? dr : 0.6
                         }
+                        property bool _dragging: false
 
-                        background: Rectangle {
-                            x: drSlider.leftPadding; y: drSlider.topPadding + drSlider.availableHeight / 2 - height / 2
-                            width: drSlider.availableWidth; height: 3; radius: 2; color: "#252538"
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width; height: 3; radius: 2; color: "#252538"
                             Rectangle {
-                                width: drSlider.visualPosition * parent.width
-                                height: parent.height; radius: parent.radius
-                                color: "#CA9A4A"
+                                width: drTrack.drVal * parent.width
+                                height: parent.height; radius: parent.radius; color: "#CA9A4A"
+                                Behavior on width { enabled: !drTrack._dragging; NumberAnimation { duration: 80 } }
                             }
                         }
-                        handle: Rectangle {
-                            x: drSlider.leftPadding + drSlider.visualPosition * (drSlider.availableWidth - width)
-                            y: drSlider.topPadding + drSlider.availableHeight / 2 - height / 2
-                            width: 12; height: 12; radius: 6; color: "#CA9A4A"
+                        Rectangle {
+                            x: drTrack.drVal * (drTrack.width - width)
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 12; height: 12; radius: 6
+                            color: drMa.pressed ? "#EABB6A" : "#CA9A4A"
                         }
-
-                        onPressedChanged: {
-                            if (!pressed)
-                                adminRoot.convParamChanged("directness", "_", value)
+                        MouseArea {
+                            id: drMa
+                            anchors.fill: parent
+                            preventStealing: true
+                            cursorShape: Qt.SizeHorCursor
+                            onPressed: drTrack._dragging = true
+                            onReleased: {
+                                drTrack._dragging = false
+                                adminRoot.convParamChanged("directness", "_", drTrack.drVal)
+                            }
+                            onPositionChanged: {
+                                if (pressed) {
+                                    var v = Math.round(mouseX / drTrack.width * 20) / 20
+                                    drTrack.drVal = Math.max(0.0, Math.min(1.0, v))
+                                }
+                            }
                         }
                     }
 
@@ -408,7 +430,7 @@ Item {
                     }
 
                     Text {
-                        text: drSlider.value.toFixed(2)
+                        text: drTrack.drVal.toFixed(2)
                         color: "#9A8060"; font.pixelSize: 10
                         font.family: adminRoot.fontFamily
                         Layout.preferredWidth: 30

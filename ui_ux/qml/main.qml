@@ -49,6 +49,11 @@ Window {
     // 기억 DB 관리 패널
     property bool   memoryDbOpen:          false
     property string memoryDbJson:          "{}"
+    property string worldDbJson:           "{}"
+    property string promptGuidesJson:      "{}"
+
+    // 세션 목록
+    property string sessionListJson:       "[]"
 
     // 관리자 패널
     property bool   adminPanelOpen:        false
@@ -56,6 +61,9 @@ Window {
 
     // 캐릭터 생성 패널
     property bool   charCreateOpen:        false
+
+    // 세계관 생성 패널
+    property bool   worldCreateOpen:       false
 
     // ── 테마 ──────────────────────────────────────────────────────────────────
     property string currentTheme: "ocean"
@@ -139,6 +147,14 @@ Window {
         y = Screen.height - height - 60
         _loadCustomization()
         if (bridge) root.currentTheme = bridge.getTheme()
+        // 앱 시작 시 default 세계관(Seaside) 자동 적용
+        if (bridge) {
+            try {
+                var dw = JSON.parse(bridge.getDefaultWorld())
+                if (dw.world_id && dw.scenario_id && dw.act_id)
+                    bridge.changeWorld(dw.world_id, dw.scenario_id, dw.act_id)
+            } catch(e) {}
+        }
     }
 
     function _loadCustomization() {
@@ -197,6 +213,7 @@ Window {
     DragHandler {
         id: dragHandler
         target: null
+        enabled: !root.adminPanelOpen && !root.charCreateOpen
         onActiveChanged: if (active) root.startSystemMove()
     }
 
@@ -329,6 +346,9 @@ Window {
             characterListJson: root.charListJson
             worldListJson:     root.worldListJson
             currentTheme:      root.currentTheme
+            currentCharId:     bridge ? bridge.characterId : ""
+            sessionListJson:   root.sessionListJson
+            activeSessionId:   bridge ? bridge.activeSessionId : ""
             onCloseRequested: root.settingsOpen = false
             onThemeChangeRequested: function(themeId) {
                 root.currentTheme = themeId
@@ -336,6 +356,9 @@ Window {
             }
             onEmotionPanelRequested: {
                 root.emotionPanelOpen = true
+            }
+            onCharacterCreateRequested: {
+                root.charCreateOpen = true
             }
             onCharacterBuildRequested: {
                 root.allPartsListJson   = bridge.getAllPartsList()
@@ -354,9 +377,16 @@ Window {
                 root.memoryDbJson = bridge.getMemoryDB()
                 root.memoryDbOpen = true
             }
+            onWorldCreateRequested: {
+                root.worldCreateOpen = true
+            }
             onAdminRequested: {
                 root.adminConvJson  = bridge.getConvParams()
                 root.adminPanelOpen = true
+            }
+            onSessionSwitchRequested: function(sessionId) {
+                bridge.switchSession(sessionId)
+                root.statusJson = bridge.getCharacterStatus()
             }
         }
 
@@ -370,6 +400,13 @@ Window {
             onCloseRequested:  root.charSelectOpen = false
             onCharacterChanged: function(charId) {
                 bridge.changeCharacter(charId)
+                // world_id가 없는 경우 첫 번째 세계관/act를 자동 지정
+                var dw = bridge.getDefaultWorld()
+                try {
+                    var d = JSON.parse(dw)
+                    if (d.world_id && d.scenario_id && d.act_id)
+                        bridge.changeWorld(d.world_id, d.scenario_id, d.act_id)
+                } catch(e) {}
             }
             onAddRequested: {
                 root.charSelectOpen = false
@@ -408,9 +445,11 @@ Window {
             anchors.fill: parent
             visible: root.memoryDbOpen && !root.isBubble
             z: 22
-            fontFamily: koreanFont.font.family
-            dbJson:     root.memoryDbJson
-            onCloseRequested: root.memoryDbOpen = false
+            fontFamily:        koreanFont.font.family
+            dbJson:            root.memoryDbJson
+            worldDbJson:       root.worldDbJson
+            promptGuidesJson:  root.promptGuidesJson
+            onCloseRequested:  root.memoryDbOpen = false
             onDeleteRequested: function(entryId) {
                 bridge.deleteMemoryEntry(entryId)
             }
@@ -419,6 +458,16 @@ Window {
             }
             onUpdateRequested: function(entryId, newContent, metaJson) {
                 bridge.updateMemoryEntry(entryId, newContent, metaJson)
+            }
+            onTabRequested: function(tabIndex) {
+                if (tabIndex === 1)
+                    root.worldDbJson = bridge.getWorldKnowledgeDB()
+                else if (tabIndex === 2)
+                    root.promptGuidesJson = bridge.getPromptGuidesDB()
+            }
+            onReindexRequested: {
+                bridge.reindexWorldKnowledge()
+                root.worldDbJson = bridge.getWorldKnowledgeDB()
             }
         }
 
@@ -471,6 +520,15 @@ Window {
                     root.charCreateOpen = false
                 }
             }
+        }
+
+        // ── 세계관 생성 패널 오버레이 ────────────────────────────────────
+        WorldCreatePanel {
+            anchors.fill: parent
+            visible: root.worldCreateOpen && !root.isBubble
+            z: 25
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.worldCreateOpen = false
         }
 
         // ── 확장 모드 ────────────────────────────────────────────────────
@@ -574,9 +632,10 @@ Window {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                root.charListJson  = bridge.getCharacterList()
-                                root.worldListJson = bridge.getWorldList()
-                                root.settingsOpen  = true
+                                root.charListJson    = bridge.getCharacterList()
+                                root.worldListJson   = bridge.getWorldList()
+                                root.sessionListJson = bridge.listSessions(bridge.characterId)
+                                root.settingsOpen    = true
                             }
                         }
                     }

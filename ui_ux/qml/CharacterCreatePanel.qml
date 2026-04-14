@@ -54,12 +54,48 @@ Item {
             rl[_tiers[i]] = f_rl[_tiers[i]]
             op[_tiers[i]] = f_op[_tiers[i]]
         }
+
+        // 친밀도 tier 텍스트 — formality에 따라 분기
+        var affection
+        if (f_formality === "존댓말") {
+            affection = {
+                stranger:     "처음 만난 사이. 필요한 말만 정중하게 한다. 감정적 반응은 거의 보이지 않는다.",
+                acquaintance: "아는 사이지만 거리감을 유지한다. 공손하게 응대하고 개인적인 이야기는 피한다.",
+                familiar:     "조금 편해진 상태. 여전히 존댓말을 유지하며 자연스럽게 대화한다.",
+                friendly:     "자연스럽게 대화한다. 배려가 정중한 말 속에 드러나기 시작한다.",
+                close:        "신뢰가 생긴 상태. 솔직한 반응을 보이되 존댓말을 유지한다.",
+                intimate:     "깊은 신뢰 상태. 감정을 솔직하게 표현하되 존댓말을 유지한다."
+            }
+        } else {
+            affection = {
+                stranger:     "처음 만난 사이. 대화를 짧게 끊으려 하고 개인적인 반응을 거의 하지 않는다.",
+                acquaintance: "기본 대화는 가능하지만 경계가 있다. 개인적인 이야기는 아직 조심스럽다.",
+                familiar:     "조금 편해진 상태. 가끔 관심이 묻어나오지만 여전히 담담하다.",
+                friendly:     "자연스럽게 대화한다. 배려가 짧은 말 속에 드러나기 시작한다.",
+                close:        "배려가 자연스럽게 드러난다. 솔직한 반응을 자주 보인다.",
+                intimate:     "깊은 신뢰 상태. 감정을 짧게라도 솔직하게 표현한다."
+            }
+        }
+
+        var emotion = {
+            happy:        "현재 기분이 좋은 상태. 반응이 약간 빨라지고 말이 조금 더 나온다.",
+            sad:          "현재 기분이 가라앉은 상태. 말이 짧아지고 주제를 돌리려 한다.",
+            angry:        "현재 화가 난 상태. 말이 차갑고 날카로워진다.",
+            annoyed:      "짜증난 상태. 반응이 건조하고 반문이 많아진다.",
+            curious:      "궁금증이 생긴 상태. 질문이 늘어나고 반응이 빨라진다.",
+            embarrassed:  "당혹스럽거나 부끄러운 상태. 말을 돌리거나 주제를 전환하려 한다.",
+            touched:      "마음이 움직인 상태. 짧은 침묵 후 말이 나온다.",
+            affectionate: "따뜻한 감정이 올라온 상태. 거리를 좁히려는 표현이 나온다."
+        }
+
         var data = {
             id: f_id.trim(),
             name: f_name.trim(),
             description: f_description.trim(),
             speech: { formality: f_formality, style: f_style, persona: f_persona },
             personality: f_personality,
+            affection: affection,
+            emotion: emotion,
             rules: f_rules.filter(function(r){ return r.trim() !== "" }),
             memory_voice: "기억을 떠올릴 때 무심한 듯 언급한다.",
             state: {
@@ -154,6 +190,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                contentWidth: availableWidth   // Flickable 수평 스크롤 비활성화 → 슬라이더 보호
                 clip: true
 
                 Column {
@@ -169,7 +206,7 @@ Item {
 
                     FieldRow {
                         label: "ID"
-                        hint: "영문+숫자, 파일명에 사용됨"
+                        hint: "ex) Haru  →  CH_Haru.yaml로 저장"
                         fontFam: createRoot.fontFamily
                         onTextEdited: function(v) { createRoot.f_id = v }
                     }
@@ -195,8 +232,9 @@ Item {
                             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                             TextArea {
                                 id: descArea
-                                placeholderText: "캐릭터 외형/성격 개요..."
-                                color: createRoot._textPri; font.pixelSize: 12
+                                placeholderText: "캐릭터를 간단히 소개해주세요.\nex) 말수가 적고 냉정해 보이지만, 신뢰하는 사람에게는 의외로 솔직한 편이다."
+                                placeholderTextColor: "#686890"
+                                color: createRoot._textPri; font.pixelSize: 11
                                 font.family: createRoot.fontFamily
                                 background: null; wrapMode: TextArea.Wrap
                                 onTextChanged: createRoot.f_description = text
@@ -233,7 +271,11 @@ Item {
                     }
                     Item { height: 8; width: 1 }
 
-                    Text { text: "페르소나"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                    RowLayout {
+                        width: parent.width
+                        Text { text: "페르소나"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                        Text { text: "— 말투의 분위기·커뮤니케이션 방식"; color: "#404060"; font.pixelSize: 9; font.family: createRoot.fontFamily }
+                    }
                     Item { height: 4; width: 1 }
                     ToggleRow {
                         options: ["cool_observant", "gentle_quiet", "quiet_sensitive", "warm_dry"]
@@ -248,11 +290,23 @@ Item {
                     Item { height: 12; width: 1 }
 
                     // ── 성격 ─────────────────────────────────────────────────
-                    SectionLabel { text: "성격"; fontFam: createRoot.fontFamily }
+                    RowLayout {
+                        width: parent.width
+                        SectionLabel { text: "성격"; fontFam: createRoot.fontFamily }
+                        Text { text: "— 내면의 기질·감정 성향"; color: "#404060"; font.pixelSize: 9; font.family: createRoot.fontFamily; Layout.alignment: Qt.AlignVCenter }
+                    }
                     Item { height: 6; width: 1 }
                     ToggleRow {
-                        options: ["calm", "cynical", "tsundere"]
-                        labels: ["차분 안정", "냉소적", "츤데레"]
+                        options: ["calm", "warm", "energetic"]
+                        labels: ["차분", "따뜻함", "활발"]
+                        selected: createRoot.f_personality
+                        fontFam: createRoot.fontFamily
+                        onPicked: function(v) { createRoot.f_personality = v }
+                    }
+                    Item { height: 4; width: 1 }
+                    ToggleRow {
+                        options: ["cynical", "tsundere", "melancholic"]
+                        labels: ["냉소적", "츤데레", "감성적"]
                         selected: createRoot.f_personality
                         fontFam: createRoot.fontFamily
                         onPicked: function(v) { createRoot.f_personality = v }
@@ -346,51 +400,55 @@ Item {
                     Rectangle { width: parent.width; height: 1; color: createRoot._border }
                     Item { height: 12; width: 1 }
 
-                    // ── 응답 길이 슬라이더 ────────────────────────────────────
+                    // ── 응답 길이 (tier별 토글) ────────────────────────────────
                     SectionLabel { text: "응답 길이 (tier별)"; fontFam: createRoot.fontFamily }
                     Item { height: 6; width: 1 }
 
                     Repeater {
                         model: createRoot._tiers
 
-                        RowLayout {
-                            width: parent.width
-                            spacing: 6
-
-                            Text {
-                                text: createRoot._tierKo[index]
-                                color: createRoot._textSec; font.pixelSize: 10
-                                font.family: createRoot.fontFamily
-                                Layout.preferredWidth: 72
+                        Item {
+                            id: rlRowC
+                            width: parent.width; height: 24
+                            property int tierIndex: index
+                            readonly property var _rlVals: [0.2, 0.5, 0.8]
+                            function selIdx() {
+                                var v = createRoot.f_rl[modelData] !== undefined ? createRoot.f_rl[modelData] : 0.4
+                                return v <= 0.35 ? 0 : v <= 0.65 ? 1 : 2
                             }
-                            Slider {
-                                id: rlS
-                                Layout.fillWidth: true
-                                from: 0.0; to: 1.0; stepSize: 0.05
-                                Component.onCompleted: value = (createRoot.f_rl[modelData] !== undefined ? createRoot.f_rl[modelData] : 0.4)
-                                background: Rectangle {
-                                    x: rlS.leftPadding; y: rlS.topPadding + rlS.availableHeight/2 - height/2
-                                    width: rlS.availableWidth; height: 3; radius: 2; color: "#1C1C30"
-                                    Rectangle { width: rlS.visualPosition * parent.width; height: parent.height; radius: parent.radius; color: "#4A8ACA" }
+                            RowLayout {
+                                anchors.fill: parent; spacing: 4
+                                Text {
+                                    text: createRoot._tierKo[rlRowC.tierIndex]
+                                    color: createRoot._textSec; font.pixelSize: 10
+                                    font.family: createRoot.fontFamily
+                                    Layout.preferredWidth: 76
                                 }
-                                handle: Rectangle {
-                                    x: rlS.leftPadding + rlS.visualPosition * (rlS.availableWidth - width)
-                                    y: rlS.topPadding + rlS.availableHeight/2 - height/2
-                                    width: 12; height: 12; radius: 6; color: "#4A8ACA"
-                                }
-                                onPressedChanged: {
-                                    if (!pressed) {
-                                        var tmp = Object.assign({}, createRoot.f_rl)
-                                        tmp[modelData] = value
-                                        createRoot.f_rl = tmp
+                                Repeater {
+                                    model: ["짧게", "보통", "길게"]
+                                    Rectangle {
+                                        Layout.fillWidth: true; height: 22; radius: 4
+                                        property bool sel: rlRowC.selIdx() === index
+                                        color: sel ? "#1A3A6A" : createRoot._bgInput
+                                        border.color: sel ? "#4A8ACA" : createRoot._border; border.width: 1
+                                        Behavior on color { ColorAnimation { duration: 80 } }
+                                        Text {
+                                            anchors.centerIn: parent; text: modelData
+                                            color: parent.sel ? "#8AC0F8" : createRoot._textSec
+                                            font.pixelSize: 10; font.family: createRoot.fontFamily
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var tier = createRoot._tiers[rlRowC.tierIndex]
+                                                var val  = rlRowC._rlVals[index]
+                                                var tmp  = Object.assign({}, createRoot.f_rl)
+                                                tmp[tier] = val
+                                                createRoot.f_rl = tmp
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                            Text {
-                                text: rlS.value.toFixed(2)
-                                color: "#5080A0"; font.pixelSize: 10
-                                font.family: createRoot.fontFamily
-                                Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight
                             }
                         }
                     }
@@ -399,51 +457,55 @@ Item {
                     Rectangle { width: parent.width; height: 1; color: createRoot._border }
                     Item { height: 12; width: 1 }
 
-                    // ── 감정 개방도 슬라이더 ──────────────────────────────────
+                    // ── 감정 개방도 (tier별 토글) ──────────────────────────────
                     SectionLabel { text: "감정 개방도 (tier별)"; fontFam: createRoot.fontFamily }
                     Item { height: 6; width: 1 }
 
                     Repeater {
                         model: createRoot._tiers
 
-                        RowLayout {
-                            width: parent.width
-                            spacing: 6
-
-                            Text {
-                                text: createRoot._tierKo[index]
-                                color: createRoot._textSec; font.pixelSize: 10
-                                font.family: createRoot.fontFamily
-                                Layout.preferredWidth: 72
+                        Item {
+                            id: opRowC
+                            width: parent.width; height: 24
+                            property int tierIndex: index
+                            readonly property var _opVals: [0.1, 0.4, 0.8]
+                            function selIdx() {
+                                var v = createRoot.f_op[modelData] !== undefined ? createRoot.f_op[modelData] : 0.3
+                                return v <= 0.25 ? 0 : v <= 0.6 ? 1 : 2
                             }
-                            Slider {
-                                id: opS
-                                Layout.fillWidth: true
-                                from: 0.0; to: 1.0; stepSize: 0.05
-                                Component.onCompleted: value = (createRoot.f_op[modelData] !== undefined ? createRoot.f_op[modelData] : 0.3)
-                                background: Rectangle {
-                                    x: opS.leftPadding; y: opS.topPadding + opS.availableHeight/2 - height/2
-                                    width: opS.availableWidth; height: 3; radius: 2; color: "#1C1C30"
-                                    Rectangle { width: opS.visualPosition * parent.width; height: parent.height; radius: parent.radius; color: "#CA6A9A" }
+                            RowLayout {
+                                anchors.fill: parent; spacing: 4
+                                Text {
+                                    text: createRoot._tierKo[opRowC.tierIndex]
+                                    color: createRoot._textSec; font.pixelSize: 10
+                                    font.family: createRoot.fontFamily
+                                    Layout.preferredWidth: 76
                                 }
-                                handle: Rectangle {
-                                    x: opS.leftPadding + opS.visualPosition * (opS.availableWidth - width)
-                                    y: opS.topPadding + opS.availableHeight/2 - height/2
-                                    width: 12; height: 12; radius: 6; color: "#CA6A9A"
-                                }
-                                onPressedChanged: {
-                                    if (!pressed) {
-                                        var tmp = Object.assign({}, createRoot.f_op)
-                                        tmp[modelData] = value
-                                        createRoot.f_op = tmp
+                                Repeater {
+                                    model: ["낮음", "보통", "높음"]
+                                    Rectangle {
+                                        Layout.fillWidth: true; height: 22; radius: 4
+                                        property bool sel: opRowC.selIdx() === index
+                                        color: sel ? "#3A1A5A" : createRoot._bgInput
+                                        border.color: sel ? "#9A4ACA" : createRoot._border; border.width: 1
+                                        Behavior on color { ColorAnimation { duration: 80 } }
+                                        Text {
+                                            anchors.centerIn: parent; text: modelData
+                                            color: parent.sel ? "#C08AF8" : createRoot._textSec
+                                            font.pixelSize: 10; font.family: createRoot.fontFamily
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var tier = createRoot._tiers[opRowC.tierIndex]
+                                                var val  = opRowC._opVals[index]
+                                                var tmp  = Object.assign({}, createRoot.f_op)
+                                                tmp[tier] = val
+                                                createRoot.f_op = tmp
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                            Text {
-                                text: opS.value.toFixed(2)
-                                color: "#905070"; font.pixelSize: 10
-                                font.family: createRoot.fontFamily
-                                Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight
                             }
                         }
                     }
@@ -458,25 +520,46 @@ Item {
                     RowLayout {
                         width: parent.width; spacing: 6
                         Text { text: "돌려말함"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
-                        Slider {
-                            id: drS
-                            Layout.fillWidth: true
-                            from: 0.0; to: 1.0; stepSize: 0.05
-                            Component.onCompleted: value = createRoot.f_dr
-                            background: Rectangle {
-                                x: drS.leftPadding; y: drS.topPadding + drS.availableHeight/2 - height/2
-                                width: drS.availableWidth; height: 3; radius: 2; color: "#1C1C30"
-                                Rectangle { width: drS.visualPosition * parent.width; height: parent.height; radius: parent.radius; color: "#CA9A4A" }
+                        Item {
+                            id: drTrackC
+                            Layout.fillWidth: true; height: 20
+                            property real drVal: createRoot.f_dr
+                            property bool _dragging: false
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width; height: 3; radius: 2; color: "#1C1C30"
+                                Rectangle {
+                                    width: drTrackC.drVal * parent.width
+                                    height: parent.height; radius: parent.radius; color: "#CA9A4A"
+                                    Behavior on width { enabled: !drTrackC._dragging; NumberAnimation { duration: 80 } }
+                                }
                             }
-                            handle: Rectangle {
-                                x: drS.leftPadding + drS.visualPosition * (drS.availableWidth - width)
-                                y: drS.topPadding + drS.availableHeight/2 - height/2
-                                width: 12; height: 12; radius: 6; color: "#CA9A4A"
+                            Rectangle {
+                                x: drTrackC.drVal * (drTrackC.width - width)
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 12; height: 12; radius: 6
+                                color: drMaC.pressed ? "#EABB6A" : "#CA9A4A"
                             }
-                            onPressedChanged: { if (!pressed) createRoot.f_dr = value }
+                            MouseArea {
+                                id: drMaC
+                                anchors.fill: parent
+                                preventStealing: true
+                                cursorShape: Qt.SizeHorCursor
+                                onPressed: drTrackC._dragging = true
+                                onReleased: {
+                                    drTrackC._dragging = false
+                                    createRoot.f_dr = drTrackC.drVal
+                                }
+                                onPositionChanged: {
+                                    if (pressed) {
+                                        var v = Math.round(mouseX / drTrackC.width * 20) / 20
+                                        drTrackC.drVal = Math.max(0.0, Math.min(1.0, v))
+                                    }
+                                }
+                            }
                         }
                         Text { text: "직접"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
-                        Text { text: drS.value.toFixed(2); color: "#906840"; font.pixelSize: 10; font.family: createRoot.fontFamily; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight }
+                        Text { text: drTrackC.drVal.toFixed(2); color: "#906840"; font.pixelSize: 10; font.family: createRoot.fontFamily; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight }
                     }
 
                     Item { height: 18; width: 1 }

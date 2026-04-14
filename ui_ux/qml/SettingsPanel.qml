@@ -12,15 +12,22 @@ Item {
     property string characterListJson: "[]"
     property string worldListJson:     "[]"
     property string currentTheme:     "dark"
+    property string currentCharId:    ""    // bridge.characterId — 현재 활성 캐릭터 (삭제 불가)
+
+    property string sessionListJson: "[]"   // bridge.listSessions(char_id) 결과
+    property string activeSessionId: ""    // 현재 활성 session_id
 
     signal closeRequested()
     signal emotionPanelRequested()
     signal characterBuildRequested()
+    signal characterCreateRequested()
     signal newSessionRequested(bool keepMemory)
     signal resetConfirmRequested()
     signal themeChangeRequested(string themeId)
     signal memoryDBRequested()
     signal adminRequested()
+    signal sessionSwitchRequested(string sessionId)
+    signal worldCreateRequested()
 
     // ── 섹션 펼침 상태 ────────────────────────────────────────────────────────
     property bool secCharExpanded:   true   // 캐릭터: 기본 펼침
@@ -135,20 +142,62 @@ Item {
                                 try { return JSON.parse(settingsRoot.characterListJson) }
                                 catch(e) { return [] }
                             }
-                            delegate: SettingsButton {
+                            delegate: Item {
                                 width: charCol.width
-                                label: modelData.name || modelData.id
-                                fontFamily: settingsRoot.fontFamily
-                                onActivated: {
-                                    bridge.changeCharacter(modelData.id)
-                                    settingsRoot.closeRequested()
+                                height: 32
+
+                                // 캐릭터 이름 버튼 (삭제 버튼 공간 제외)
+                                SettingsButton {
+                                    anchors { left: parent.left; right: charDelBtn.left; rightMargin: 2; top: parent.top; bottom: parent.bottom }
+                                    label: modelData.name || modelData.id
+                                    fontFamily: settingsRoot.fontFamily
+                                    onActivated: {
+                                        bridge.changeCharacter(modelData.id)
+                                        var dw = bridge.getDefaultWorld()
+                                        try {
+                                            var d = JSON.parse(dw)
+                                            if (d.world_id && d.scenario_id && d.act_id)
+                                                bridge.changeWorld(d.world_id, d.scenario_id, d.act_id)
+                                        } catch(e) {}
+                                        settingsRoot.closeRequested()
+                                    }
+                                }
+
+                                // 삭제 버튼 — 현재 활성 캐릭터는 숨김
+                                Rectangle {
+                                    id: charDelBtn
+                                    visible: modelData.id !== settingsRoot.currentCharId
+                                    width: visible ? 38 : 0
+                                    height: 24; radius: 4
+                                    anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+                                    color: charDelHov.containsMouse ? "#802020" : "#3A1818"
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+                                    Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                    MouseArea {
+                                        id: charDelHov; anchors.fill: parent
+                                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            bridge.deleteCharacter(modelData.id)
+                                            settingsRoot.characterListJson = bridge.getCharacterList()
+                                        }
+                                    }
                                 }
                             }
                         }
 
                         SettingsButton {
                             width: charCol.width
-                            label: "캐릭터 초기화"
+                            label: "+ 캐릭터 생성"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.characterCreateRequested()
+                            }
+                        }
+
+                        SettingsButton {
+                            width: charCol.width
+                            label: "+ 캐릭터 초기화"
                             fontFamily: settingsRoot.fontFamily
                             onActivated: {
                                 settingsRoot.closeRequested()
@@ -159,10 +208,10 @@ Item {
                 }
 
                 // ══════════════════════════════════════════════════════════════
-                // 시나리오 섹션
+                // 세계관 섹션
                 // ══════════════════════════════════════════════════════════════
                 SectionHeader {
-                    label: "시나리오"
+                    label: "세계관"
                     fontFamily: settingsRoot.fontFamily
                     expanded: settingsRoot.secWorldExpanded
                     onToggled: settingsRoot.secWorldExpanded = !settingsRoot.secWorldExpanded
@@ -179,53 +228,100 @@ Item {
                         width: parent.width
                         spacing: 0
 
+                        SettingsButton {
+                            width: worldCol.width
+                            label: "+ 세계관 생성"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.worldCreateRequested()
+                            }
+                        }
+
+                        // 세계관별 드릴다운 (세계관 헤더 클릭 → act 목록 펼침)
                         Repeater {
                             model: {
-                                try {
-                                    var worlds = JSON.parse(settingsRoot.worldListJson)
-                                    var items = []
-                                    for (var i = 0; i < worlds.length; i++) {
-                                        var w = worlds[i]
-                                        items.push({ type: "header", world_id: w.world_id,
-                                                     scenario_id: "", act_id: "", location: "" })
-                                        for (var j = 0; j < w.scenarios.length; j++) {
-                                            var sc = w.scenarios[j]
-                                            for (var k = 0; k < sc.acts.length; k++) {
-                                                var a = sc.acts[k]
-                                                items.push({ type: "act",
-                                                             world_id: w.world_id,
-                                                             scenario_id: sc.scenario_id,
-                                                             act_id: a.act_id,
-                                                             location: a.location || "" })
-                                            }
-                                        }
-                                    }
-                                    return items
-                                } catch(e) { return [] }
+                                try { return JSON.parse(settingsRoot.worldListJson) }
+                                catch(e) { return [] }
                             }
-                            delegate: Item {
+                            delegate: Column {
+                                id: worldDelegate
                                 width: worldCol.width
-                                height: modelData.type === "header" ? 20 : 28
+                                spacing: 0
+                                property bool _expanded: false
 
-                                Text {
-                                    visible: modelData.type === "header"
-                                    anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 4 }
-                                    text: modelData.world_id
-                                    color: "#888"; font.pixelSize: 12
-                                    font.family: settingsRoot.fontFamily
+                                // 세계관 헤더 행
+                                Rectangle {
+                                    width: worldDelegate.width
+                                    height: 28
+                                    color: worldHov.containsMouse ? "#242424" : "transparent"
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+                                    radius: 4
+
+                                    Text {
+                                        id: wArrow
+                                        anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 4 }
+                                        text: worldDelegate._expanded ? "▾" : "▸"
+                                        color: "#6060A0"; font.pixelSize: 9
+                                    }
+                                    Text {
+                                        anchors { verticalCenter: parent.verticalCenter; left: wArrow.right; leftMargin: 4 }
+                                        text: modelData.world_id
+                                        color: "#9090C0"; font.pixelSize: 12; font.bold: true
+                                        font.family: settingsRoot.fontFamily
+                                        elide: Text.ElideRight
+                                    }
+                                    MouseArea {
+                                        id: worldHov; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: worldDelegate._expanded = !worldDelegate._expanded
+                                    }
                                 }
 
-                                SettingsButton {
-                                    visible: modelData.type === "act"
-                                    anchors.fill: parent
-                                    label: "  " + modelData.act_id
-                                           + (modelData.location ? "  (" + modelData.location + ")" : "")
-                                    fontFamily: settingsRoot.fontFamily
-                                    onActivated: {
-                                        bridge.changeWorld(modelData.world_id,
-                                                           modelData.scenario_id,
-                                                           modelData.act_id)
-                                        settingsRoot.closeRequested()
+                                // act 목록 (펼쳐질 때만 표시)
+                                Item {
+                                    width: worldDelegate.width
+                                    height: worldDelegate._expanded ? actsInner.implicitHeight : 0
+                                    clip: true
+                                    Behavior on height { NumberAnimation { duration: 120; easing.type: Easing.InOutQuad } }
+
+                                    Column {
+                                        id: actsInner
+                                        width: parent.width
+                                        spacing: 0
+
+                                        Repeater {
+                                            model: {
+                                                var items = []
+                                                for (var j = 0; j < modelData.scenarios.length; j++) {
+                                                    var sc = modelData.scenarios[j]
+                                                    for (var k = 0; k < sc.acts.length; k++) {
+                                                        var a = sc.acts[k]
+                                                        items.push({
+                                                            world_id:     modelData.world_id,
+                                                            scenario_id:  sc.scenario_id,
+                                                            act_id:       a.act_id,
+                                                            location:     a.location || "",
+                                                            display_name: a.display_name || ""
+                                                        })
+                                                    }
+                                                }
+                                                return items
+                                            }
+                                            delegate: SettingsButton {
+                                                width: actsInner.width
+                                                label: "    " + (modelData.display_name
+                                                       ? modelData.display_name + (modelData.location ? " (" + modelData.location + ")" : "")
+                                                       : modelData.location || modelData.act_id)
+                                                fontFamily: settingsRoot.fontFamily
+                                                onActivated: {
+                                                    bridge.changeWorld(modelData.world_id,
+                                                                       modelData.scenario_id,
+                                                                       modelData.act_id)
+                                                    settingsRoot.closeRequested()
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -297,9 +393,75 @@ Item {
                         width: parent.width
                         spacing: 0
 
+                        // ── 과거 세션 목록 ─────────────────────────────────────
+                        Repeater {
+                            model: {
+                                try { return JSON.parse(settingsRoot.sessionListJson) }
+                                catch(e) { return [] }
+                            }
+                            delegate: Item {
+                                width: sessionCol.width
+                                height: 36
+
+                                // 날짜 + 세션 ID 요약
+                                Rectangle {
+                                    anchors { left: parent.left; right: sessSwitchBtn.left; rightMargin: 4; top: parent.top; bottom: parent.bottom }
+                                    color: "transparent"
+
+                                    Column {
+                                        anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                                        spacing: 2
+
+                                        Text {
+                                            text: modelData.display_name || (modelData.session_id || "").substring(0, 18)
+                                            color: modelData.session_id === settingsRoot.activeSessionId ? "#A0A0F0" : "#909090"
+                                            font.pixelSize: 11; font.bold: modelData.session_id === settingsRoot.activeSessionId
+                                            font.family: settingsRoot.fontFamily
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            text: (modelData.last_active || "").substring(0, 10)
+                                            color: "#505070"; font.pixelSize: 9
+                                            font.family: settingsRoot.fontFamily
+                                        }
+                                    }
+
+                                    // 현재 활성 표시
+                                    Rectangle {
+                                        visible: modelData.session_id === settingsRoot.activeSessionId
+                                        anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+                                        width: curLbl.implicitWidth + 8; height: 16; radius: 8; color: "#252548"
+                                        Text { id: curLbl; anchors.centerIn: parent; text: "현재"; color: "#8080C0"; font.pixelSize: 9; font.family: settingsRoot.fontFamily }
+                                    }
+                                }
+
+                                // 전환 버튼 (현재 세션은 비활성)
+                                Rectangle {
+                                    id: sessSwitchBtn
+                                    visible: modelData.session_id !== settingsRoot.activeSessionId
+                                    width: visible ? 36 : 0
+                                    height: 24; radius: 4
+                                    anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+                                    color: sessHov.containsMouse ? "#2A3A5A" : "#1A2A40"
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+                                    Text { anchors.centerIn: parent; text: "전환"; color: "#6090C0"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                    MouseArea {
+                                        id: sessHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            settingsRoot.sessionSwitchRequested(modelData.session_id)
+                                            settingsRoot.closeRequested()
+                                        }
+                                    }
+                                }
+
+                                Rectangle { anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; height: 1; color: "#1A1A2E" }
+                            }
+                        }
+
+                        // ── 새 세션 버튼들 ─────────────────────────────────────
                         SettingsButton {
                             width: sessionCol.width
-                            label: "새 대화 시작 (기억 초기화)"
+                            label: "+ 새 대화 (기억 초기화)"
                             fontFamily: settingsRoot.fontFamily
                             onActivated: {
                                 settingsRoot.closeRequested()
@@ -309,7 +471,7 @@ Item {
 
                         SettingsButton {
                             width: sessionCol.width
-                            label: "새 대화 시작 (기억 유지)"
+                            label: "+ 새 대화 (기억 유지)"
                             fontFamily: settingsRoot.fontFamily
                             onActivated: {
                                 settingsRoot.closeRequested()
@@ -447,10 +609,10 @@ Item {
                 }
 
                 // ══════════════════════════════════════════════════════════════
-                // 데이터 섹션 (기억 DB / 관리자)
+                // DB 섹션 (기억 DB)
                 // ══════════════════════════════════════════════════════════════
                 SectionHeader {
-                    label: "데이터"
+                    label: "DB"
                     fontFamily: settingsRoot.fontFamily
                     expanded: settingsRoot.secDataExpanded
                     onToggled: settingsRoot.secDataExpanded = !settingsRoot.secDataExpanded
@@ -469,21 +631,11 @@ Item {
 
                         SettingsButton {
                             width: dataCol.width
-                            label: "기억 DB 조회 / 편집"
+                            label: "DB 조회 / 편집"
                             fontFamily: settingsRoot.fontFamily
                             onActivated: {
                                 settingsRoot.closeRequested()
                                 settingsRoot.memoryDBRequested()
-                            }
-                        }
-
-                        SettingsButton {
-                            width: dataCol.width
-                            label: "관리자 패널"
-                            fontFamily: settingsRoot.fontFamily
-                            onActivated: {
-                                settingsRoot.closeRequested()
-                                settingsRoot.adminRequested()
                             }
                         }
                     }
