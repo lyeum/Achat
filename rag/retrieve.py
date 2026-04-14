@@ -33,8 +33,20 @@ class WorldRetriever:
             )
         return self._ef
 
-    def query(self, text: str) -> list[str]:
+    def query(
+        self,
+        text: str,
+        world_id: str | None = None,
+        section: str | None = None,
+    ) -> list[str]:
         """text와 유사한 세계관 청크를 반환한다.
+
+        Parameters
+        ----------
+        world_id : str | None
+            지정하면 해당 세계관의 청크만 대상으로 검색한다.
+        section : str | None
+            "culture" | "place" | "story" 중 하나를 지정하면 해당 섹션만 검색한다.
 
         threshold 미만이면 빈 리스트를 반환한다.
         컬렉션이 없으면 (인덱싱 전) 빈 리스트를 반환한다.
@@ -50,12 +62,25 @@ class WorldRetriever:
         if col.count() == 0:
             return []
 
+        # 메타 필터 조합
+        where: dict | None = None
+        if world_id and section:
+            where = {"$and": [{"world_id": world_id}, {"section": section}]}
+        elif world_id:
+            where = {"world_id": world_id}
+        elif section:
+            where = {"section": section}
+
         n = min(self.n_results, col.count())
-        results = col.query(
-            query_texts=[text],
-            n_results=n,
-            include=["documents", "distances"],
-        )
+        query_kwargs: dict = {
+            "query_texts": [text],
+            "n_results":   n,
+            "include":     ["documents", "distances"],
+        }
+        if where:
+            query_kwargs["where"] = where
+
+        results = col.query(**query_kwargs)
 
         docs  = results["documents"][0]
         dists = results["distances"][0]
@@ -68,6 +93,49 @@ class WorldRetriever:
             f"{len(filtered)}개 threshold({self.threshold}) 통과"
         )
         return filtered
+
+    def query_by_meta(
+        self,
+        world_id: str,
+        section: str | None = None,
+        item_title: str | None = None,
+    ) -> list[dict]:
+        """메타데이터 기준으로 청크를 직접 조회한다 (임베딩 검색 없이).
+
+        Returns
+        -------
+        list[dict]
+            각 항목: {"id": ..., "document": ..., "metadata": {...}}
+        """
+        existing = [c.name for c in self._client.list_collections()]
+        if self._col_name not in existing:
+            return []
+
+        col = self._client.get_collection(name=self._col_name)
+        if col.count() == 0:
+            return []
+
+        conditions: list[dict] = [{"world_id": world_id}]
+        if section:
+            conditions.append({"section": section})
+        if item_title:
+            conditions.append({"item_title": item_title})
+
+        where = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+
+        results = col.get(
+            where=where,
+            include=["documents", "metadatas"],
+        )
+
+        items = []
+        for doc_id, doc, meta in zip(
+            results.get("ids", []),
+            results.get("documents", []),
+            results.get("metadatas", []),
+        ):
+            items.append({"id": doc_id, "document": doc, "metadata": meta})
+        return items
 
     def add_document(self, doc_id: str, text: str, metadata: dict) -> None:
         """ChromaDB에 문서를 동적으로 추가(upsert)한다.
