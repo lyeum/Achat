@@ -45,12 +45,20 @@ _CHAR_DIR         = ROOT / "conversation" / "character"
 
 # ── 시스템 프롬프트 조립 (character_id + affection 기준) ─────────────────────
 
-def _build_system_prompt(character_id: str, affection: str) -> str:
-    """캐릭터 YAML과 affection 구간으로 시스템 프롬프트를 조립한다.
+# log 데이터 affection 3단계 → YAML 6단계 tier 매핑
+_AFF_TIER_MAP = {"low": "stranger", "mid": "familiar", "high": "close"}
 
+def _build_system_prompt(character_id: str, affection: str) -> str:
+    """캐릭터 YAML + affection 구간으로 시스템 프롬프트를 조립한다.
+
+    prompt_build.py PromptBuilder._layer_a() 와 동일한 순서로 조립.
     YAML 로드 실패 시 최소 폴백 프롬프트를 반환한다.
     """
     import yaml
+    from conversation.core.prompt_build import (
+        _STYLE_PRESETS, _PERSONA_PRESETS, _PERSONALITY_PRESETS,
+        _AFFECTION_FALLBACK,
+    )
 
     yaml_path = _CHAR_DIR / f"CH_{character_id}.yaml"
     if not yaml_path.exists():
@@ -59,31 +67,52 @@ def _build_system_prompt(character_id: str, affection: str) -> str:
     with open(yaml_path, encoding="utf-8") as f:
         char: dict = yaml.safe_load(f)
 
-    name         = char.get("name", character_id)
-    description  = char.get("description", "").strip()
-    speech_style = char.get("speech_style", "").strip()
-    rules: list  = char.get("rules", [])
+    tier = _AFF_TIER_MAP.get(affection, "familiar")
 
-    # affection 구간 → tier 매핑
-    affection_map = {"low": "stranger", "mid": "familiar", "high": "close"}
-    tier = affection_map.get(affection, "familiar")
+    parts: list[str] = []
 
-    tone_guide = ""
-    if "state" in char and "tone_guide" in char["state"]:
-        tone_guide = char["state"]["tone_guide"].get(tier, "")
+    # 1. 이름
+    name = char.get("name", character_id)
+    parts.append(f"너는 {name}이다.")
 
-    parts = [
-        f"너는 {name}이다.",
-        description,
-        speech_style,
-    ]
-    if tone_guide:
-        parts.append(tone_guide)
-    if rules:
-        rules_text = " ".join(str(r) for r in rules)
-        parts.append(rules_text)
+    # 2. 캐릭터 설명
+    if desc := char.get("description", "").strip():
+        parts.append(desc)
 
-    return " ".join(p for p in parts if p)
+    # 3. 말투 — prompt_build.py 동일 로직
+    speech: dict = char.get("speech", {})
+    formality = speech.get("formality", "").strip()
+    if formality == "존댓말":
+        parts.append("반드시 존댓말(경어체)로만 말한다. 반말을 절대 사용하지 않는다.")
+    elif formality == "반말":
+        parts.append("반드시 반말로만 말한다. 존댓말을 사용하지 않는다.")
+    elif formality:
+        parts.append(f"{formality}을 사용한다.")
+
+    style_val = speech.get("style", "").strip()
+    if style_val:
+        parts.append(_STYLE_PRESETS.get(style_val, style_val))
+
+    persona_val = speech.get("persona", "").strip()
+    if persona_val:
+        parts.append(_PERSONA_PRESETS.get(persona_val, persona_val))
+
+    # 4. 성격
+    personality_val = char.get("personality", "").strip()
+    if personality_val:
+        parts.append(_PERSONALITY_PRESETS.get(personality_val, personality_val))
+
+    # 5. 친밀도 tier 행동
+    aff_text = char.get("affection", {}).get(tier) or _AFFECTION_FALLBACK.get(tier, "")
+    if aff_text:
+        parts.append(aff_text)
+
+    # 6. 규칙
+    rules: list = char.get("rules", [])
+    if rules and all(isinstance(r, str) for r in rules):
+        parts.append(" ".join(rules))
+
+    return " ".join(parts)
 
 
 # ── 변환 ─────────────────────────────────────────────────────────────────────
