@@ -272,19 +272,20 @@ Achat/
 │   │   ├─ memory_test.py         # 기억 유지 정확도 (5케이스, 자동 실행)
 │   │   ├─ speed_bench.py         # 추론 속도 벤치마크 (수동)
 │   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 12턴 (수동)
-│   ├─ data/                      # 학습 데이터 (2,150건, 38파일, v10 기준)
-│   │   ├─ affection/             # 친밀도 단계별 (6단계: stranger~intimate)
-│   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow
-│   │   ├─ emotion/               # 감정 상태별 (9종: neutral/happy/affectionate/touched/curious/sad/embarrassed/annoyed/angry)
-│   │   ├─ long_dialogue/         # 장대화 (8-15턴: daily_chat / emotional_support / casual_deep)
-│   │   ├─ personality/           # 5종 성격별
-│   │   └─ speech_style/          # 말투 조합
+│   ├─ data/                      # 학습 데이터 (3,170건, 57파일, v11 기준)
+│   │   ├─ affection/             # 친밀도 단계별 반말 (6단계: stranger~intimate) + formal/ 존댓말 6단계
+│   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow / initiative / world_trigger_response
+│   │   ├─ emotion/               # 감정 상태별 (10종: neutral/happy/affectionate/touched/curious/sad/embarrassed/annoyed/angry + transition)
+│   │   ├─ long_dialogue/         # 장대화 (8-15턴: daily_chat(51건) / emotional_support / casual_deep / topic_continuity 등 9종)
+│   │   ├─ personality/           # 6종 성격별 (calm/cynical/tsundere/energetic/melancholic/warm)
+│   │   └─ speech_style/          # 말투 조합 (formal/ 6종 + informal/ 2종 + persona/ 4종)
 │   └─ log/                       # MVP 대화 로그 수집 (카테고리별 JSONL)
 │
 ├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
 │   ├─ LoRA_v8/                   # v8 (eval best 1.353, 5 epoch 과적합)
 │   ├─ LoRA_v9/adapter/           # v9 (eval best 1.511, 3 epoch, EWC λ=500)
-│   └─ LoRA_v10/adapter/          # 현재 어댑터 (eval best 1.512, 3 epoch, character_schema 기반)
+│   ├─ LoRA_v10/adapter/          # v10 (eval best 1.512, 3 epoch, character_schema 기반)
+│   └─ LoRA_v11/                  # v11 목표 — 3,170건 / 57파일 (감정전환·세계관반응·존댓말·성격6종 추가)
 │
 ├─ data/
 │   └─ lora/
