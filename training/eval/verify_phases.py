@@ -9,12 +9,11 @@
 
 실행:
     uv run python training/eval/verify_phases.py
-    uv run python training/eval/verify_phases.py --adapter output/lora_haru_v1/adapter
+    uv run python training/eval/verify_phases.py --adapter output/LoRA_v11/adapter
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -22,20 +21,19 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import argparse
+
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
 from config import get_config
 from conversation.core.llm_client import LLMClient
-from conversation.core.prompt_build import PromptBuilder
 from conversation.core.router import ConversationRouter
 from conversation.core.session import ConversationSession
 from conversation.loader.character_load import load_character
 from conversation.loader.world_load import load_world
-from memory import short_term as st_mod
 from memory.long_term import LongTermMemory
-from memory.summarizer import check_trigger, summarize, score_importance, write_to_vdb
 from rag.index import index_world
 from rag.retrieve import WorldRetriever
 
@@ -69,61 +67,47 @@ _AUTO_DIALOGUE = [
 
 def _run_turn_tracked(
     router: ConversationRouter,
-    builder: PromptBuilder,
-    llm: LLMClient,
     session: ConversationSession,
     user_input: str,
     long_term: LongTermMemory,
     rag: WorldRetriever,
-    trigger_n: int,
 ) -> dict:
-    """한 턴을 실행하고 검증에 필요한 정보를 반환한다."""
-    short_buf   = st_mod.get_recent(session)
+    """한 턴을 실행하고 검증에 필요한 정보를 반환한다.
+
+    router.handle_turn()을 통해 실제 파이프라인(world trigger, narration 포함)을
+    실행한다. VDB/RAG 히트 수는 handle_turn 내부 쿼리와 독립적으로 별도 측정한다.
+    """
+    prev_mood = session.mood
+    prev_aff  = session.affection
+
+    # 검증용 VDB/RAG 히트 수 사전 측정 (handle_turn 내부 호출과 독립)
     vdb_results = long_term.query(user_input, session.character_id)
     rag_results = rag.query(user_input)
 
-    messages = builder.assemble(
-        short_buf=short_buf,
-        vdb_results=vdb_results,
-        rag_results=rag_results,
-    )
-    messages.append({"role": "user", "content": user_input})
+    # VDB 저장 여부: handle_turn 전후 count 비교
+    vdb_count_before = long_term._collection(session.character_id).count()
 
-    response = llm.generate(messages, stream=False)
+    # 실제 파이프라인 실행 — world trigger / narration / 요약 저장 모두 포함
+    response = router.handle_turn(user_input, stream=False)
 
-    # 상태 업데이트
-    from agent import state as state_mod
-    character = router.character
-    prev_mood = session.mood
-    prev_aff  = session.affection
-    new_mood  = state_mod.update_mood(session, user_input, character)
-    state_mod.update_affection(session, new_mood)
-
-    session.add_turn(user_input, response)
-
-    # 요약 트리거 확인
-    stored = False
-    if check_trigger(session, trigger_n):
-        summary = summarize(session.dialogue_log, llm, trigger_n)
-        score   = score_importance(summary)
-        stored  = write_to_vdb(summary, score, session, long_term, character, trigger_n)
+    vdb_count_after = long_term._collection(session.character_id).count()
 
     return {
-        "turn":        session.turn_count,
-        "vdb_hits":    len(vdb_results),
-        "rag_hits":    len(rag_results),
-        "vdb_results": vdb_results,
-        "rag_results": rag_results,
-        "prev_mood":   prev_mood,
-        "mood":        session.mood,
-        "prev_aff":    prev_aff,
-        "affection":   session.affection,
-        "summary_stored": stored,
-        "response":    response[:80],
+        "turn":           session.turn_count,
+        "vdb_hits":       len(vdb_results),
+        "rag_hits":       len(rag_results),
+        "vdb_results":    vdb_results,
+        "rag_results":    rag_results,
+        "prev_mood":      prev_mood,
+        "mood":           session.mood,
+        "prev_aff":       prev_aff,
+        "affection":      session.affection,
+        "summary_stored": vdb_count_after > vdb_count_before,
+        "response":       response[:80],
     }
 
 
-def run_verification() -> dict[str, bool]:
+def run_verification(adapter_path: str | None = None) -> dict[str, bool]:
     logger.info("=== Phase 2/3 실환경 검증 시작 ===")
 
     cfg = get_config()
@@ -131,6 +115,11 @@ def run_verification() -> dict[str, bool]:
     cfg["memory_trigger_n"] = 10
     # 검증용 임시 ChromaDB 경로 (기존 데이터 오염 방지)
     cfg["chroma_path"] = "./chroma_verify"
+    # 어댑터 경로 오버라이드 (--adapter 인자 제공 시)
+    if adapter_path:
+        p = Path(adapter_path)
+        cfg["adapter_path"] = str(ROOT / p) if not p.is_absolute() else str(p)
+        logger.info(f"어댑터 경로 오버라이드: {cfg['adapter_path']}")
 
     character = load_character(CHARACTER_PATH)
     world     = load_world(WORLD_PATH)
@@ -156,17 +145,14 @@ def run_verification() -> dict[str, bool]:
         character=character, world=world, session=session,
         llm=llm, long_term=long_term, config=cfg,
     )
-    builder = router.builder
-    trigger_n = cfg["memory_trigger_n"]
 
-    # ── 10턴 자동 대화 실행 ─────────────────────────────────────────────
+    # ── 12턴 자동 대화 실행 ─────────────────────────────────────────────
     results = []
-    console.rule("[bold blue]자동 대화 실행 (10턴)")
+    console.rule("[bold blue]자동 대화 실행 (12턴)")
     for i, user_input in enumerate(_AUTO_DIALOGUE, start=1):
         console.print(f"[dim]Turn {i}[/] [cyan]You:[/] {user_input}")
         info = _run_turn_tracked(
-            router, builder, llm, session, user_input,
-            long_term, rag, trigger_n,
+            router, session, user_input, long_term, rag,
         )
         results.append(info)
         console.print(f"         [green]Haru:[/] {info['response']}...")
@@ -249,5 +235,11 @@ def run_verification() -> dict[str, bool]:
 
 
 if __name__ == "__main__":
-    results = run_verification()
+    parser = argparse.ArgumentParser(description="Phase 2/3 실환경 검증")
+    parser.add_argument(
+        "--adapter", default=None,
+        help="LoRA 어댑터 경로 (없으면 config.py의 adapter_path 사용)",
+    )
+    args = parser.parse_args()
+    results = run_verification(adapter_path=args.adapter)
     sys.exit(0 if all(results.values()) else 1)
