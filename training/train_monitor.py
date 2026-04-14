@@ -61,8 +61,23 @@ def parse_output_dir(cmd_parts: list[str]) -> Path:
     return ROOT / "output" / "LoRA_v7"
 
 
-def load_log_history(state_path: Path) -> list[dict]:
-    """trainer_state.json 에서 log_history 를 읽어 반환. 실패 시 빈 리스트."""
+def find_latest_state(output_dir: Path) -> Path:
+    """학습 중 최신 checkpoint의 trainer_state.json 경로를 반환.
+    checkpoint가 없으면 학습 완료 후 루트에 저장된 경로를 반환."""
+    checkpoints = sorted(
+        output_dir.glob("checkpoint-*"),
+        key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0,
+    )
+    for ckpt in reversed(checkpoints):
+        state = ckpt / "trainer_state.json"
+        if state.exists():
+            return state
+    return output_dir / "trainer_state.json"
+
+
+def load_log_history(output_dir: Path) -> list[dict]:
+    """최신 checkpoint의 trainer_state.json 에서 log_history 를 읽어 반환. 실패 시 빈 리스트."""
+    state_path = find_latest_state(output_dir)
     try:
         with open(state_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -90,33 +105,34 @@ def extract_metrics(log_history: list[dict]) -> tuple[list[float], list[float], 
 def check_overfitting(
     eval_losses: list[float],
     train_losses: list[float],
+    n_rise: int = N_RISE,
+    gap_threshold: float = GAP_THRESHOLD,
 ) -> tuple[bool, str]:
     """
     과적합 여부 판단.
     Returns (should_stop, reason_message)
     """
-    if len(eval_losses) < N_RISE + 1:
-        return False, ""
-
-    # 조건 1: eval_loss N_RISE 번 연속 상승
-    recent = eval_losses[-(N_RISE + 1):]
-    if all(recent[i] < recent[i + 1] for i in range(N_RISE)):
-        best = min(eval_losses)
-        current = eval_losses[-1]
-        return True, (
-            f"eval_loss {N_RISE}회 연속 상승 "
-            f"(best={best:.4f} → 현재={current:.4f})"
-        )
+    # 조건 1: eval_loss n_rise 번 연속 상승
+    if len(eval_losses) >= n_rise + 1:
+        recent = eval_losses[-(n_rise + 1):]
+        if all(recent[i] < recent[i + 1] for i in range(n_rise)):
+            best = min(eval_losses)
+            current = eval_losses[-1]
+            return True, (
+                f"eval_loss {n_rise}회 연속 상승 "
+                f"(best={best:.4f} → 현재={current:.4f})"
+            )
 
     # 조건 2: train/eval loss gap 초과
     if train_losses and eval_losses:
         latest_train = train_losses[-1]
         latest_eval = eval_losses[-1]
         gap = latest_eval - latest_train
-        if gap > GAP_THRESHOLD:
+        if gap > gap_threshold:
             return True, (
                 f"train/eval 손실 격차 초과 "
-                f"(train={latest_train:.4f}, eval={latest_eval:.4f}, gap={gap:.4f} > {GAP_THRESHOLD})"
+                f"(train={latest_train:.4f}, eval={latest_eval:.4f}, "
+                f"gap={gap:.4f} > {gap_threshold})"
             )
 
     return False, ""
@@ -195,7 +211,6 @@ def main() -> None:
     poll_interval = args.poll
 
     output_dir = parse_output_dir(cmd_parts)
-    state_path = output_dir / "trainer_state.json"
 
     logger.info("=" * 60)
     logger.info("학습 모니터 시작")
@@ -220,7 +235,7 @@ def main() -> None:
         while proc.poll() is None:
             time.sleep(poll_interval)
 
-            log_history = load_log_history(state_path)
+            log_history = load_log_history(output_dir)
             eval_steps, eval_losses, train_losses = extract_metrics(log_history)
 
             # 현재 상태 출력
@@ -236,35 +251,15 @@ def main() -> None:
                     f"best_eval={best_eval:.4f}  gap={gap:+.4f}"
                 )
             else:
-                logger.info("trainer_state.json 대기 중 (eval 아직 없음)...")
+                logger.info("trainer_state.json 대기 중 (첫 checkpoint 저장 전)...")
 
             # 과적합 검사
             should_stop, reason = check_overfitting(
                 eval_losses,
                 train_losses,
+                n_rise=n_rise,
+                gap_threshold=gap_threshold,
             )
-            # check_overfitting 내부 설정값을 args 값으로 덮어쓰기
-            if not should_stop and eval_losses:
-                if len(eval_losses) >= n_rise + 1:
-                    recent = eval_losses[-(n_rise + 1):]
-                    if all(recent[i] < recent[i + 1] for i in range(n_rise)):
-                        best = min(eval_losses)
-                        current = eval_losses[-1]
-                        should_stop = True
-                        reason = (
-                            f"eval_loss {n_rise}회 연속 상승 "
-                            f"(best={best:.4f} → 현재={current:.4f})"
-                        )
-                if not should_stop and train_losses:
-                    gap_val = eval_losses[-1] - train_losses[-1]
-                    if gap_val > gap_threshold:
-                        should_stop = True
-                        reason = (
-                            f"train/eval 손실 격차 초과 "
-                            f"(train={train_losses[-1]:.4f}, "
-                            f"eval={eval_losses[-1]:.4f}, "
-                            f"gap={gap_val:.4f} > {gap_threshold})"
-                        )
 
             if should_stop:
                 logger.warning(f"과적합 감지 → 학습 중단: {reason}")
@@ -308,7 +303,7 @@ def main() -> None:
     logger.info("")
 
     # (1) 학습 상황
-    log_history = load_log_history(state_path)
+    log_history = load_log_history(output_dir)
     eval_steps, eval_losses, train_losses = extract_metrics(log_history)
     if eval_losses:
         best_eval = min(eval_losses)
