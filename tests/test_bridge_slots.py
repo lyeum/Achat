@@ -375,58 +375,41 @@ class TestUnloadLlm:
         bridge_inst._agent = agent
         bridge_inst._unload_llm()  # must not raise
 
-    def test_unload_called_before_rebuild(self, monkeypatch):
-        """_rebuild_agent()가 _unload_llm()을 먼저 호출하는지 확인한다 (BUG-02-A 핵심)."""
+    def test_rebuild_calls_swap_character(self, monkeypatch):
+        """_rebuild_agent()가 LLM 재로드 없이 swap_character()를 호출하는지 확인한다.
+
+        모든 캐릭터가 동일한 어댑터를 공유하므로 캐릭터 교체 시 LLM을 내렸다
+        다시 올릴 필요가 없다. _unload_llm은 호출되어선 안 된다.
+        """
         from ui_ux.bridge import ChatBridge
         from conversation.session_manager import SessionState
 
-        call_order: list[str] = []
+        swap_args: list[tuple] = []
+        unload_called: list[bool] = []
 
         bridge_inst = ChatBridge.__new__(ChatBridge)
-        bridge_inst._agent = MagicMock()
-        bridge_inst._agent.llm = None
-        bridge_inst._agent.cfg = {"model_backend": "stub"}
-        bridge_inst._agent.character = {"id": "Haru", "name": "하루"}
         bridge_inst._conv_logger = None
 
-        def fake_unload():
-            call_order.append("unload")
+        fake_agent = MagicMock()
+        fake_agent.character = {"id": "MookHyeon", "name": "묵현"}
+        fake_agent.swap_character = lambda cid, wid, st: swap_args.append((cid, wid))
+        bridge_inst._agent = fake_agent
 
-        def fake_agent_from_session(state, cfg):
-            call_order.append("load")
-            a = MagicMock()
-            a.character = {"id": state.char_id, "name": state.char_id}
-            a.session = None
-            a.world = {}
-            a.llm = None
-            return a
-
-        monkeypatch.setattr(bridge_inst, "_unload_llm", fake_unload)
+        monkeypatch.setattr(bridge_inst, "_unload_llm", lambda: unload_called.append(True))
         monkeypatch.setattr(bridge_inst, "_resolve_initial_location", lambda: "")
 
-        import ui_ux.bridge as bmod
-        monkeypatch.setattr(
-            bmod.__import__("agent.core", fromlist=["Agent"]) if False else
-            __import__("agent.core", fromlist=["Agent"]),
-            "Agent",
-            type("A", (), {"from_session": staticmethod(fake_agent_from_session)})(),
-            raising=False,
-        )
-
-        # agent.core.Agent.from_session 패치
-        import agent.core as acore
-        monkeypatch.setattr(acore.Agent, "from_session", staticmethod(fake_agent_from_session))
-
         state = SessionState(
-            char_id="Haru", session_id="s1", world_id="w",
+            char_id="MookHyeon", session_id="s1", world_id="seaside_world",
             scenario_id=None, act_id=None, location=None,
             mood="neutral", affection=30, turn_count=0,
             created_at="", last_active="",
         )
         bridge_inst._rebuild_agent(state)
 
-        assert call_order == ["unload", "load"], \
-            f"_unload_llm이 먼저 호출되어야 함. 실제 순서: {call_order}"
+        assert swap_args == [("MookHyeon", "seaside_world")], \
+            f"swap_character가 올바른 인자로 호출되어야 함. 실제: {swap_args}"
+        assert not unload_called, \
+            "_rebuild_agent는 _unload_llm을 호출하지 않아야 한다 (LLM 공유 설계)"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
