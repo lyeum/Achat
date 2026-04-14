@@ -20,7 +20,6 @@ os.environ.setdefault("ACHAT_ENV", "ui_test")
 
 _CHAR_DIR = ROOT / "conversation" / "character"
 _HARU_YAML = _CHAR_DIR / "CH_Haru.yaml"
-_SEONJAE_YAML = _CHAR_DIR / "CH_Seonjae.yaml"
 _HARU_STRANGER = ROOT / "data" / "lora" / "conversation" / "haru_stranger.jsonl"
 
 
@@ -59,19 +58,13 @@ class TestCharacterLoad:
         data = load_character(_HARU_YAML)
         assert data["id"] == "Haru"
 
-    def test_seonjae_loads_without_error(self):
-        """CH_Seonjae.yaml 로드가 오류 없이 완료된다."""
-        from conversation.loader.character_load import load_character
-        data = load_character(_SEONJAE_YAML)
-        assert data["id"] == "Seonjae"
-
 
 # ══════════════════════════════════════════════════════════════════════════════
-# C & G. CH_Haru.yaml / CH_Seonjae.yaml 규칙 강화 검증
+# C & G. CH_Haru.yaml 규칙 강화 검증 (CH_Seonjae는 삭제됨)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestCharacterYamlRules:
-    @pytest.fixture(params=["CH_Haru.yaml", "CH_Seonjae.yaml"])
+    @pytest.fixture(params=["CH_Haru.yaml"])
     def char_data(self, request):
         with open(_CHAR_DIR / request.param, encoding="utf-8") as f:
             return yaml.safe_load(f)

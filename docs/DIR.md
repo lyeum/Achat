@@ -1,6 +1,6 @@
 # DIR — 파일시스템 현황 참조 문서
 
-> 이 문서는 실제 파일시스템 기준으로 작성됩니다.
+> 이 문서는 실제 파일시스템 기준으로 작성됩니다. 최종 업데이트: 2026-04-09 (개선5 구현 반영)
 > 코드·설계와 불일치하는 항목은 ⚠️로 표시합니다.
 >
 > 범례: ✅ 완료 | 🔲 비어있음(구현 예정) | 📄 데이터/설정 파일 | ⚠️ 불일치/정리 필요
@@ -22,6 +22,8 @@ Achat/
 ├─ config.py                          ✅ dev / deploy / ui_test 환경 분기 설정
 │                                        dev: adapter_path="./output/LoRA_v9/adapter" ✅ LoRA_v9 기준 (2026-03-23)
 │                                        deploy: model_path="./models/model_q4km.gguf" ⚠️ 실제 없음
+│                                        모든 환경: default_world_id="seaside_world" (2026-04-09)
+│                                        모든 환경: memory_trigger_n=5 (2026-04-09, 이전 10)
 ├─ pyproject.toml                     ✅ 개발 환경 의존성 (uv, Linux + GPU) + ruff 설정
 ├─ pyproject-deploy.toml              ✅ 배포 환경 의존성 (uv, Windows + CPU)
 ├─ uv.lock                            ✅ uv lock 파일 (dev 기준)
@@ -45,7 +47,8 @@ Achat/
 │   │   ├─ phases.md                  ✅ Phase 0~7 실행 계획서
 │   │   ├─ training_개선.md           ✅ EWC 다단계 학습 / 카테고리 가중치 / assistant 마스킹 구현 계획
 │   │   ├─ UI설계-clear.md             ✅ QML + PySide6 UI 설계 상세 (1~6단계 구현 완료)
-│   │   └─ UI_테스트.md               ✅ UI 전체 수동 테스트 체크리스트 + 자동 테스트 실행 가이드
+│   │   ├─ UI_테스트.md               ✅ UI 전체 수동 테스트 체크리스트 + 자동 테스트 실행 가이드
+│   │   └─ 개선5.md                   ✅ 개선5 구현 계획 (항목1~10 모두 완료, 2026-04-09)
 │   └─ BUG/
 │       ├─ BUG_1-clear.md              ✅ 인수인계 문서 (환경 셋업, 해결된 이슈 기록)
 │       └─ BUG_small-clear.md          ✅ 소규모 버그 수정 기록
@@ -53,6 +56,8 @@ Achat/
 ├─ agent/
 │   ├─ __init__.py                    ✅ 패키지 초기화
 │   ├─ core.py                        ✅ Agent 클래스 — 컴포넌트 초기화 + chat() / handle_input(mode) 모드 분기
+│                                        _inject_prompt_guide(tool_name) — prompt_convert 제외 기능모드 도구에 ChromaDB prompt_guides 주입 (2026-04-09)
+│                                        character_overrides.rules — 세계관 YAML rules를 캐릭터 rules에 merge (2026-04-09)
 │   ├─ memory.py                      ✅ memory/ 패키지 re-export (LongTermMemory, get_recent, summarizer)
 │   ├─ persona.py                     ✅ load_persona() / swap_persona() 핫스왑
 │   ├─ router.py                      ✅ CommandRouter — 슬래시 명령어 감지/파싱 (/캐릭터변경, /초기화, /상태 등)
@@ -80,6 +85,13 @@ Achat/
 │   ├─ narration_monitor.py           ✅ NarrationMonitor — check_keyword()
 │   │                                    세션 내 키워드당 1회 제한, _fired_keywords 추적
 │   │
+│   ├─ narration/                     ← 신규 패키지 (2026-04-09)
+│   │   ├─ __init__.py               ✅ 패키지 초기화
+│   │   └─ world_trigger.py          ✅ 세계관 트리거 판단 + 나레이션 생성 (2026-04-09)
+│   │                                    check_story_trigger(session, user_input, rag) — 코사인 유사도 ≥ 0.55
+│   │                                    check_place_trigger(session, place_id) — visited_places 기반 1회
+│   │                                    check_culture_trigger(session, rag) — explained_cultures 소거법
+│   │
 │   ├─ character/
 │   │   ├─ character_schema.yaml     ✅ 캐릭터 YAML 계약 (슬롯 = 학습 카테고리 어휘, 2026-04-02 신규)
 │   │   ├─ CH_Haru.yaml              ✅ 예시 캐릭터 (speech/affection/emotion/personality 슬롯 기반, 2026-04-02 재작성)
@@ -92,10 +104,15 @@ Achat/
 │   │   │                               LoRA 어댑터 로드, repetition_penalty=1.1, 토큰 카운트
 │   │   ├─ prompt_build.py           ✅ Layer A~D Context Assembly
 │   │   │                               session.location_context 우선, 없으면 YAML act 사용
-│   │   ├─ router.py                 ✅ handle_turn() — 장소 이동 감지(_handle_location)
+│   │   ├─ router.py                 ✅ handle_turn(mode=) — mode 파라미터 추가 (2026-04-09)
+│   │   │                               mode="function"이면 요약 트리거 건너뜀
+│   │   │                               _check_world_triggers() 신규 — story/place/culture 트리거 체크
 │   │   │                               → VDB+RAG → PromptBuilder → LLM → mood/affection → 요약
 │   │   └─ session.py                ✅ 세션 상태 (mood 8종, affection, turn_count, dialogue_log,
 │   │                                   world_id, scenario_id, act_id, location_context)
+│   │                                   fired_stories: list[str] — 발동된 story item_title 목록 (2026-04-09)
+│   │                                   visited_places: list[str] — 방문한 장소 목록 (2026-04-09)
+│   │                                   explained_cultures: list[str] — 설명된 문화 항목 목록 (2026-04-09)
 │   │
 │   ├─ loader/
 │   │   ├─ __init__.py               ✅ 패키지 초기화
@@ -118,6 +135,7 @@ Achat/
 │       ├─ W_schema.json             📄 세계관 YAML 스키마
 │       └─ W_sea.yaml                📄 예시 세계관 (seaside_world / morning_walk 시나리오)
 │                                       act_1: location=beach / act_2: location=breakwater
+│                                       character_overrides.rules 필드 추가 (2026-04-09) — 세계관별 추가 행동 규칙
 │
 ├─ data/
 │   └─ lora/
@@ -159,18 +177,23 @@ Achat/
 ├─ rag/
 │   ├─ __init__.py                   ✅ 패키지 초기화
 │   ├─ al.txt                        📄 세계관 분위기 텍스트 메모 (바닷가/영화관/새벽 묘사)
-│   ├─ index.py                      ✅ index_world() — .md 청킹(400자/overlap 50) + ChromaDB 인덱싱
-│   │                                   ⚠️ 고정 크기 청킹 — ## 헤더 경계와 불일치 가능
-│   │                                   → semantic chunking 전환 권장 (현재 보류: world 문서 1개뿐)
+│   ├─ index.py                      ✅ index_world() — 섹션 기반 청킹 + ChromaDB 인덱싱 (2026-04-09)
+│   │                                   _parse_world_md() 신규: # WorldName / ## section / ### item_title 파싱
+│   │                                   story 섹션 전용 트리거 키워드: [...] 파싱
+│   │                                   ChromaDB 메타: {world_id, section, item_title, trigger_keywords}
+│   │                                   ~~⚠️ 고정 크기 청킹~~ → ✅ 섹션 기반 청킹으로 전환 완료 (2026-04-09)
 │   ├─ retrieve.py                   ✅ WorldRetriever.query() — 매 턴 실행, threshold 0.52
 │   │                                   컬렉션 미존재 안전 처리 / add_document() 동적 upsert
+│   │                                   query_by_meta(world_id, section) 신규 — 섹션 전체 반환 (2026-04-09)
 │   ├─ world_nav.py                  ✅ detect_move_intent() — 키워드 필터 + LLM 추출(max_tokens=15)
 │   │                                   find_or_create_location() — RAG 검색 → LLM 생성 → add_document 저장
 │   └─ sources/
 │       └─ world/
-│           ├─ culture.md            📄 마을 문화 및 풍습
-│           ├─ place.md              📄 주요 장소 정보 (beach/breakwater/lighthouse/항구시장/카페)
-│           └─ story.md              📄 배경 스토리 (마을 역사, 등대지기 전설, 주요 사건)
+│           ├─ Seaside.md            ✅ 통합 세계관 소스 (2026-04-09, 신규) — ## culture / ## place / ## story
+│           │                           기존 culture.md + place.md + story.md 통합 대체
+│           ├─ culture.md            📄 (구 파일 — Seaside.md로 통합됨)
+│           ├─ place.md              📄 (구 파일 — Seaside.md로 통합됨)
+│           └─ story.md              📄 (구 파일 — Seaside.md로 통합됨)
 │
 ├─ scripts/
 │   ├─ build_dataset.py              ✅ training/log/*.jsonl → data/lora/conversation/ 빌드
@@ -196,14 +219,27 @@ Achat/
 │   │                                   SFT 변환, reviewed_only 필터, haru_stranger.jsonl 구조 검증
 │   ├─ test_function_tools.py        ✅ PromptGuideStore 저장/검색/삭제, regex fallback, 한국어 비율
 │   │                                   (TestWebSearchTool 제거됨 — web_search.py 삭제)
-│   └─ test_integration_flows.py     ✅ LocalSearchFullFlow / FolderClassifyFullFlow / FileOptionsFullFlow
-│                                       (TestWebSearchFullFlow 제거됨 — web_search.py 삭제)
+│   ├─ test_integration_flows.py     ✅ LocalSearchFullFlow / FolderClassifyFullFlow / FileOptionsFullFlow
+│   │                                   (TestWebSearchFullFlow 제거됨 — web_search.py 삭제)
+│   └─ test_improvement5.py          ✅ 개선5 전체 커버 (35개 테스트, 2026-04-09)
+│                                       TestConversationSessionTriggerFields (3개) — fired_stories/visited_places/explained_cultures
+│                                       TestRouterModeParameter (3개) — mode="chat"/"function" 분기
+│                                       TestSessionManagerWorldId (4개) — SessionMeta.world_id / activate_for_world()
+│                                       TestAgentInjectPromptGuide (4개) — _inject_prompt_guide() 주입 경로
+│                                       TestBridgePromptGuideKeys (3개) — model_name / model 키 정규화
+│                                       TestWorldTriggers (5개) — story/place/culture 트리거
+│                                       TestRagIndexParser (3개) — _parse_world_md() 섹션 파서
+│                                       TestConfigValues (3개) — default_world_id / memory_trigger_n
+│                                       TestMemoryDBPanelQmlTab2 (7개) — CRUD UI 속성·시그널 검증
 │
 ├─ tools/
 │   ├─ __init__.py                   ✅ BaseTool re-export
 │   ├─ base.py                       ✅ BaseTool 인터페이스 (parse_params JSON 추출 + execute 추상 메서드)
 │   ├─ commands.py                   📄 미사용 — 추후 정리 예정
 │   ├─ prompt_converter.py           ✅ 프롬프트 변환 (명확하게/간결하게/상세하게/질문형/지시형)
+│   ├─ prompt_store.py               ✅ PromptGuideStore — ChromaDB prompt_guides 컬렉션 CRUD
+│   │                                   query(model_key): model 키 exact match 조회
+│   │                                   model 키 정규화: " " / "_" → "-", lowercase (2026-04-09 호환성 추가)
 │   ├─ folder/
 │   │   ├─ __init__.py               ✅ 패키지 초기화
 │   │   ├─ classifier.py             ✅ 파일 분류 (확장자별/종류별, CATEGORY_MAP, dry_run)
@@ -305,11 +341,20 @@ Achat/
     │                                         getCharacterList / getWorldList
     │                                         loadCustomization / saveCustomization / getAllPartsList
     │                                         browseImage / importImageFromDrop / browseCharacterYaml
-    │                                         newSession(keep_memory) / listSessions(char_id)
+    │                                         newSession(keep_memory) / listSessions(char_id)  ← world_id 포함 (2026-04-09)
     │                                         getCharacterStatus / resetCharacter(char_id)
     │                                         getTheme / saveTheme(theme_id)
     │                                         deleteMemoryEntry(entry_id) / addMemoryEntry(content, meta_json)
     │                                         updateMemoryEntry(entry_id, new_content, meta_json)
+    │                                         ── 개선5 신규 슬롯 (2026-04-09) ──
+    │                                         getWorldKnowledgeDB() / addWorldKnowledge(section, title, content)
+    │                                         updateWorldKnowledge(entry_id, content) / deleteWorldKnowledge(entry_id)
+    │                                         reindexWorldKnowledge() — Seaside.md 재인덱싱
+    │                                         addPromptGuide(model_name, content, char_id) — model 키 정규화 저장
+    │                                         updatePromptGuide(entry_id, content) / deletePromptGuide(entry_id)
+    │                                         getPromptModelList() — DB 내 model_name 목록
+    │                                         getDefaultWorld() — config.default_world_id 반환
+    │                                         changeWorld — 세계관 변경 감지, activate_for_world() 호출
     │                                   경로 상수:
     │                                     _ICONS_DIR      = ui_ux/assets/icons/
     │                                     _CHAR_PARTS_DIR = ui_ux/assets/characters/
@@ -319,6 +364,7 @@ Achat/
     │                                     _WORLD_DIR      = conversation/world/
     │                                   _build_bg_url(): session.location → {location}.png 탐색
     │                                   SessionManager 연동: _init_session / _sync_session_state / _rebuild_agent
+    │                                   activate_for_world(char_id, world_id) — (char_id, world_id) 쌍 기준 세션 초기화
     ├─ chat_panel.py                 ✅ LLMWorker(QThread) — 백그라운드 LLM 추론
     │                                   response_ready / error_occurred 시그널
     ├─ tray.py                       ✅ AppTrayIcon — 시스템 트레이 (열기/숨기기, 캐릭터 변경, 종료)
@@ -363,6 +409,8 @@ Achat/
         │                               charSelectOpen / charStatusOpen / resetConfirmOpen / memoryDBOpen /
         │                               customPartsJson / allPartsListJson / backgroundImageUrl / currentMood
         │                               Connections(bridge.memoryChanged → getMemoryDB() 재호출)
+        │                               Component.onCompleted — default_world_id(seaside_world) 자동 적용 (2026-04-09)
+        │                               onCharacterCreateRequested — CharacterCreatePanel 열기 핸들러 (2026-04-09)
         ├─ ChatBubble.qml            ✅ 재사용 말풍선 컴포넌트 (role로 좌/우 정렬·색상 제어)
         │                               userBubbleColor / assistBubbleColor 프로퍼티 (테마 색상 주입)
         ├─ PipWindow.qml             ✅ PIP 마스코트 모드 (아이콘 + 위로 확장 말풍선)
@@ -372,6 +420,9 @@ Achat/
         │                               캐릭터 / 세계관+act / 커스터마이징 / 초기화 / 테마 섹션
         │                               closeRequested / emotionPanelRequested / characterBuildRequested /
         │                               newSessionRequested / resetConfirmRequested / themeChangeRequested 시그널
+        │                               characterCreateRequested 시그널 신규 (2026-04-09) — 캐릭터 생성 버튼 연결
+        │                               세션 목록 display_name / {char_name}-{world_id} 표시 (2026-04-09)
+        │                               session_id null 가드 추가 (2026-04-09)
         ├─ SideMenuPanel.qml         ✅ 오른쪽 슬라이드인 사이드 내비게이션 패널 (z:25, 220px)
         │                               DB / 설정 / 관리 세 섹션 아코디언 구조
         │                               closeRequested / openMemoryDB / openSettings / openAdmin 시그널
@@ -382,6 +433,10 @@ Achat/
         │                               추가 폼: 내용 + 중요도 Slider + 태그/위치 TextInput
         │                               deleteRequested / addRequested / updateRequested 시그널
         │                               bridge.memoryChanged → getMemoryDB() 실시간 갱신
+        │                               탭2 (프롬프트 가이드) CRUD 완전 구현 (2026-04-09, 개선5 항목6):
+        │                                 model_name 기준 그룹 접힘/펼침 구조
+        │                                 추가 폼: 모델명(gAddModel) + 캐릭터ID(gAddCharId) + 내용(gAddContent)
+        │                                 카드 삭제: bridge.deletePromptGuide(id) / 수정: bridge.updatePromptGuide(id, text)
         ├─ AdminPanel.qml            ✅ 관리자 패널 — affection 직접 조작 (z:20)
         ├─ CharacterCreatePanel.qml  ✅ 캐릭터 생성 패널 — 신규 캐릭터 YAML 등록 (z:20)
         ├─ CharacterDisplay.qml      ✅ 레이어 합성 캐릭터 표시 (128×160 px, z:2)
@@ -423,7 +478,7 @@ Achat/
 
 | 상태 | 항목 수 | 설명 |
 |---|---|---|
-| ✅ 완료 | 90+ | 전체 대화 엔진, UI, RAG, 학습 파이프라인, 테스트 |
+| ✅ 완료 | 100+ | 전체 대화 엔진, UI, RAG, 학습 파이프라인, 테스트 + 개선5 (2026-04-09) |
 | 📄 데이터/설정 | 30+ | YAML/JSON 스키마, 학습 데이터, 런타임 로그 |
 | 🔲 구현 예정 / 비어있음 | 8 | characters/ 파츠 PNG, emotion/ 오버레이 PNG, icons 앱 아이콘, advice·persona 로그 폴더, data/lora/conversation |
-| ⚠️ 정리 필요 | 6 | 위 "알려진 문제" 표 참조 |
+| ⚠️ 정리 필요 | 3 | 위 "알려진 문제" 표 참조 (이전 6개 중 3개 해결됨) |

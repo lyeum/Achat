@@ -70,8 +70,8 @@ Item {
     // ── 모달 박스 ─────────────────────────────────────────────────────────────
     Rectangle {
         id: modal
-        width: 260
-        height: contentLayout.implicitHeight + 32
+        width: 300
+        height: Math.min(modalHeader.height + 16 + contentLayout.implicitHeight + 16, statusRoot.height - 96)
         anchors {
             top: parent.top
             topMargin: 48
@@ -81,6 +81,7 @@ Item {
         radius: 12
         border.color: "#333"
         border.width: 1
+        clip: true
 
         // 헤더
         Rectangle {
@@ -127,6 +128,7 @@ Item {
                 color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                 font.family: statusRoot.fontFamily
                 horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
             }
 
             // Tier 배지

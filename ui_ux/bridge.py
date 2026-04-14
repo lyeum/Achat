@@ -9,7 +9,26 @@ from pathlib import Path
 from PySide6.QtCore import Property, QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
-_ACTION_RE = re.compile(r"^\*(.+)\*$")
+_ACTION_RE    = re.compile(r"^\*(.+)\*$")
+_NARRATION_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def _split_narration(text: str, default_role: str) -> list[tuple[str, str]]:
+    """**...**로 둘러싸인 부분을 narrator, 나머지를 default_role로 순서대로 분리한다."""
+    parts: list[tuple[str, str]] = []
+    last = 0
+    for m in _NARRATION_RE.finditer(text):
+        before = text[last:m.start()].strip()
+        if before:
+            parts.append((default_role, before))
+        narr = m.group(1).strip()
+        if narr:
+            parts.append(("narrator", narr))
+        last = m.end()
+    after = text[last:].strip()
+    if after:
+        parts.append((default_role, after))
+    return parts if parts else [(default_role, text)]
 
 
 # ── 플랫폼 감지 헬퍼 ──────────────────────────────────────────────────────────
@@ -120,6 +139,12 @@ class ChatBridge(QObject):
         session = getattr(self._agent, "session", None)
         return session.affection_locked if session else False
 
+    @Property(str, notify=statusChanged)
+    def activeSessionId(self) -> str:
+        """현재 활성 세션 ID."""
+        session = getattr(self._agent, "session", None)
+        return session.session_id if session else ""
+
     # ── 세션 관리 내부 헬퍼 ──────────────────────────────────────────────────
 
     def _init_session(self) -> None:
@@ -138,7 +163,11 @@ class ChatBridge(QObject):
             if active.location:
                 self._agent.session.location = active.location
         else:
-            state = self._session_manager.activate(char_id)
+            world_id = getattr(self._agent.session, "world_id", None)
+            if world_id:
+                state = self._session_manager.activate_for_world(char_id, world_id)
+            else:
+                state = self._session_manager.activate(char_id)
             self._agent.session.session_id = state.session_id
 
     def _sync_session_state(self) -> None:
@@ -156,6 +185,10 @@ class ChatBridge(QObject):
         state.act_id      = session.act_id      or state.act_id
         state.scenario_id = session.scenario_id or state.scenario_id
         state.world_id    = session.world_id    or state.world_id
+        # 세계관 트리거 상태 동기화
+        state.fired_stories      = list(getattr(session, "fired_stories", []) or [])
+        state.visited_places     = list(getattr(session, "visited_places", []) or [])
+        state.explained_cultures = list(getattr(session, "explained_cultures", []) or [])
         self._session_manager.save_state(state)
 
     def _unload_llm(self) -> None:
@@ -197,19 +230,11 @@ class ChatBridge(QObject):
         gc.collect()
 
     def _rebuild_agent(self, state: SessionState) -> None:
-        """SessionState로부터 새 Agent를 구성하고 self._agent를 교체한다.
+        """SessionState로부터 캐릭터 / 세션 / 라우터를 교체한다.
 
-        새 LLM 로드 전 반드시 기존 LLM을 해제(_unload_llm)해야 한다.
-        해제 없이 로드하면 기존 모델이 GC되기 전까지 두 모델이 동시에 메모리에
-        올라가 OOM이 발생한다. (Qwen2.5-3B bfloat16 기준 순간 ~12 GB)
+        LLM은 유지된다 — 모든 캐릭터가 동일한 어댑터를 공유하므로 재로드 불필요.
         """
-        from agent.core import Agent
-
-        # 기존 LLM 먼저 해제 — OOM 방지 핵심
-        self._unload_llm()
-
-        cfg = getattr(self._agent, "cfg", None)
-        self._agent = Agent.from_session(state, cfg)
+        self._agent.swap_character(state.char_id, state.world_id, state)
         self._character_name = self._agent.character.get("name", state.char_id)
         self._location = self._resolve_initial_location()
 
@@ -300,6 +325,12 @@ class ChatBridge(QObject):
             action_text = action_match.group(1)
             text = f"(행동: {action_text})"
 
+        # ── **...** 나레이션 패턴 처리 ─────────────────────────────────────
+        # UI: 순서대로 user/narrator 버블로 분리 emit
+        # LLM: ** 마커를 (나레이션: text) 형태로 변환
+        has_narration = bool(_NARRATION_RE.search(text))
+        llm_text = _NARRATION_RE.sub(r"(나레이션: \1)", text) if has_narration else text
+
         # 경로가 필요한 도구는 OS 파일 탐색기로 먼저 디렉토리를 선택
         selected_path = ""
         if mode == "function" and tool_name in self._PATH_TOOLS:
@@ -310,11 +341,15 @@ class ChatBridge(QObject):
             if not selected_path:
                 return  # 사용자가 취소
 
-        self.messageAdded.emit("user", text)
+        if has_narration:
+            for role, content in _split_narration(text, "user"):
+                self.messageAdded.emit(role, content)
+        else:
+            self.messageAdded.emit("user", text)
         self.statusChanged.emit("thinking")
 
         self._worker = LLMWorker(
-            self._agent, text, mode=mode,
+            self._agent, llm_text, mode=mode,
             tool_name=tool_name, selected_path=selected_path,
         )
         self._worker.response_ready.connect(self._on_response)
@@ -348,6 +383,20 @@ class ChatBridge(QObject):
 
         return [snapped_x, snapped_y]
 
+    @Slot(str, result=bool)
+    def deleteCharacter(self, char_id: str) -> bool:
+        """캐릭터 YAML을 삭제한다.
+
+        현재 활성 캐릭터는 삭제 불가.
+        """
+        if char_id == (self._agent.character or {}).get("id", ""):
+            return False
+        target = _CHARACTER_DIR / f"CH_{char_id}.yaml"
+        if not target.exists():
+            return False
+        target.unlink()
+        return True
+
     @Slot(result=str)
     def getCharacterList(self) -> str:
         """사용 가능한 캐릭터 목록을 JSON 문자열로 반환한다.
@@ -373,6 +422,29 @@ class ChatBridge(QObject):
         return json.dumps(result, ensure_ascii=False)
 
     @Slot(result=str)
+    def getDefaultWorld(self) -> str:
+        """세계관 목록의 첫 번째 world/scenario/act를 반환한다.
+
+        Returns
+        -------
+        str
+            ``{"world_id": ..., "scenario_id": ..., "act_id": ...}`` 형태의 JSON.
+            세계관이 없으면 빈 dict.
+        """
+        import json
+        worlds = json.loads(self.getWorldList())
+        if not worlds:
+            return json.dumps({}, ensure_ascii=False)
+        w = worlds[0]
+        sc = w["scenarios"][0] if w.get("scenarios") else {}
+        act = sc["acts"][0] if sc.get("acts") else {}
+        return json.dumps({
+            "world_id":    w["world_id"],
+            "scenario_id": sc.get("scenario_id", ""),
+            "act_id":      act.get("act_id", ""),
+        }, ensure_ascii=False)
+
+    @Slot(result=str)
     def getWorldList(self) -> str:
         """세계관 + 시나리오 목록을 JSON 문자열로 반환한다.
 
@@ -392,7 +464,11 @@ class ChatBridge(QObject):
                 scenarios = []
                 for sc in world.get("scenarios", []):
                     acts = [
-                        {"act_id": a["act_id"], "location": a.get("location", "")}
+                        {
+                            "act_id":       a["act_id"],
+                            "location":     a.get("location", ""),
+                            "display_name": a.get("display_name", ""),
+                        }
                         for a in sc.get("acts", [])
                     ]
                     scenarios.append({"scenario_id": sc["scenario_id"], "acts": acts})
@@ -564,7 +640,12 @@ class ChatBridge(QObject):
 
     @Slot(str, str, str)
     def changeWorld(self, world_id: str, scenario_id: str, act_id: str) -> None:
-        """세계관 / 시나리오 / act를 전환한다. stub 모드에서는 배경만 전환."""
+        """세계관 / 시나리오 / act를 전환한다.
+
+        세계관(world_id)이 실제로 바뀌면 (char_id, world_id) 쌍에 해당하는
+        세션을 찾거나 새로 생성한다. act/scenario만 바뀌면 현재 세션을 유지한다.
+        stub 모드에서는 배경만 전환.
+        """
         from conversation.loader.world_load import get_act, load_world
 
         for path in _WORLD_DIR.glob("W_*.yaml"):
@@ -582,38 +663,70 @@ class ChatBridge(QObject):
                 self._agent.world = world
 
                 if self._agent.session is not None:
-                    # 세계관/시나리오/act를 세션에 반영 (session_id 유지)
-                    from conversation.core.prompt_build import PromptBuilder
-                    old_session_id = self._agent.session.session_id
-                    from agent.persona import swap_persona
-                    new_char, new_session = swap_persona(
-                        session=self._agent.session,
-                        new_character_id=self._agent.character["id"],
-                        world_id=world_id,
-                        scenario_id=scenario_id,
-                        act_id=act_id,
-                    )
-                    new_session.location   = self._location
-                    new_session.session_id = old_session_id  # session_id 유지
-                    self._agent.character = new_char
-                    self._agent.session   = new_session
-                    if self._agent.router is not None:
-                        self._agent.router.character = new_char
-                        self._agent.router.session   = new_session
-                        self._agent.router.builder   = PromptBuilder(
-                            new_char, world, new_session,
-                            count_tokens_fn=self._agent.llm.count_tokens,
-                        )
-                    # 변경된 world/scenario/act를 SessionState에 반영
-                    self._sync_session_state()
+                    cur_world_id = getattr(self._agent.session, "world_id", None)
+                    world_changed = cur_world_id != world_id
 
-                # 항상 배경/mood emit
+                    if world_changed:
+                        # 세계관이 바뀌면 (char_id, world_id) 전용 세션으로 전환
+                        self._sync_session_state()
+                        char_id = self._agent.character.get("id", "")
+                        new_state = self._session_manager.activate_for_world(char_id, world_id)
+                        new_state.world_id    = world_id
+                        new_state.scenario_id = scenario_id
+                        new_state.act_id      = act_id
+                        new_state.location    = self._location
+                        self._session_manager.save_state(new_state)
+                        self._rebuild_agent(new_state)
+                    else:
+                        # 같은 세계관 내 act/scenario 교체 → session_id 유지
+                        from conversation.core.prompt_build import PromptBuilder
+                        old_session_id = self._agent.session.session_id
+                        from agent.persona import swap_persona
+                        new_char, new_session = swap_persona(
+                            session=self._agent.session,
+                            new_character_id=self._agent.character["id"],
+                            world_id=world_id,
+                            scenario_id=scenario_id,
+                            act_id=act_id,
+                        )
+                        new_session.location   = self._location
+                        new_session.session_id = old_session_id  # session_id 유지
+                        # 세계관 character_overrides.rules 재적용
+                        _ov = (world.get("character_overrides") or {}).get("rules") or []
+                        if _ov:
+                            new_char["rules"] = list(new_char.get("rules") or []) + list(_ov)
+                        self._agent.character = new_char
+                        self._agent.session   = new_session
+                        if self._agent.router is not None:
+                            self._agent.router.character = new_char
+                            self._agent.router.session   = new_session
+                            self._agent.router.builder   = PromptBuilder(
+                                new_char, world, new_session,
+                                count_tokens_fn=self._agent.llm.count_tokens,
+                            )
+                        self._sync_session_state()
+
+                # 배경/mood emit
                 new_bg = self._build_bg_url()
                 self._current_bg = new_bg
                 self.backgroundChanged.emit(new_bg)
                 new_mood = self._read_mood()
                 self._current_mood = new_mood
                 self.moodChanged.emit(new_mood)
+
+                # 초기 장소 나레이션 emit (첫 진입 or 세계관 변경 시)
+                if self._location and not getattr(self._agent, "_stub", True):
+                    try:
+                        from narration.world_trigger import check_place_trigger
+                        session = getattr(self._agent, "session", None)
+                        rag = getattr(getattr(self._agent, "router", None), "rag", None)
+                        if session and rag:
+                            narr = check_place_trigger(self._location, session, rag)
+                            if narr:
+                                _title, document = narr
+                                self.messageAdded.emit("narrator", document)
+                    except Exception:
+                        pass
             except Exception as e:  # noqa: BLE001
                 self.messageAdded.emit("system", f"[세계관 변경 실패] {e}")
             return
@@ -664,7 +777,12 @@ class ChatBridge(QObject):
         self._sync_session_state()
 
         char_id = self._agent.character.get("id", "")
+        cur_world_id = getattr(self._agent.session, "world_id", None) if self._agent.session else None
         new_state, old_session_id = self._session_manager.new_session(char_id, keep_memory)
+        # 현재 세계관 정보를 새 세션에 복사
+        if cur_world_id:
+            new_state.world_id = cur_world_id
+            self._session_manager.save_state(new_state)
 
         # 에피소딕 기억 삭제 (keep_memory=False 시)
         if old_session_id and self._agent.long_term is not None:
@@ -694,15 +812,61 @@ class ChatBridge(QObject):
         Returns
         -------
         str
-            ``[{"session_id": "...", "char_id": "...", "created_at": "...", "last_active": "..."}]``
+            ``[{"session_id": "...", "char_id": "...", "world_id": "...",
+               "created_at": "...", "last_active": "...", "display_name": "하루-seaside_world"}]``
         """
         metas = self._session_manager.list_sessions(char_id)
-        return json.dumps(
-            [{"session_id": m.session_id, "char_id": m.char_id,
-              "created_at": m.created_at, "last_active": m.last_active}
-             for m in metas],
-            ensure_ascii=False,
-        )
+        # 캐릭터 이름 조회 (display_name 구성용)
+        char_name = char_id
+        try:
+            chars = json.loads(self.getCharacterList())
+            for c in chars:
+                if c.get("id") == char_id:
+                    char_name = c.get("name", char_id)
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+
+        items = []
+        for m in metas:
+            wid = m.world_id or ""
+            display = f"{char_name}-{wid}" if wid else char_name
+            items.append({
+                "session_id":  m.session_id,
+                "char_id":     m.char_id,
+                "world_id":    m.world_id,
+                "created_at":  m.created_at,
+                "last_active": m.last_active,
+                "display_name": display,
+            })
+        return json.dumps(items, ensure_ascii=False)
+
+    @Slot(str, result=bool)
+    def switchSession(self, session_id: str) -> bool:
+        """지정한 session_id로 세션을 전환한다.
+
+        - 현재 세션 상태를 저장
+        - SessionManager.activate() 로 해당 세션 복원
+        - 에이전트 session 교체
+        - mood / affection Signal emit
+        """
+        char_id = (self._agent.character or {}).get("id", "")
+        if not char_id or not session_id:
+            return False
+
+        # 현재 세션 저장
+        self._sync_session_state()
+
+        new_state = self._session_manager.activate(char_id, session_id)
+        if new_state is None:
+            return False
+
+        self._agent.session = new_state
+        self.affectionChanged.emit(new_state.affection)
+        self.moodChanged.emit(new_state.mood)
+        sid_short = session_id[:14] if len(session_id) > 14 else session_id
+        self.messageAdded.emit("system", f"세션 '{sid_short}' 로 전환했습니다.")
+        return True
 
     @Slot(result=str)
     def getCharacterStatus(self) -> str:
@@ -1293,6 +1457,272 @@ class ChatBridge(QObject):
             self.memoryChanged.emit()
         return ok
 
+    # ── 세계관 RAG / 프롬프트 가이드 DB 조회 ────────────────────────────────
+
+    @Slot(result=str)
+    def getWorldKnowledgeDB(self) -> str:
+        """world_knowledge ChromaDB 컬렉션 전체 청크를 JSON으로 반환."""
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col = client.get_collection("world_knowledge")
+            result = col.get(include=["documents", "metadatas"])
+            chunks = []
+            for i, doc in enumerate(result["documents"] or []):
+                meta = (result["metadatas"] or [])[i] if result["metadatas"] else {}
+                chunks.append({
+                    "id":               result["ids"][i],
+                    "content":          doc,
+                    "source":           meta.get("source", ""),
+                    "world_id":         meta.get("world_id", ""),
+                    "section":          meta.get("section", ""),
+                    "item_title":       meta.get("item_title", ""),
+                    "trigger_keywords": meta.get("trigger_keywords", ""),
+                })
+            return json.dumps({"total": len(chunks), "chunks": chunks}, ensure_ascii=False)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"total": 0, "chunks": [], "error": str(e)}, ensure_ascii=False)
+
+    @Slot(result=bool)
+    def reindexWorldKnowledge(self) -> bool:
+        """rag/sources/world/ 디렉토리를 force=True로 재인덱싱한다."""
+        from rag.index import index_world
+        cfg = getattr(self._agent, "cfg", {})
+        rag_dir   = Path(cfg.get("rag_world_dir", "./rag/sources/world"))
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        embed_model = cfg.get("embedding_model", "BAAI/bge-m3")
+        try:
+            index_world(rag_dir, chroma_path, embed_model, force=True)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @Slot(result=str)
+    def getPromptGuidesDB(self) -> str:
+        """prompt_guides ChromaDB 컬렉션 전체를 JSON으로 반환."""
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col = client.get_collection("prompt_guides")
+            result = col.get(include=["documents", "metadatas"])
+            guides = []
+            for i, doc in enumerate(result["documents"] or []):
+                meta = (result["metadatas"] or [])[i] if result["metadatas"] else {}
+                guides.append({
+                    "id":           result["ids"][i],
+                    "content":      doc,
+                    # bridge 저장(model_name) 과 PromptGuideStore 저장(model) 양쪽 호환
+                    "model_name":   meta.get("model_name") or meta.get("model", ""),
+                    "character_id": meta.get("character_id", ""),
+                })
+            return json.dumps({"total": len(guides), "guides": guides}, ensure_ascii=False)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"total": 0, "guides": [], "error": str(e)}, ensure_ascii=False)
+
+    @Slot(result=str)
+    def getPromptModelList(self) -> str:
+        """prompt_guides DB에 있는 model_name 목록을 중복 제거하여 JSON 배열로 반환."""
+        try:
+            parsed = json.loads(self.getPromptGuidesDB())
+            models = list(dict.fromkeys(
+                g["model_name"] for g in parsed.get("guides", []) if g.get("model_name")
+            ))
+            return json.dumps(models, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            return "[]"
+
+    # ── 세계관 RAG CRUD ──────────────────────────────────────────────────────
+
+    @Slot(str, str, str, str, str, result=str)
+    def addWorldKnowledge(
+        self,
+        world_id: str,
+        section: str,
+        item_title: str,
+        content: str,
+        trigger_keywords: str = "",
+    ) -> str:
+        """세계관 RAG 항목을 ChromaDB에 추가하고 Seaside.md 소스 파일을 업데이트한다.
+
+        Returns
+        -------
+        str : 생성된 chunk_id, 실패 시 빈 문자열
+        """
+        import chromadb
+        import re as _re
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col_name = "world_knowledge"
+            existing_cols = [c.name for c in client.list_collections()]
+            if col_name in existing_cols:
+                col = client.get_collection(col_name)
+            else:
+                from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+                embed_model = cfg.get("embedding_model", "BAAI/bge-m3")
+                ef = SentenceTransformerEmbeddingFunction(model_name=embed_model)
+                col = client.create_collection(
+                    name=col_name,
+                    embedding_function=ef,
+                    metadata={"hnsw:space": "cosine"},
+                )
+
+            chunk_id = _re.sub(r"[^\w가-힣-]", "_", f"{world_id}_{section}_{item_title}")
+            doc_text = f"{item_title}\n{content}"
+            meta = {
+                "world_id":         world_id,
+                "section":          section,
+                "item_title":       item_title,
+                "trigger_keywords": trigger_keywords,
+                "source":           "Seaside.md",
+            }
+            col.upsert(ids=[chunk_id], documents=[doc_text], metadatas=[meta])
+
+            # 소스 파일 업데이트
+            self._append_to_world_source(world_id, section, item_title, content, trigger_keywords)
+            return chunk_id
+        except Exception as e:  # noqa: BLE001
+            return ""
+
+    @Slot(str, str, result=bool)
+    def updateWorldKnowledge(self, chunk_id: str, content: str) -> bool:
+        """세계관 RAG 항목 내용을 수정한다."""
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col = client.get_collection("world_knowledge")
+            existing = col.get(ids=[chunk_id], include=["metadatas"])
+            if not existing["ids"]:
+                return False
+            meta = existing["metadatas"][0]
+            item_title = meta.get("item_title", "")
+            col.update(ids=[chunk_id], documents=[f"{item_title}\n{content}"])
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @Slot(str, result=bool)
+    def deleteWorldKnowledge(self, chunk_id: str) -> bool:
+        """세계관 RAG 항목을 ChromaDB에서 삭제하고 소스 파일을 재생성한다."""
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col = client.get_collection("world_knowledge")
+            existing = col.get(ids=[chunk_id])
+            if not existing["ids"]:
+                return False
+            col.delete(ids=[chunk_id])
+            # 재인덱싱으로 소스 파일 동기화
+            self.reindexWorldKnowledge()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _append_to_world_source(
+        self,
+        world_id: str,
+        section: str,
+        item_title: str,
+        content: str,
+        trigger_keywords: str = "",
+    ) -> None:
+        """세계관 소스 .md 파일에 새 항목을 append한다."""
+        cfg = getattr(self._agent, "cfg", {})
+        rag_dir = Path(cfg.get("rag_world_dir", "./rag/sources/world"))
+        src_path = rag_dir / "Seaside.md"
+        if not src_path.exists():
+            return
+        with src_path.open("a", encoding="utf-8") as f:
+            kw_line = f"\n트리거 키워드: [{trigger_keywords}]" if trigger_keywords else ""
+            f.write(f"\n### {item_title}{kw_line}\n{content}\n")
+
+    # ── 프롬프트 가이드 CRUD ─────────────────────────────────────────────────
+
+    @Slot(str, str, str, result=str)
+    def addPromptGuide(self, model_name: str, content: str, character_id: str = "") -> str:
+        """프롬프트 가이드를 ChromaDB에 추가한다.
+
+        Returns
+        -------
+        str : 생성된 guide_id, 실패 시 빈 문자열
+        """
+        import chromadb
+        import re as _re
+        import uuid as _uuid
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col_name = "prompt_guides"
+            existing_cols = [c.name for c in client.list_collections()]
+            if col_name in existing_cols:
+                col = client.get_collection(col_name)
+            else:
+                from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+                embed_model = cfg.get("embedding_model", "BAAI/bge-m3")
+                ef = SentenceTransformerEmbeddingFunction(model_name=embed_model)
+                col = client.create_collection(
+                    name=col_name,
+                    embedding_function=ef,
+                    metadata={"hnsw:space": "cosine"},
+                )
+
+            import re as _re2
+            model_key = _re2.sub(r"[\s_]+", "-", model_name.strip().lower())
+            guide_id = f"pg_{_re.sub(r'[^\\w]', '_', model_name)}_{_uuid.uuid4().hex[:6]}"
+            meta = {
+                "model_name":   model_name,
+                "model":        model_key,   # PromptGuideStore.query() 호환 키
+                "character_id": character_id,
+            }
+            col.add(ids=[guide_id], documents=[content], metadatas=[meta])
+            return guide_id
+        except Exception:  # noqa: BLE001
+            return ""
+
+    @Slot(str, str, result=bool)
+    def updatePromptGuide(self, guide_id: str, content: str) -> bool:
+        """프롬프트 가이드 내용을 수정한다."""
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col = client.get_collection("prompt_guides")
+            existing = col.get(ids=[guide_id])
+            if not existing["ids"]:
+                return False
+            col.update(ids=[guide_id], documents=[content])
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @Slot(str, result=bool)
+    def deletePromptGuide(self, guide_id: str) -> bool:
+        """프롬프트 가이드를 ChromaDB에서 삭제한다."""
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            col = client.get_collection("prompt_guides")
+            existing = col.get(ids=[guide_id])
+            if not existing["ids"]:
+                return False
+            col.delete(ids=[guide_id])
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     # ── 대화 파라미터 관리자 ──────────────────────────────────────────────────
 
     @Slot(result=str)
@@ -1347,7 +1777,17 @@ class ChatBridge(QObject):
             return ""
 
     def _on_response(self, response: str) -> None:
-        self.messageAdded.emit("assistant", response)
+        # assistant 응답 먼저 표시 → 나레이션은 그 뒤에 표시
+        for role, content in _split_narration(response, "assistant"):
+            self.messageAdded.emit(role, content)
+
+        router = getattr(self._agent, "router", None)
+        if router is not None:
+            narration_data = getattr(router, "_pending_narration", None)
+            if narration_data:
+                _title, document = narration_data
+                self.messageAdded.emit("narrator", document)
+                router._pending_narration = None
         self._sync_state()
         self._sync_session_state()  # 턴 종료 시 세션 상태 디스크 동기화
 

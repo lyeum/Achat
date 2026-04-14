@@ -30,6 +30,11 @@ class ConversationSession:
     # SessionManager가 부여하는 영속 세션 ID (None = 비관리 세션, 하위 호환 유지)
     session_id: Optional[str] = None
 
+    # 세계관 트리거 상태 (세션 변경 시 초기화)
+    fired_stories: list = field(default_factory=list)        # 발동된 story item_title 목록
+    visited_places: list = field(default_factory=list)       # 방문한 장소 목록
+    explained_cultures: list = field(default_factory=list)   # 세션 내 설명된 culture 항목
+
     @classmethod
     def from_character(
         cls,

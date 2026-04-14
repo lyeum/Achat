@@ -117,6 +117,11 @@ class Agent:
         self.character = load_persona(character_id)
         self.world = load_world(world_path)
 
+        # 세계관 character_overrides.rules를 캐릭터 rules에 append
+        _override_rules = (self.world.get("character_overrides") or {}).get("rules") or []
+        if _override_rules:
+            self.character["rules"] = list(self.character.get("rules") or []) + list(_override_rules)
+
         # 최근 기능 작업 기록 (대화 모드로 전환 시 캐릭터 컨텍스트에 주입)
         self._recent_ops: list[str] = []
 
@@ -201,8 +206,76 @@ class Agent:
             agent.session.turn_count = state.turn_count
             if state.location:
                 agent.session.location = state.location
+            # 세계관 트리거 상태 복원
+            agent.session.fired_stories      = list(state.fired_stories or [])
+            agent.session.visited_places     = list(state.visited_places or [])
+            agent.session.explained_cultures = list(state.explained_cultures or [])
 
         return agent
+
+    def swap_character(
+        self,
+        character_id: str,
+        world_id: str | None,
+        state: "SessionState | None" = None,  # type: ignore[name-defined]  # noqa: F821
+    ) -> None:
+        """LLM을 유지한 채 캐릭터 / 세션 / 라우터만 교체한다.
+
+        모든 캐릭터가 동일한 어댑터를 공유하므로 LLM 재로드가 불필요하다.
+        stub 모드에서는 character만 교체하고 나머지는 건너뛴다.
+        """
+        world_path = _find_world_path(world_id)
+
+        # 캐릭터 / 세계관 로드
+        self.character = load_persona(character_id)
+        self.world = load_world(world_path)
+
+        # 세계관 character_overrides.rules 재적용
+        _override_rules = (self.world.get("character_overrides") or {}).get("rules") or []
+        if _override_rules:
+            self.character["rules"] = list(self.character.get("rules") or []) + list(_override_rules)
+
+        self._recent_ops.clear()
+
+        if self._stub:
+            logger.info(f"[agent] 캐릭터 교체 완료(stub) — {self.character.get('name', character_id)}")
+            return
+
+        # 세션 생성
+        world_id_resolved = self.world.get("world_id")
+        self.session = ConversationSession.from_character(
+            self.character,
+            world_id=world_id_resolved,
+            scenario_id=state.scenario_id if state else None,
+            act_id=state.act_id      if state else None,
+        )
+
+        # 세션 상태 복원
+        if state is not None and self.session is not None:
+            self.session.session_id       = state.session_id
+            self.session.mood             = state.mood
+            self.session.affection        = state.affection
+            self.session.turn_count       = state.turn_count
+            if state.location:
+                self.session.location     = state.location
+            self.session.fired_stories      = list(state.fired_stories      or [])
+            self.session.visited_places     = list(state.visited_places     or [])
+            self.session.explained_cultures = list(state.explained_cultures or [])
+
+        # 라우터 교체 (LLM / LongTermMemory 재사용)
+        self.router = ConversationRouter(
+            character=self.character,
+            world=self.world,
+            session=self.session,
+            llm=self.llm,
+            long_term=self.long_term,
+            config=self.cfg,
+        )
+
+        logger.info(
+            f"[agent] 캐릭터 교체 완료 — {self.character['name']} "
+            f"mood: {self.session.mood} / affection: {self.session.affection} (LLM 유지)"
+        )
 
     def chat(self, user_input: str, stream: bool = True) -> str:
         """대화 모드 진입점. user_input을 받아 캐릭터 응답을 반환한다.
@@ -213,7 +286,7 @@ class Agent:
         if self._stub:
             return f"[stub] 입력 받음: {user_input}"
         return self.router.handle_turn(
-            user_input, stream=stream, recent_ops=self._recent_ops or None
+            user_input, stream=stream, recent_ops=self._recent_ops or None, mode="chat"
         )
 
     def handle_input(
@@ -281,9 +354,14 @@ class Agent:
             # stub 모드: LLM 없이 빈 params 로 execute
             params: dict = {}
         else:
+            # 도구 이름 기반 프롬프트 가이드 조회 (prompt_convert는 execute() 내부에서 처리)
+            sys_prompt = tool.system_prompt
+            if tool.name != "prompt_convert":
+                sys_prompt = self._inject_prompt_guide(tool.name, sys_prompt)
+
             llm_output = self.llm.generate(
                 messages=[
-                    {"role": "system", "content": tool.system_prompt},
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_input},
                 ],
                 stream=False,
@@ -326,6 +404,26 @@ class Agent:
             self._recent_ops.pop(0)
 
         return result
+
+    def _inject_prompt_guide(self, tool_name: str, base_prompt: str) -> str:
+        """prompt_guides DB에서 tool_name 기반 가이드를 조회해 시스템 프롬프트에 주입한다.
+
+        가이드가 없으면 base_prompt를 그대로 반환한다.
+        """
+        try:
+            chroma_path = self.cfg.get("chroma_path", "")
+            if not chroma_path:
+                return base_prompt
+            from tools.prompt_store import PromptGuideStore
+            embed = self.cfg.get("embedding_model")
+            store = PromptGuideStore(chroma_path, embedding_model=embed)
+            guide = store.query(tool_name)
+            if guide:
+                logger.debug(f"[agent:function] 프롬프트 가이드 주입 — tool={tool_name!r}, {len(guide)}자")
+                return f"{base_prompt}\n\n=== 가이드 ({tool_name}) ===\n{guide}"
+        except Exception as e:
+            logger.debug(f"[agent:function] 프롬프트 가이드 조회 실패: {e}")
+        return base_prompt
 
     _OP_LABELS: dict[str, str] = {
         "folder_classify": "폴더 분류",
