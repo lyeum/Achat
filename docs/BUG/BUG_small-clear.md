@@ -651,6 +651,104 @@ bridge_inst._session_manager = fake_sm
 
 ---
 
+## BUG-24 · `rag/index.py` — culture / place 섹션 트리거 키워드가 content에 저장됨 ✅
+
+**발견**: RAG 트리거 검증 (2026-04-17)
+
+**파일**: `rag/index.py` (`_parse_world_md`)
+
+**문제**
+`_parse_world_md()`에서 `트리거 키워드:` 줄을 메타데이터로 추출하는 조건이
+`current_section == "story"` 로 한정되어 있었다.
+
+```python
+# 수정 전
+if trigger_match and current_section == "story":
+    current_triggers = trigger_match.group(1).strip()
+    continue
+```
+
+culture / place 섹션에서는 이 조건이 False → `continue`가 실행되지 않아
+`current_lines.append(line)`으로 빠져나가 ChromaDB `document` 필드에 아래처럼 저장됨:
+
+```
+트리거 키워드: [등대 축제, 여름 끝, 촛불, 종이배, 소원]
+여름이 끝날 무렵, 등대 아래에 촛불이 하나씩 켜진다. ...
+```
+
+→ 불필요한 메타 텍스트가 임베딩 검색을 오염시키고 나레이션 버블로도 그대로 출력됨.
+
+**수정** ✅ (2026-04-17)
+
+```python
+# 수정 후: 모든 섹션 (culture / place / story)
+if trigger_match:
+    current_triggers = trigger_match.group(1).strip()
+    continue
+```
+
+content에는 실제 서술 텍스트만, `trigger_keywords` 메타데이터 필드에 키워드만 저장된다.
+원본 `.md` 파일은 수정하지 않는다 — 인덱싱 시점에 필터링.
+
+**필요 후속 조치**: ChromaDB 재인덱싱 (`uv run python rag/index.py` — force=True)
+
+---
+
+## BUG-25 · `narration/world_trigger.py` — culture 트리거가 항목별 키워드를 무시 ✅
+
+**발견**: RAG 트리거 검증 (2026-04-17)
+
+**파일**: `narration/world_trigger.py` (`check_culture_trigger`)
+
+**문제**
+`check_culture_trigger()`가 `###` 항목별 `trigger_keywords`를 전혀 사용하지 않았다.
+대신 하드코딩된 섹션 레벨 키워드(`_CULTURE_KEYWORDS`)로만 게이트를 걸고,
+통과하면 무조건 첫 번째 미설명 항목을 반환하는 방식이었다.
+
+```python
+# 수정 전 (섹션 레벨 게이트만 존재)
+_CULTURE_KEYWORDS = ["문화", "풍습", "축제", "전통", "행사", ...]
+
+if not any(kw in user_lower for kw in _CULTURE_KEYWORDS):
+    return None
+# → 통과 시 무조건 remaining[0] 반환 (항목별 키워드 무시)
+```
+
+결과: "촛불" / "종이배" / "소원" 등 `### 등대 축제` 의 특정 키워드를 언급해도
+"문화" / "축제" 등 섹션 레벨 단어가 없으면 트리거 미발동.
+반대로 "문화"만 언급해도 상관없는 항목이 발동.
+
+**원인**
+`check_story_trigger()`는 처음부터 항목별 `trigger_keywords`를 사용하는 설계였으나,
+`check_culture_trigger()`는 구현 당시 story 방식과 다른 소거 방식으로 작성됨.
+BUG-24와 연계: culture `trigger_keywords`가 메타데이터에 없었으므로 항목별 매칭 자체가 불가능했음.
+
+**수정** ✅ (2026-04-17)
+
+`check_story_trigger()`와 동일한 항목별 키워드 매칭 방식으로 전면 재작성.
+`_CULTURE_KEYWORDS` 하드코딩 리스트 제거.
+
+```python
+# 수정 후: story 트리거와 동일한 방식, threshold=0.2 (5개 키워드 중 1개 이상)
+for item in candidates:
+    kw_str = item["metadata"].get("trigger_keywords", "")
+    keywords = [k.strip() for k in kw_str.split(",") if k.strip()]
+    matched = sum(1 for kw in keywords if kw in user_lower or kw in user_input)
+    score = matched / max(len(keywords), 1)
+    if score > best_score:
+        best_score = score
+        best = item
+
+if best is None or best_score < threshold:   # threshold=0.2
+    return None
+```
+
+- "촛불" 언급 → 등대 축제 (1/5 = 0.2) 발동 ✓
+- "소원 적은 종이배" → 등대 축제 (2/5 = 0.4) 발동 ✓
+- 무관한 입력 → None ✓
+
+---
+
 ## 미수정 항목 (계획 미완성 / 의도적 설계)
 
 | 항목 | 이유 |

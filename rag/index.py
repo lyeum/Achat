@@ -84,9 +84,9 @@ def _parse_world_md(text: str) -> tuple[str, list[dict]]:
             current_title = line[4:].strip()
             continue
 
-        # story 트리거 키워드 라인 감지
+        # 트리거 키워드 라인 감지 (모든 섹션 — content에서 제외하고 메타데이터로만 저장)
         trigger_match = re.match(r"\s*트리거\s*키워드\s*:\s*\[([^\]]*)\]", line)
-        if trigger_match and current_section == "story":
+        if trigger_match:
             current_triggers = trigger_match.group(1).strip()
             continue
 

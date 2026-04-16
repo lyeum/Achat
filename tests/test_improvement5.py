@@ -500,9 +500,8 @@ class TestRagIndexParser:
         assert "선착장 전설" in item_titles
 
     def test_parse_world_md_trigger_keywords(self):
-        """_parse_world_md()가 story 섹션의 트리거 키워드를 올바르게 파싱해야 한다."""
+        """_parse_world_md()가 모든 섹션의 트리거 키워드를 메타데이터로 파싱해야 한다."""
         from rag.index import _parse_world_md
-        # trigger_keywords는 story 섹션에서만 파싱됨
         md_text = """# TestWorld
 
 ## story
@@ -516,6 +515,42 @@ class TestRagIndexParser:
         item = next(it for it in items if it["item_title"] == "선착장 전설")
         assert "선착장" in item["trigger_keywords"]
         assert "부두" in item["trigger_keywords"]
+        # 트리거 키워드 줄이 content에 포함되지 않아야 한다
+        assert "트리거 키워드" not in item["content"]
+
+    def test_parse_world_md_trigger_keywords_all_sections(self):
+        """culture / place 섹션도 trigger_keywords가 메타데이터로 추출되고 content에서 제거되어야 한다."""
+        from rag.index import _parse_world_md
+        md_text = """# TestWorld
+
+## culture
+
+### 등대 축제
+트리거 키워드: [등대 축제, 촛불, 종이배, 소원]
+여름이 끝날 무렵, 등대 아래에 촛불이 켜진다.
+
+## place
+
+### 방파제
+트리거 키워드: [방파제, breakwater]
+항구 입구를 가로막은 긴 돌 방파제다.
+"""
+        _, items = _parse_world_md(md_text)
+        culture_item = next(it for it in items if it["item_title"] == "등대 축제")
+        place_item   = next(it for it in items if it["item_title"] == "방파제")
+
+        # trigger_keywords가 메타데이터로 추출되어야 한다
+        assert "촛불" in culture_item["trigger_keywords"]
+        assert "종이배" in culture_item["trigger_keywords"]
+        assert "방파제" in place_item["trigger_keywords"]
+
+        # trigger_keywords 줄이 content에 없어야 한다
+        assert "트리거 키워드" not in culture_item["content"]
+        assert "트리거 키워드" not in place_item["content"]
+
+        # 실제 내용은 content에 있어야 한다
+        assert "촛불" in culture_item["content"]
+        assert "방파제" in place_item["content"]
 
     def test_parse_world_md_section_field(self):
         """_parse_world_md()가 section 필드를 올바르게 설정해야 한다."""

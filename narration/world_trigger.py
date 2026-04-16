@@ -130,27 +130,19 @@ def check_place_trigger(
 
 # ── Culture 트리거 ───────────────────────────────────────────────────────────
 
-_CULTURE_KEYWORDS = [
-    "문화", "풍습", "축제", "전통", "행사", "관습",
-    "생활 방식", "어떤 문화", "어떤 풍습",
-]
-
-
 def check_culture_trigger(
     user_input: str,
     session: "SessionState",
     retriever: "WorldRetriever",
+    threshold: float = 0.2,
 ) -> tuple[str, str] | None:
-    """사용자 발화가 문화/풍습 관련이면 미설명 culture 항목 중 하나를 반환한다.
+    """사용자 발화가 culture 항목의 trigger_keywords와 일치하면 해당 항목을 반환한다.
 
-    이미 설명한 항목은 제외하고 소거 방식으로 선택한다.
-    모든 항목이 소진되면 None 반환.
+    story 트리거와 동일한 키워드 매칭 방식을 사용한다 (### 레벨 항목별 매칭).
+    이미 설명된 항목은 제외한다.
+
+    threshold : 매칭된 키워드 수 / 전체 키워드 수 최소 비율 (기본 0.2 — 5개 중 1개 이상).
     """
-    # 문화 관련 키워드 포함 여부 확인
-    user_lower = user_input.lower()
-    if not any(kw in user_lower for kw in _CULTURE_KEYWORDS):
-        return None
-
     world_id = getattr(session, "world_id", None)
     if not world_id:
         return None
@@ -164,18 +156,35 @@ def check_culture_trigger(
         return None
 
     explained = set(getattr(session, "explained_cultures", []))
-    remaining = [it for it in items if it["metadata"].get("item_title") not in explained]
+    candidates = [it for it in items if it["metadata"].get("item_title") not in explained]
+    if not candidates:
+        return None
 
-    if not remaining:
-        return None  # 모든 항목 소진
+    # 항목별 trigger_keywords 키워드 매칭 (story 트리거와 동일 방식)
+    user_lower = user_input.lower()
+    best: dict | None = None
+    best_score = 0.0
 
-    # 첫 번째 미설명 항목 선택
-    target = remaining[0]
-    item_title = target["metadata"].get("item_title", "")
+    for item in candidates:
+        kw_str = item["metadata"].get("trigger_keywords", "")
+        if not kw_str:
+            continue
+        keywords = [k.strip() for k in kw_str.split(",") if k.strip()]
+        matched = sum(1 for kw in keywords if kw in user_lower or kw in user_input)
+        if matched == 0:
+            continue
+        score = matched / max(len(keywords), 1)
+        if score > best_score:
+            best_score = score
+            best = item
 
+    if best is None or best_score < threshold:
+        return None
+
+    item_title = best["metadata"].get("item_title", "")
     if not hasattr(session, "explained_cultures") or session.explained_cultures is None:
         session.explained_cultures = []
     session.explained_cultures.append(item_title)
 
-    logger.info(f"[world_trigger] culture 트리거 발동: '{item_title}'")
-    return item_title, target["document"]
+    logger.info(f"[world_trigger] culture 트리거 발동: '{item_title}' (score={best_score:.2f})")
+    return item_title, best["document"]
