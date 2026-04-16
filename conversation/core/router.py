@@ -6,6 +6,7 @@ from agent import state as state_mod
 from conversation.core.llm_client import LLMClient
 from conversation.core.prompt_build import PromptBuilder
 from conversation.core.session import ConversationSession
+from conversation.narration_monitor import NarrationMonitor
 from memory import short_term, summarizer
 from memory.long_term import LongTermMemory
 from rag.retrieve import WorldRetriever
@@ -48,6 +49,7 @@ class ConversationRouter:
         self._trigger_n: int    = config.get("memory_trigger_n", 10)
         self._aff_gate: float   = config.get("aff_gate_threshold", 0.6)
         self._pending_narration: tuple[str, str] | None = None  # (title, document) — bridge가 turn 후 읽어 UI emit
+        self._narration_monitor = NarrationMonitor()  # 키워드 기반 하드코딩 나레이션 (세션 내 1회)
 
     def handle_turn(
         self,
@@ -89,10 +91,14 @@ class ConversationRouter:
         )
         messages.append({"role": "user", "content": user_input})
 
-        # 4-1. 세계관 트리거 체크 (장소 > story/culture 우선순위)
+        # 4-1. 나레이션 트리거 체크 (우선순위: 장소 > story/culture > 키워드 하드코딩)
         #      나레이션은 UI bubble로 표시(bridge._pending_narration)
         #      LLM에는 item_title 힌트만 주입 — 풀텍스트 주입 시 LLM이 "..."만 출력하는 문제 방지
         narration_data = place_narration or self._check_world_triggers(user_input)
+        if narration_data is None:
+            kw_narration = self._narration_monitor.check_keyword(user_input)
+            if kw_narration:
+                narration_data = ("keyword", kw_narration)
         self._pending_narration = narration_data
 
         # 5. LLM 생성
@@ -107,15 +113,18 @@ class ConversationRouter:
         response = self.llm.generate(messages, stream=stream)
 
         # 6. mood / affection 업데이트 (사용자 입력 기준)
-        new_mood = state_mod.update_mood(self.session, user_input, self.character)
-        # semantic 중요도 게이팅: 잡담(0.5) 발화는 affection 변화 억제
-        importance = summarizer.score_importance(user_input)
-        if importance >= self._aff_gate:
-            state_mod.update_affection(self.session, new_mood, self.character)
-        else:
-            logger.debug(
-                f"[router] aff 게이팅 — importance={importance:.2f} < {self._aff_gate} → 변화 억제"
-            )
+        # trigger_events 우선 적용 — 발동 시 일반 mood/aff 업데이트 건너뜀
+        triggered = state_mod.check_trigger_events(self.session, user_input, self.character)
+        if not triggered:
+            new_mood = state_mod.update_mood(self.session, user_input, self.character)
+            # semantic 중요도 게이팅: 잡담(0.5) 발화는 affection 변화 억제
+            importance = summarizer.score_importance(user_input)
+            if importance >= self._aff_gate:
+                state_mod.update_affection(self.session, new_mood, self.character)
+            else:
+                logger.debug(
+                    f"[router] aff 게이팅 — importance={importance:.2f} < {self._aff_gate} → 변화 억제"
+                )
 
         # 7. 세션 기록
         self.session.add_turn(user_input, response)
@@ -165,7 +174,15 @@ class ConversationRouter:
                     self.session.location         = act_location
                     self.session.location_context = None
                     logger.info(f"[router] 장소 이동 (YAML): {act_location} ({act_display_name})")
-                    return self._run_place_trigger(act_location)
+                    # ChromaDB 우선, 없으면 YAML context로 폴백
+                    narr = self._run_place_trigger(act_location)
+                    if narr is None:
+                        act_context = act.get("context", "").strip()
+                        if act_context:
+                            narr = self._first_visit_narration(
+                                act_location, act_display_name or act_location, act_context
+                            )
+                    return narr
 
         # RAG 검색 or LLM 생성
         world_desc = self.world.get("description", "")
@@ -173,15 +190,34 @@ class ConversationRouter:
         self.session.location         = location_name
         self.session.location_context = f"{location_name}\n{desc}"
         logger.info(f"[router] 동적 장소 설정: '{location_name}'")
-        return self._run_place_trigger(location_name)
+        # 동적 장소: 직접 나레이션 반환 (ChromaDB 메타 불일치 우회)
+        if desc:
+            return self._first_visit_narration(location_name, location_name, desc)
+        return None
 
-    def _run_place_trigger(self, location: str) -> str | None:
+    def _run_place_trigger(self, location: str) -> tuple[str, str] | None:
         """check_place_trigger를 실행하고 나레이션을 반환한다."""
         try:
             from narration.world_trigger import check_place_trigger
             return check_place_trigger(location, self.session, self.rag)
         except Exception:  # noqa: BLE001
             return None
+
+    def _first_visit_narration(
+        self, location_key: str, title: str, text: str
+    ) -> tuple[str, str] | None:
+        """첫 방문 시 나레이션을 반환한다. 이미 방문했으면 None.
+
+        visited_places 기록도 함께 관리한다.
+        """
+        visited = set(getattr(self.session, "visited_places", []) or [])
+        if location_key in visited:
+            return None
+        if not hasattr(self.session, "visited_places") or self.session.visited_places is None:
+            self.session.visited_places = []
+        self.session.visited_places.append(location_key)
+        logger.info(f"[router] 장소 나레이션 (YAML/생성): '{title}'")
+        return (title, text)
 
     def _check_world_triggers(self, user_input: str) -> str | None:
         """story / culture 트리거를 확인하고 나레이션 텍스트를 반환한다.

@@ -395,6 +395,11 @@ class TestUnloadLlm:
         fake_agent.swap_character = lambda cid, wid, st: swap_args.append((cid, wid))
         bridge_inst._agent = fake_agent
 
+        # _session_manager: load_dialogue는 빈 리스트를 반환해 dialogue_log 덮어쓰기 없음
+        fake_sm = MagicMock()
+        fake_sm.load_dialogue.return_value = []
+        bridge_inst._session_manager = fake_sm
+
         monkeypatch.setattr(bridge_inst, "_unload_llm", lambda: unload_called.append(True))
         monkeypatch.setattr(bridge_inst, "_resolve_initial_location", lambda: "")
 

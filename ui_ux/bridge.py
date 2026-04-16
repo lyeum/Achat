@@ -10,18 +10,22 @@ from PySide6.QtCore import Property, QObject, QRunnable, QThreadPool, QUrl, Sign
 from PySide6.QtWidgets import QApplication
 
 _ACTION_RE    = re.compile(r"^\*(.+)\*$")
-_NARRATION_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_SPLIT_RE     = re.compile(r"\*\*(.+?)\*\*|\*([^*\n]+)\*", re.DOTALL)
 
 
 def _split_narration(text: str, default_role: str) -> list[tuple[str, str]]:
-    """**...**로 둘러싸인 부분을 narrator, 나머지를 default_role로 순서대로 분리한다."""
+    """**...**와 *...* 로 둘러싸인 부분을 narrator, 나머지를 default_role로 순서대로 분리한다.
+
+    **...**  — 세계관/분위기 묘사 (narrator 버블)
+    *...*    — 행동/동작 묘사   (narrator 버블)
+    """
     parts: list[tuple[str, str]] = []
     last = 0
-    for m in _NARRATION_RE.finditer(text):
+    for m in _SPLIT_RE.finditer(text):
         before = text[last:m.start()].strip()
         if before:
             parts.append((default_role, before))
-        narr = m.group(1).strip()
+        narr = (m.group(1) or m.group(2) or "").strip()
         if narr:
             parts.append(("narrator", narr))
         last = m.end()
@@ -71,14 +75,16 @@ class ChatBridge(QObject):
         changeCharacter(char_id)     : 캐릭터 핫스왑
     """
 
-    messageAdded         = Signal(str, str)   # role, content
-    statusChanged        = Signal(str)        # "thinking" | "ready"
+    messageAdded         = Signal(str, str)          # role, content
+    messageReplaced      = Signal(int, "QVariantList") # index, [{role, content}, ...]
+    statusChanged        = Signal(str)               # "thinking" | "ready"
     characterNameChanged = Signal(str)
-    backgroundChanged    = Signal(str)        # file URL or ""
-    moodChanged          = Signal(str)        # neutral | happy | annoyed | sad
-    affectionChanged     = Signal(int)        # 0~100 — admin 조작 or 잠금 해제 시 emit
-    imageImported        = Signal(str, str)   # slot_type, result (icon→URL, parts→filename)
-    memoryChanged        = Signal()           # DB CRUD 성공 시 emit → QML 자동 갱신
+    backgroundChanged    = Signal(str)               # file URL or ""
+    moodChanged          = Signal(str)               # neutral | happy | annoyed | sad
+    affectionChanged     = Signal(int)               # 0~100 — admin 조작 or 잠금 해제 시 emit
+    imageImported        = Signal(str, str)          # slot_type, result (icon→URL, parts→filename)
+    memoryChanged        = Signal()                  # DB CRUD 성공 시 emit → QML 자동 갱신
+    chatReset            = Signal("QVariantList")    # 캐릭터/세계관 변경 시 채팅창 초기화 + 이전 기록 로드
 
     def __init__(self, agent):
         super().__init__()
@@ -150,25 +156,76 @@ class ChatBridge(QObject):
     def _init_session(self) -> None:
         """앱 시작 시 SessionManager와 ConversationSession을 연동한다.
 
-        이전 세션이 있으면 mood / affection / turn_count를 복원하고,
-        없으면 새 세션을 생성해 session_id를 부여한다.
+        이전 세션이 있으면 전체 상태(mood / affection / turn_count / location /
+        scenario_id / act_id / 트리거 상태)를 복원하고, 대화 기록도 불러온다.
+        없으면 새 세션을 생성한다.
         """
         char_id = self._agent.character.get("id", "")
         active = self._session_manager.get_active()
         if active and active.char_id == char_id:
-            self._agent.session.session_id = active.session_id
-            self._agent.session.mood       = active.mood
-            self._agent.session.affection  = active.affection
-            self._agent.session.turn_count = active.turn_count
-            if active.location:
-                self._agent.session.location = active.location
+            self._restore_session_from_state(active)
         else:
             world_id = getattr(self._agent.session, "world_id", None)
             if world_id:
                 state = self._session_manager.activate_for_world(char_id, world_id)
             else:
                 state = self._session_manager.activate(char_id)
-            self._agent.session.session_id = state.session_id
+            self._restore_session_from_state(state)
+
+    def _restore_session_from_state(self, state) -> None:
+        """SessionState의 모든 필드를 ConversationSession에 복원한다.
+
+        대화 기록(dialogue_log)도 디스크에서 불러온다.
+        """
+        session = self._agent.session
+        if session is None:
+            return
+        session.session_id = state.session_id
+        session.mood       = state.mood
+        session.affection  = state.affection
+        session.turn_count = state.turn_count
+        if state.location:
+            session.location = state.location
+        if getattr(state, "scenario_id", None):
+            session.scenario_id = state.scenario_id
+        if getattr(state, "act_id", None):
+            session.act_id = state.act_id
+        session.fired_stories      = list(getattr(state, "fired_stories",      []) or [])
+        session.visited_places     = list(getattr(state, "visited_places",     []) or [])
+        session.explained_cultures = list(getattr(state, "explained_cultures", []) or [])
+
+        # 대화 기록 복원
+        char_id = self._agent.character.get("id", "")
+        dialogue = self._session_manager.load_dialogue(char_id, state.session_id)
+        if dialogue:
+            session.dialogue_log = dialogue
+
+    _HISTORY_DISPLAY_TURNS = 10  # 재시작/캐릭터 전환 시 표시할 최근 턴 수
+
+    @Slot(result="QVariantList")
+    def getSessionHistory(self) -> list:
+        """현재 세션의 최근 대화 기록을 QML에 반환한다.
+
+        최대 _HISTORY_DISPLAY_TURNS 턴(= 턴수 × 2 메시지)을 반환한다.
+        assistant 응답 안의 **...**/*...* 는 narrator 버블로 분리한다.
+        """
+        session = getattr(self._agent, "session", None)
+        if session is None or not getattr(session, "dialogue_log", None):
+            return []
+        max_msgs = self._HISTORY_DISPLAY_TURNS * 2
+        recent_log = session.dialogue_log[-max_msgs:]
+        result: list[dict] = []
+        for msg in recent_log:
+            role    = msg.get("role", "user")
+            content = msg.get("content", "")
+            if not content:
+                continue
+            if role == "assistant":
+                for r, c in _split_narration(content, "assistant"):
+                    result.append({"role": r, "content": c})
+            else:
+                result.append({"role": role, "content": content})
+        return result
 
     def _sync_session_state(self) -> None:
         """ConversationSession의 현재 상태를 SessionState에 동기화해 저장한다."""
@@ -190,6 +247,11 @@ class ChatBridge(QObject):
         state.visited_places     = list(getattr(session, "visited_places", []) or [])
         state.explained_cultures = list(getattr(session, "explained_cultures", []) or [])
         self._session_manager.save_state(state)
+
+        # 대화 기록 저장 (dialogue_log가 없는 SessionState 호환 포함)
+        char_id = self._agent.character.get("id", "")
+        dialogue = getattr(session, "dialogue_log", []) or []
+        self._session_manager.save_dialogue(char_id, session.session_id, dialogue)
 
     def _unload_llm(self) -> None:
         """현재 Agent의 LLM 모델을 메모리에서 해제한다.
@@ -237,6 +299,12 @@ class ChatBridge(QObject):
         self._agent.swap_character(state.char_id, state.world_id, state)
         self._character_name = self._agent.character.get("name", state.char_id)
         self._location = self._resolve_initial_location()
+
+        # swap_character가 새 session을 만든 뒤 dialogue_log를 복원한다
+        if self._agent.session is not None and state.session_id:
+            dialogue = self._session_manager.load_dialogue(state.char_id, state.session_id)
+            if dialogue:
+                self._agent.session.dialogue_log = dialogue
 
         # 캐릭터/세션 교체 시 ConversationLogger도 새 캐릭터로 재시작
         if self._conv_logger is not None:
@@ -319,17 +387,23 @@ class ChatBridge(QObject):
         if not text.strip() or self._worker is not None:
             return
 
-        # ── 행동 묘사 패턴 감지 (*...*) → dialogue_log용 변환 ────────────
+        # ── 전체 문자열이 *...* 인 경우 → dialogue_log/LLM용 텍스트 변환 ──
         action_match = _ACTION_RE.match(text.strip())
         if action_match:
             action_text = action_match.group(1)
             text = f"(행동: {action_text})"
 
-        # ── **...** 나레이션 패턴 처리 ─────────────────────────────────────
+        # ── **...** / *...* 혼합 패턴 처리 ────────────────────────────────
         # UI: 순서대로 user/narrator 버블로 분리 emit
-        # LLM: ** 마커를 (나레이션: text) 형태로 변환
-        has_narration = bool(_NARRATION_RE.search(text))
-        llm_text = _NARRATION_RE.sub(r"(나레이션: \1)", text) if has_narration else text
+        # LLM: **...**→(나레이션: ...), *...*→(행동: ...) 로 변환
+        has_narration = bool(_SPLIT_RE.search(text))
+        if has_narration:
+            llm_text = _SPLIT_RE.sub(
+                lambda m: f"(나레이션: {m.group(1)})" if m.group(1) else f"(행동: {m.group(2)})",
+                text,
+            )
+        else:
+            llm_text = text
 
         # 경로가 필요한 도구는 OS 파일 탐색기로 먼저 디렉토리를 선택
         selected_path = ""
@@ -356,6 +430,41 @@ class ChatBridge(QObject):
         self._worker.error_occurred.connect(self._on_error)
         self._worker.finished.connect(self._on_done)
         self._worker.start()
+
+    # 복원 시 표시할 최대 턴 수 (1턴 = user + assistant 2개 메시지)
+    _HISTORY_DISPLAY_TURNS = 10
+
+    @Slot(result="QVariantList")
+    def getSessionHistory(self) -> list:
+        """이전 세션의 대화 기록을 QML 모델용 리스트로 반환한다.
+
+        최근 _HISTORY_DISPLAY_TURNS(10턴)만 반환한다.
+        반환 형식: [{"role": "user"|"assistant"|"narrator", "content": "..."}, ...]
+
+        QML Component.onCompleted에서 호출해 messageModel을 초기화한다.
+        PIP 버블 자동 표시를 일으키지 않는 방식(직접 모델 추가)으로 사용된다.
+        """
+        session = getattr(self._agent, "session", None)
+        if session is None or not session.dialogue_log:
+            return []
+
+        # 최근 N턴(= N*2 메시지)만 표시
+        max_msgs = self._HISTORY_DISPLAY_TURNS * 2
+        recent_log = session.dialogue_log[-max_msgs:]
+
+        result: list[dict] = []
+        for msg in recent_log:
+            role    = msg.get("role", "user")
+            content = msg.get("content", "")
+            if not content:
+                continue
+            # assistant 응답은 **/*/묘사 패턴이 있으면 재분할
+            if role == "assistant":
+                for r, c in _split_narration(content, "assistant"):
+                    result.append({"role": r, "content": c})
+            else:
+                result.append({"role": role, "content": content})
+        return result
 
     @Slot(int, int, int, int, result="QVariantList")
     def snapToEdge(self, x: int, y: int, w: int, h: int) -> list[int]:
@@ -678,9 +787,10 @@ class ChatBridge(QObject):
                         self._session_manager.save_state(new_state)
                         self._rebuild_agent(new_state)
                     else:
-                        # 같은 세계관 내 act/scenario 교체 → session_id 유지
+                        # 같은 세계관 내 act/scenario 교체 → session_id + dialogue_log 유지
                         from conversation.core.prompt_build import PromptBuilder
                         old_session_id = self._agent.session.session_id
+                        old_dialogue   = list(getattr(self._agent.session, "dialogue_log", []) or [])
                         from agent.persona import swap_persona
                         new_char, new_session = swap_persona(
                             session=self._agent.session,
@@ -689,8 +799,9 @@ class ChatBridge(QObject):
                             scenario_id=scenario_id,
                             act_id=act_id,
                         )
-                        new_session.location   = self._location
-                        new_session.session_id = old_session_id  # session_id 유지
+                        new_session.location    = self._location
+                        new_session.session_id  = old_session_id  # session_id 유지
+                        new_session.dialogue_log = old_dialogue    # 대화 기록 유지
                         # 세계관 character_overrides.rules 재적용
                         _ov = (world.get("character_overrides") or {}).get("rules") or []
                         if _ov:
@@ -713,6 +824,10 @@ class ChatBridge(QObject):
                 new_mood = self._read_mood()
                 self._current_mood = new_mood
                 self.moodChanged.emit(new_mood)
+
+                # 세계관 변경 시 채팅창 초기화 후 해당 세션 기록 복원
+                if self._agent.session is not None and world_changed:
+                    self.chatReset.emit(self.getSessionHistory())
 
                 # 초기 장소 나레이션 emit (첫 진입 or 세계관 변경 시)
                 if self._location and not getattr(self._agent, "_stub", True):
@@ -760,6 +875,9 @@ class ChatBridge(QObject):
         new_mood = self._read_mood()
         self._current_mood = new_mood
         self.moodChanged.emit(new_mood)
+
+        # 채팅창 초기화 후 새 캐릭터의 이전 대화 기록 복원
+        self.chatReset.emit(self.getSessionHistory())
 
     @Slot(bool)
     def newSession(self, keep_memory: bool = False) -> None:
@@ -847,7 +965,7 @@ class ChatBridge(QObject):
 
         - 현재 세션 상태를 저장
         - SessionManager.activate() 로 해당 세션 복원
-        - 에이전트 session 교체
+        - dialogue_log를 포함한 전체 세션 상태 복원
         - mood / affection Signal emit
         """
         char_id = (self._agent.character or {}).get("id", "")
@@ -861,9 +979,24 @@ class ChatBridge(QObject):
         if new_state is None:
             return False
 
-        self._agent.session = new_state
-        self.affectionChanged.emit(new_state.affection)
-        self.moodChanged.emit(new_state.mood)
+        # ConversationSession을 재생성하고 SessionState를 복원
+        from conversation.core.session import ConversationSession
+        world_id = new_state.world_id or (self._agent.world or {}).get("world_id")
+        new_session = ConversationSession.from_character(
+            self._agent.character,
+            world_id=world_id,
+            scenario_id=new_state.scenario_id,
+            act_id=new_state.act_id,
+        )
+        self._agent.session = new_session
+        # router 세션 참조 갱신
+        if self._agent.router is not None:
+            self._agent.router.session = new_session
+
+        self._restore_session_from_state(new_state)
+
+        self.affectionChanged.emit(new_session.affection)
+        self.moodChanged.emit(new_session.mood)
         sid_short = session_id[:14] if len(session_id) > 14 else session_id
         self.messageAdded.emit("system", f"세션 '{sid_short}' 로 전환했습니다.")
         return True
@@ -1809,6 +1942,10 @@ class ChatBridge(QObject):
     def editMessage(self, qml_index: int, old_content: str, new_content: str) -> None:
         """사용자가 수정한 assistant/narrator 메시지를 세션 로그와 학습 데이터에 반영한다.
 
+        **...**가 포함된 경우 QML 버블을 재분할한다:
+          "안녕. **그가 웃었다.** 잘 지냈어?"
+          → [assistant: "안녕."] [narrator: "그가 웃었다."] [assistant: "잘 지냈어?"]
+
         Parameters
         ----------
         qml_index:
@@ -1825,13 +1962,21 @@ class ChatBridge(QObject):
         session = getattr(self._agent, "session", None)
         if session is not None:
             for msg in session.dialogue_log:
-                if msg.get("role") == "assistant" and msg.get("content") == old_content:
+                if msg.get("role") in ("assistant", "narrator") and msg.get("content") == old_content:
                     msg["content"] = new_content
                     break
 
         # 2. conversation_logger 버퍼 및 저장 파일 업데이트
         if self._conv_logger is not None:
             self._conv_logger.edit_turn(old_content, new_content)
+
+        # 3. **...** / *...* 포함 시 QML 버블 재분할
+        if _SPLIT_RE.search(new_content):
+            segments = [
+                {"role": r, "content": c}
+                for r, c in _split_narration(new_content, "assistant")
+            ]
+            self.messageReplaced.emit(qml_index, segments)
 
     def _on_error(self, msg: str) -> None:
         self.messageAdded.emit("system", f"[오류] {msg}")

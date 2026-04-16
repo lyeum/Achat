@@ -541,6 +541,116 @@ def _is_content_valid(content: str, src: str) -> bool:
 
 ---
 
+## BUG-20 · `ui_ux/bridge.py` — 캐릭터/세계관 변경 시 채팅창 미초기화 ✅
+
+**발견**: Phase 7-A chatReset 구현 (2026-04-16)
+
+**파일**: `ui_ux/bridge.py` (`changeCharacter`, `changeWorld`)
+
+**문제**
+`changeCharacter()` / `changeWorld()` 호출 후 QML 채팅창이 초기화되지 않아
+이전 캐릭터/세계관의 대화 버블이 그대로 남아 있었음.
+동시에 새로 활성화된 세션의 이전 기록도 복원되지 않음.
+
+**원인**
+세션 교체 후 UI에 알릴 시그널이 없었음.
+`chatReset` 시그널 자체가 미정의 상태였음.
+
+**수정** ✅ (2026-04-16)
+
+```python
+# Signal 추가
+chatReset = Signal("QVariantList")  # 캐릭터/세계관 변경 시 채팅창 초기화 + 이전 기록 로드
+
+# changeCharacter() / changeWorld() 종료 시 emit
+self.chatReset.emit(self.getSessionHistory())
+```
+
+`getSessionHistory()` — `@Slot(result="QVariantList")` 신규 추가.
+`session.dialogue_log` 최근 `_HISTORY_DISPLAY_TURNS * 2` (= 20) 메시지를 반환.
+`**...**` / `*...*` 나레이션 분할을 포함하므로 재로드 시 bubble 타입도 올바르게 복원.
+
+---
+
+## BUG-21 · `ui_ux/bridge.py` — 앱 재시작 시 이전 대화 기록 미복원 ✅
+
+**발견**: Phase 7-A 세션 영속화 구현 (2026-04-16)
+
+**파일**: `ui_ux/bridge.py` (`_rebuild_agent`)
+
+**문제**
+앱 재시작 후 `activate()` / `activate_for_world()`로 기존 세션을 불러와도
+`session.dialogue_log`가 빈 리스트로 초기화되어 이전 대화 내용이 사라짐.
+
+**원인**
+`SessionState`는 `dialogue_log`를 런타임 전용으로 취급해 저장하지 않음.
+대화 기록은 `dialogue.json`에 별도 저장되지만, `_rebuild_agent()`에서 복원하지 않음.
+
+**수정** ✅ (2026-04-16)
+
+```python
+# _rebuild_agent() 내 swap_character() 이후
+if self._agent.session is not None and state.session_id:
+    dialogue = self._session_manager.load_dialogue(state.char_id, state.session_id)
+    if dialogue:
+        self._agent.session.dialogue_log = dialogue
+```
+
+`SessionManager.save_dialogue()` / `load_dialogue()` — `dialogue.json` R/W 신규 추가.
+`_on_done()` 및 `new_session()` 에서 `save_dialogue()` 호출.
+
+---
+
+## BUG-22 · `ui_ux/bridge.py` — `changeWorld()` 동일 세계관 전환 시 dialogue_log 손실 ✅
+
+**발견**: Phase 7-A 구현 중 (2026-04-16)
+
+**파일**: `ui_ux/bridge.py` (`changeWorld`)
+
+**문제**
+같은 세계관에서 act(시나리오)만 변경할 때 `swap_persona()` 내부에서
+`session.dialogue_log`가 덮어써져 이전 대화 내용이 모두 사라졌음.
+
+**원인**
+`swap_persona()`가 내부적으로 새 `ConversationSession`을 생성하거나
+`dialogue_log`를 초기화하는 경로가 있었고, 호출 전 dialogue를 보존하지 않음.
+
+**수정** ✅ (2026-04-16)
+
+```python
+# swap_persona() 호출 전 dialogue 저장
+old_dialogue = list(getattr(self._agent.session, "dialogue_log", []) or [])
+# ...swap_persona() 호출...
+new_session.dialogue_log = old_dialogue   # 복원
+```
+
+---
+
+## BUG-23 · `tests/test_bridge_slots.py` — `_rebuild_agent` 테스트에서 `_session_manager` 누락 ✅
+
+**발견**: `_rebuild_agent()` 수정 후 테스트 실행 시 (2026-04-16)
+
+**파일**: `tests/test_bridge_slots.py` (`test_rebuild_calls_swap_character`)
+
+**문제**
+`AttributeError: 'ChatBridge' object has no attribute '_session_manager'`
+
+**원인**
+`ChatBridge.__new__(ChatBridge)`로 인스턴스를 생성하면 `__init__`이 실행되지 않아
+`_session_manager`가 설정되지 않음.
+`_rebuild_agent()`가 `load_dialogue()` 호출을 추가하면서 `_session_manager` 접근이 생겼으나
+테스트 setup에서 해당 속성이 mock으로 주입되지 않았음.
+
+**수정** ✅ (2026-04-16)
+
+```python
+fake_sm = MagicMock()
+fake_sm.load_dialogue.return_value = []
+bridge_inst._session_manager = fake_sm
+```
+
+---
+
 ## 미수정 항목 (계획 미완성 / 의도적 설계)
 
 | 항목 | 이유 |

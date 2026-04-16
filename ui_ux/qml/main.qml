@@ -147,6 +147,19 @@ Window {
         y = Screen.height - height - 60
         _loadCustomization()
         if (bridge) root.currentTheme = bridge.getTheme()
+
+        // 이전 세션 대화 기록 복원 (changeWorld 이전 — 기존 대화가 먼저 표시)
+        if (bridge) {
+            try {
+                var history = bridge.getSessionHistory()
+                for (var i = 0; i < history.length; i++) {
+                    messageModel.append({ "role": history[i].role, "content": history[i].content })
+                }
+                if (history.length > 0)
+                    Qt.callLater(() => { chatList.positionViewAtEnd() })
+            } catch(e) {}
+        }
+
         // 앱 시작 시 default 세계관(Seaside) 자동 적용
         if (bridge) {
             try {
@@ -247,6 +260,19 @@ Window {
             }
         }
 
+        // **...** 편집 후 재분할: 기존 버블 제거 → 분할 버블 순서대로 삽입
+        function onMessageReplaced(index, segments) {
+            if (index < 0 || index >= messageModel.count) return
+            messageModel.remove(index, 1)
+            for (var i = 0; i < segments.length; i++) {
+                messageModel.insert(index + i, {
+                    "role":    segments[i].role,
+                    "content": segments[i].content
+                })
+            }
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+
         function onStatusChanged(status) {
             root.inputReady = (status === "ready")
             inputField.enabled = (status === "ready")
@@ -270,6 +296,15 @@ Window {
 
         function onMoodChanged(mood) {
             root.currentMood = mood
+        }
+
+        // 캐릭터/세계관 변경 시 채팅창을 지우고 해당 세션의 이전 기록을 복원한다
+        function onChatReset(history) {
+            messageModel.clear()
+            for (var i = 0; i < history.length; i++) {
+                messageModel.append({ "role": history[i].role, "content": history[i].content })
+            }
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
         }
     }
 

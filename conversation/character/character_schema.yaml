@@ -67,6 +67,19 @@ state:
   mood_triggers: {}           # 키워드 → mood 매핑 (캐릭터별 커스터마이즈)
   affection_delta: {}         # mood → affection 증감
 
+  # ── 특수 이벤트 (발작버튼 / aff 점프) ────────────────────────
+  # 일반 update_mood/update_affection보다 우선 적용.
+  # 발동 시 일반 상태 업데이트를 건너뛴다.
+  #
+  # trigger_events:
+  #   event_name:
+  #     keywords: [...]        # 유저 발화에 포함된 키워드
+  #     aff_set: 85            # aff 강제 설정 (aff_delta와 택1)
+  #     aff_delta: -30         # aff 강제 증감
+  #     mood: angry            # 강제 전환할 mood (생략 시 기존 유지)
+  #     cooldown_turns: 5      # 연속 발동 방지 (생략 시 제한 없음)
+  trigger_events: {}
+
 # ── 대화 수위 파라미터 ─────────────────────────────────────
 # prompt_build.py _conv_hints()에서 자연어 지시문으로 변환 후 시스템 프롬프트에 삽입
 conversation:

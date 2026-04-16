@@ -4,6 +4,9 @@ from loguru import logger
 
 from conversation.core.session import ConversationSession
 
+# trigger_events 쿨다운 세션 속성 키
+_FIRED_EVENTS_ATTR = "_fired_events"
+
 # affection 변화량 기본값 (캐릭터 YAML에 affection_delta 없을 때 폴백)
 _AFF_DELTA_DEFAULT = {
     "happy":       +3,
@@ -37,6 +40,61 @@ def update_mood(session: ConversationSession, user_input: str, character: dict) 
         logger.debug(f"[state] mood 변경: {session.mood} → {new_mood}")
     session.mood = new_mood
     return new_mood
+
+
+def check_trigger_events(
+    session: ConversationSession,
+    user_input: str,
+    character: dict,
+) -> bool:
+    """trigger_events 키워드 감지 → aff 점프 + mood 강제 전환.
+
+    발동하면 True 반환 → router에서 일반 update_mood/update_affection 건너뜀.
+    cooldown_turns 동안 동일 이벤트 재발동 방지.
+    """
+    events: dict = character.get("state", {}).get("trigger_events", {})
+    if not events:
+        return False
+
+    # 쿨다운 관리 (세션 내 임시 속성)
+    fired: dict[str, int] = getattr(session, _FIRED_EVENTS_ATTR, {})
+    # 매 턴 쿨다운 감소
+    fired = {k: v - 1 for k, v in fired.items() if v - 1 > 0}
+
+    triggered = False
+    for event_name, cfg in events.items():
+        if event_name in fired:
+            continue
+        keywords: list[str] = cfg.get("keywords", [])
+        if not any(kw in user_input for kw in keywords):
+            continue
+
+        # aff 변경 (aff_set 우선, 없으면 aff_delta)
+        if "aff_set" in cfg:
+            old = session.affection
+            session.affection = max(0, min(100, int(cfg["aff_set"])))
+            logger.info(f"[trigger] {event_name}: aff {old} → {session.affection} (set)")
+        elif "aff_delta" in cfg:
+            old = session.affection
+            session.affection = max(0, min(100, session.affection + int(cfg["aff_delta"])))
+            logger.info(f"[trigger] {event_name}: aff {old} → {session.affection} (delta={cfg['aff_delta']:+d})")
+
+        # mood 강제 전환
+        if "mood" in cfg:
+            old_mood = session.mood
+            session.mood = cfg["mood"]
+            logger.info(f"[trigger] {event_name}: mood {old_mood} → {session.mood}")
+
+        # 쿨다운 등록
+        cooldown = int(cfg.get("cooldown_turns", 0))
+        if cooldown > 0:
+            fired[event_name] = cooldown
+
+        triggered = True
+        break  # 턴당 하나의 이벤트만 발동
+
+    setattr(session, _FIRED_EVENTS_ATTR, fired)
+    return triggered
 
 
 def update_affection(session: ConversationSession, mood: str, character: dict | None = None) -> int:

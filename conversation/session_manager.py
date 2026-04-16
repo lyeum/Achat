@@ -117,6 +117,35 @@ class SessionManager:
             index.append(meta)
         self._save_index(state.char_id, index)
 
+    # ── 대화 기록 ─────────────────────────────────────────────────────────────
+
+    def _dialogue_path(self, char_id: str, session_id: str) -> Path:
+        return self._char_dir(char_id) / session_id / "dialogue.json"
+
+    def save_dialogue(self, char_id: str, session_id: str, dialogue_log: list) -> None:
+        """대화 기록을 {session_id}/dialogue.json에 저장한다.
+
+        재기동 후 채팅 기록을 복원하는 데 사용된다.
+        """
+        try:
+            path = self._dialogue_path(char_id, session_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(dialogue_log, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def load_dialogue(self, char_id: str, session_id: str) -> list:
+        """저장된 대화 기록을 불러온다. 없으면 빈 리스트."""
+        path = self._dialogue_path(char_id, session_id)
+        if not path.exists():
+            return []
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
     # ── SessionState 직렬화 ────────────────────────────────────────────────────
 
     def _load_state(self, char_id: str, session_id: str) -> SessionState | None:
