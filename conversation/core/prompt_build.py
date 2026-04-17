@@ -231,7 +231,12 @@ class PromptBuilder:
             parts.append(f"[현재 상황 — {location}]\n{ctx}")
         if rag_results:
             rag_text = "\n".join(f"- {r}" for r in rag_results)
-            parts.append(f"[세계관 참고]\n{rag_text}")
+            parts.append(
+                "[세계관 배경 — 대화와 관련된 배경 정보]\n"
+                + rag_text
+                + "\n이 정보는 캐릭터가 이미 알고 있는 배경이다. "
+                "직접 인용하거나 설명하지 말고, 대화 흐름 안에서 자연스럽게 녹여라."
+            )
 
         return "\n\n".join(parts)
 

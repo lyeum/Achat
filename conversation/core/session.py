@@ -25,6 +25,7 @@ class ConversationSession:
     affection_lock_value: int | None = None  # 잠금 시 고정할 수치 (None이면 현재값 유지)
 
     turn_count: int = 0
+    mood_hold: int = 0                       # 현재 mood 유지 남은 턴 수 (0 = neutral로 복귀 가능)
     dialogue_log: list[dict] = field(default_factory=list)
 
     # SessionManager가 부여하는 영속 세션 ID (None = 비관리 세션, 하위 호환 유지)

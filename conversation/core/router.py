@@ -133,9 +133,15 @@ class ConversationRouter:
             f"mood={self.session.mood} aff={self.session.affection}"
         )
 
-        # 8. 요약 트리거 — chat 모드에서만 수집 (기능 모드 발화 제외)
-        if mode == "chat" and summarizer.check_trigger(self.session, self._trigger_n):
+        # 8. 요약 트리거 — chat 모드에서만, 중요 발화 포함 여부 사전 검사
+        if (
+            mode == "chat"
+            and summarizer.check_trigger(self.session, self._trigger_n)
+            and summarizer.should_summarize(self.session.dialogue_log, self._trigger_n)
+        ):
             self._run_summarizer()
+        elif mode == "chat" and summarizer.check_trigger(self.session, self._trigger_n):
+            logger.debug("[router] 요약 조건 미충족 (중요 키워드 없음) — 생략")
 
         # 9. play_log 기록은 호출자(bridge.py or conversation/main.py)가 담당
         #    training/log/conversation_logger.py ConversationLogger.on_turn() 참조

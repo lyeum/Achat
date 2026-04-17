@@ -24,6 +24,7 @@ class SessionState:
     location: str = ""
     turn_count: int = 0
     mood: str = "neutral"
+    mood_hold: int = 0
     affection: int = 30
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

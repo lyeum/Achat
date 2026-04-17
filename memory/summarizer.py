@@ -10,7 +10,8 @@ from memory.long_term import LongTermMemory
 
 # 중요도 판정 키워드 (M_schema.json importance_rules 기준)
 # 이름 키워드는 1.0으로 강제 — VDB 검색 실패(4/5) 원인이 낮은 importance로 인한 누락
-_NAME_KEYWORDS = ["이름:", "이름은", "이름이", "이름"]
+# 구조화 포맷에서 이름 항목이 채워진 경우 ("이름: -" 는 제외)
+_NAME_KEYWORDS = ["이름: ", "이름은", "이름이", "이름"]
 _HIGH_KEYWORDS = [
     "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워",
     "기억해줘", "잊지마", "중요해", "말해줄게", "비밀", "처음으로",
@@ -23,9 +24,30 @@ _MID_KEYWORDS  = [
 ]
 
 
+_SUMMARIZE_SYSTEM = """\
+아래 대화에서 사용자에 대한 정보를 추출해. 반드시 아래 형식으로만 답해.
+정보가 없는 항목은 '-'로 표시해. 형식 외 다른 말은 쓰지 마.
+
+이름: [대화에서 언급된 경우만, 없으면 -]
+사건: [중요한 사건, 감정적 순간, 약속 — 없으면 -]
+감정: [사용자가 드러낸 감정 상태 — 없으면 -]
+기타: [취미, 선호도, 반복 화제 — 없으면 -]"""
+
+
 def check_trigger(session: ConversationSession, trigger_n: int) -> bool:
     """N턴마다 요약 트리거 여부를 반환한다."""
     return session.turn_count > 0 and session.turn_count % trigger_n == 0
+
+
+def should_summarize(dialogue_log: list[dict], trigger_n: int) -> bool:
+    """최근 trigger_n턴에 중요 키워드가 하나라도 있을 때만 True.
+
+    잡담만 오간 구간은 요약을 생략해 LLM 호출 낭비와 저품질 VDB 누적을 방지한다.
+    """
+    recent = dialogue_log[-(trigger_n * 2):]
+    text   = " ".join(m["content"] for m in recent)
+    important_kw = _NAME_KEYWORDS + _HIGH_KEYWORDS + _MID_KEYWORDS
+    return any(kw in text for kw in important_kw)
 
 
 def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
@@ -39,7 +61,7 @@ def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
 
     Returns
     -------
-    요약 문자열
+    구조화된 요약 문자열 (이름 / 사건 / 감정 / 기타 형식)
     """
     recent = dialogue_log[-(trigger_n * 2):]
     history_text = "\n".join(
@@ -47,18 +69,10 @@ def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
         for m in recent
     )
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "다음 대화를 1~3문장으로 간결하게 요약해. "
-                "사용자에 대해 알게 된 정보(이름, 취미, 감정, 사건)를 중심으로 써. "
-                "사용자의 이름이 대화에서 언급된 경우, 반드시 '이름: [이름]' 형태로 요약에 포함해. "
-                "캐릭터 시점으로 쓰지 말고, 객관적으로 요약해."
-            ),
-        },
-        {"role": "user", "content": history_text},
+        {"role": "system", "content": _SUMMARIZE_SYSTEM},
+        {"role": "user",   "content": history_text},
     ]
-    summary = llm.generate(messages, stream=False, max_tokens=250)
+    summary = llm.generate(messages, stream=False, max_tokens=150)
     logger.debug(f"[summarizer] 요약 생성: {summary[:60]}...")
     return summary
 
@@ -73,7 +87,7 @@ def score_importance(summary: str) -> float:
     """
     score = 0.5  # 기본값 — 키워드 없어도 일단 저장
     for kw in _NAME_KEYWORDS:
-        if kw in summary:
+        if kw in summary and "이름: -" not in summary:
             return 1.0  # 이름 정보는 최고 중요도 — 누락 방지
     for kw in _HIGH_KEYWORDS:
         if kw in summary:
@@ -111,13 +125,14 @@ def write_to_vdb(
         "id": mem_id,
         "content": summary,
         "metadata": {
-            "character_id": session.character_id,
-            "session_id":   session.session_id or str(id(session)),
-            "turn_range":   f"{turn_start}-{session.turn_count}",
-            "importance":   score,
-            "tags":         [],
-            "location":     session.act_id or "",
-            "timestamp":    datetime.now(timezone.utc).isoformat(),
+            "character_id":  session.character_id,
+            "session_id":    session.session_id or str(id(session)),
+            "turn_range":    f"{turn_start}-{session.turn_count}",
+            "importance":    score,
+            "tags":          [],
+            "location":      session.act_id or "",
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
+            "model_version": character.get("model_version", "unknown"),
         },
     }
     long_term.store(entry)

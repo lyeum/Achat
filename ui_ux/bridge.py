@@ -182,6 +182,7 @@ class ChatBridge(QObject):
             return
         session.session_id = state.session_id
         session.mood       = state.mood
+        session.mood_hold  = getattr(state, "mood_hold", 0)
         session.affection  = state.affection
         session.turn_count = state.turn_count
         if state.location:
@@ -237,6 +238,7 @@ class ChatBridge(QObject):
             return
         state.turn_count  = session.turn_count
         state.mood        = session.mood
+        state.mood_hold   = getattr(session, "mood_hold", 0)
         state.affection   = session.affection
         state.location    = session.location    or state.location
         state.act_id      = session.act_id      or state.act_id
