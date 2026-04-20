@@ -71,6 +71,9 @@ Window {
     // 세계관 생성 패널
     property bool   worldCreateOpen:       false
 
+    // 메뉴얼 패널
+    property bool   manualOpen:            false
+
     // ── 테마 ──────────────────────────────────────────────────────────────────
     property string currentTheme: "ocean"
 
@@ -608,6 +611,14 @@ Window {
             onCloseRequested: root.worldCreateOpen = false
         }
 
+        ManualPanel {
+            anchors.fill: parent
+            visible: root.manualOpen && !root.isBubble
+            z: 26
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.manualOpen = false
+        }
+
         // ── 확장 모드 ────────────────────────────────────────────────────
         ColumnLayout {
             anchors.fill: parent
@@ -692,6 +703,23 @@ Window {
                                 root.adminConvJson = bridge.getConvParams()
                                 root.adminPanelOpen = true
                             }
+                        }
+                    }
+
+                    // 메뉴얼 버튼
+                    Rectangle {
+                        width: 20; height: 20; radius: 10
+                        color: manualBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "?"
+                            color: root._th.accent; font.pixelSize: 11; font.bold: true
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: manualBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.manualOpen = true
                         }
                     }
 
@@ -911,16 +939,11 @@ Window {
                                             root.inputTagColor = root._th.accent
                                             root.searchDirectory = ""
                                         } else {
-                                            // #? 도움말 태그: 즉시 도움말 표시 후 해제
+                                            // #? 도움말 태그: 태그 활성화 후 사용자 입력 대기
                                             if (modelData.key === "help") {
-                                                var helpKeys = ["file_convert","folder_classify","local_search","prompt_convert"]
-                                                var helpLines = []
-                                                for (var hi = 0; hi < helpKeys.length; hi++) {
-                                                    var ht = bridge.getHelpText(helpKeys[hi])
-                                                    if (ht) helpLines.push(ht)
-                                                }
-                                                messageModel.append({ "role": "system", "content": helpLines.join("\n") })
-                                                Qt.callLater(() => { chatList.positionViewAtEnd() })
+                                                root.currentTag    = "help"
+                                                root.currentMode   = "function"
+                                                root.inputTagColor = modelData.color
                                                 return
                                             }
 
@@ -1022,7 +1045,7 @@ Window {
                                 verticalAlignment: Text.AlignVCenter
                                 text: root.currentTag !== ""
                                       ? (root._tagHints[root.currentTag] || "입력하세요...")
-                                      : "메시지 입력..."
+                                      : "텍스트 입력  *행동이나 감정 묘사*"
                                 color: "#555"
                                 font: inputField.font
                                 visible: inputField.text === "" && !inputField.activeFocus
@@ -1078,6 +1101,18 @@ Window {
         if (root.currentMode === "function" && root.currentTag === "") {
             messageModel.append({ "role": "system", "content": "기능 태그를 먼저 선택해주세요." })
             Qt.callLater(() => { chatList.positionViewAtEnd() })
+            return
+        }
+
+        // #? 도움말: 키워드로 해당 기능 설명 표시 후 태그 해제
+        if (root.currentTag === "help") {
+            var helpResult = bridge.getHelpByKeyword(text)
+            messageModel.append({ "role": "system", "content": helpResult })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+            inputField.text    = ""
+            root.currentTag    = ""
+            root.currentMode   = "chat"
+            root.inputTagColor = root._th.accent
             return
         }
 

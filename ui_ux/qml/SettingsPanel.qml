@@ -473,7 +473,8 @@ Item {
                                         Behavior on color { ColorAnimation { duration: 100 } }
                                         Text { anchors.centerIn: parent; text: "전환"; color: "#6090C0"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
                                         MouseArea {
-                                            id: sessHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            id: sessHov; anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor; preventStealing: true
                                             onClicked: {
                                                 settingsRoot.sessionSwitchRequested(modelData.session_id)
                                                 settingsRoot.closeRequested()
@@ -487,7 +488,8 @@ Item {
                                         Behavior on color { ColorAnimation { duration: 100 } }
                                         Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
                                         MouseArea {
-                                            id: sessDelHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            id: sessDelHov; anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor; preventStealing: true
                                             onClicked: {
                                                 bridge.deleteSession(modelData.session_id)
                                                 settingsRoot.sessionListJson = bridge.listSessions(bridge.characterId)

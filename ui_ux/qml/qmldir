@@ -12,3 +12,4 @@ MemoryDBPanel 1.0 MemoryDBPanel.qml
 AdminPanel 1.0 AdminPanel.qml
 CharacterCreatePanel 1.0 CharacterCreatePanel.qml
 SideMenuPanel 1.0 SideMenuPanel.qml
+ManualPanel 1.0 ManualPanel.qml

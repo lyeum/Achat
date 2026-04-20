@@ -37,6 +37,7 @@ REQUIRED_QML_FILES = [
     "MemoryDBPanel.qml",
     "AdminPanel.qml",
     "CharacterCreatePanel.qml",
+    "ManualPanel.qml",
 ]
 
 
@@ -58,6 +59,7 @@ REQUIRED_QMLDIR_ENTRIES = [
     "MemoryDBPanel",
     "AdminPanel",
     "CharacterCreatePanel",
+    "ManualPanel",
 ]
 
 

@@ -1047,8 +1047,7 @@ class ChatBridge(QObject):
         self._current_mood = new_mood
         self.moodChanged.emit(new_mood)
 
-        label = "새 세션이 시작되었습니다." if not keep_memory else "새 세션 시작 (기억 유지)."
-        self.messageAdded.emit("system", label)
+        self.chatReset.emit([])
 
     @Slot(str, result=str)
     def listSessions(self, char_id: str) -> str:
@@ -1667,10 +1666,66 @@ class ChatBridge(QObject):
         "help":           "#? — 각 기능에 대한 간략한 설명을 표시합니다",
     }
 
+    _HELP_DETAIL: list[dict] = [
+        {
+            "keys": ["프롬프트", "prompt", "변환"],
+            "text": (
+                "#프롬프트 변환\n"
+                "사용자가 사용하려는 모델과 입력하고 싶은 내용을 전달하면, 해당 모델에 대한 DB 지식을 활용해 프롬프트 형태로 가공해주는 기능입니다.\n"
+                "예) \"Flux 모델로 카페 창가에 앉아 커피 마시는 여성 이미지 만들어줘\""
+            ),
+        },
+        {
+            "keys": ["폴더", "분류", "정리", "folder"],
+            "text": (
+                "#폴더 정리\n"
+                "사용자가 선택한 폴더 범주 안에서 지정한 기준에 맞춰 폴더를 정리해주는 기능입니다.\n"
+                "예) \"Downloads 폴더를 확장자별로 분류해줘\""
+            ),
+        },
+        {
+            "keys": ["검색", "찾기", "search", "로컬"],
+            "text": (
+                "#로컬 검색\n"
+                "사용자가 지정한 폴더 범위에서 검색하려는 내용에 맞는 문서, 스크립트 파일을 검색해주는 기능입니다.\n"
+                "예) \"Documents 폴더에서 '프로젝트 보고서' 관련 파일 찾아줘\""
+            ),
+        },
+        {
+            "keys": ["파일", "이름", "rename", "확장자", "변경", "변환"],
+            "text": (
+                "#파일 이름 변환\n"
+                "일괄적으로 파일의 이름을 변경할 수 있게 해주는 기능입니다.\n"
+                "예) \"선택한 파일들 이름을 모두 소문자로 바꿔줘\""
+            ),
+        },
+    ]
+
     @Slot(str, result=str)
     def getHelpText(self, key: str) -> str:
         """기능 키에 해당하는 한 줄 도움말을 반환한다."""
         return self._HELP_TEXT.get(key, "")
+
+    @Slot(str, result=str)
+    def getHelpByKeyword(self, keyword: str) -> str:
+        """사용자가 입력한 키워드로 기능 도움말을 검색해 반환한다.
+
+        매칭 없으면 전체 기능 목록을 반환한다.
+        """
+        kw = keyword.lower().strip()
+        for item in self._HELP_DETAIL:
+            if any(k in kw or kw in k for k in item["keys"]):
+                return item["text"]
+        # 매칭 없으면 전체 목록
+        lines = [
+            "사용 가능한 기능 목록:\n",
+            "• 프롬프트 변환 — 모델용 프롬프트 자동 가공",
+            "• 폴더 정리 — 기준에 맞춰 파일 자동 분류",
+            "• 로컬 검색 — 폴더 내 문서/스크립트 검색",
+            "• 파일 이름 변환 — 파일명 일괄 변경",
+            "\n궁금한 기능 이름을 입력하면 자세한 설명을 드릴게요.",
+        ]
+        return "\n".join(lines)
 
     @Slot(result=bool)
     def getShownTagIntro(self) -> bool:
