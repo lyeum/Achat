@@ -111,7 +111,7 @@ User Input
     │       ▼                      ▼                            │
     │   [단기 메모리]         [장기 메모리 VDB]                 │
     │    최근 3~5턴 직접 삽입   시맨틱 유사도 검색              │
-    │    (검색 없이)            (bge-m3, 임계값 0.7+)           │
+    │    (검색 없이)            (bge-m3, 임계값 0.52)           │
     │       │                      │                            │
     │       └──────────┬───────────┘                            │
     │                  ▼                                         │
@@ -206,9 +206,9 @@ Achat/
 │   │   ├─ M_default.json
 │   │   └─ M_instance.json
 │   ├─ character/                  # 캐릭터 설정 파일
-│   │   ├─ CH_schema.json
+│   │   ├─ character_schema.yaml   # 캐릭터 계약 (슬롯 = 학습 카테고리 어휘)
 │   │   ├─ CH_Haru.yaml
-│   │   ├─ CH_Seonjae.yaml
+│   │   ├─ CH_MookHyeon.yaml
 │   │   └─ CH_default.yaml
 │   ├─ world/                      # 세계관 설정 파일
 │   │   ├─ W_schema.json
@@ -220,14 +220,17 @@ Achat/
 │   ├─ long_term.py               # ChromaDB VDB 저장 / 검색
 │   └─ summarizer.py              # 요약 + 중요도 scoring + 쓰기 트리거
 │
+├─ narration/                      # 세계관 트리거 패키지
+│   ├─ world_trigger.py           # story/place/culture 트리거 (절대 점수 ≥0.9, 토큰 부분 매칭)
+│   └─ narration_monitor.py       # 키워드 하드코딩 나레이션 (세션 내 1회)
+│
 ├─ rag/                            # RAG 파이프라인
-│   ├─ index.py                   # 세계관 문서 청킹 + ChromaDB 인덱싱
-│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3)
+│   ├─ index.py                   # 세계관 문서 섹션 기반 청킹 + ChromaDB 인덱싱
+│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, threshold 0.52)
+│   ├─ world_nav.py               # 이동 의도 감지 + 동적 장소 생성
 │   └─ sources/                   # 세계관 원본 문서
 │       └─ world/
-│           ├─ culture.md
-│           ├─ place.md
-│           └─ story.md
+│           └─ Seaside.md         # 통합 세계관 소스 (## culture / ## place / ## story)
 │
 ├─ agent/                          # Agent 오케스트레이터
 │   ├─ core.py                    # 전체 흐름 조율 + 모드 분기
@@ -244,6 +247,19 @@ Achat/
 │   │   ├─ Style.qml              # 디자인 토큰 singleton (색상/폰트/애니메이션)
 │   │   ├─ main.qml               # 플로팅 윈도우 (버블 축소/확장, 드래그, 스냅, 기능 태그 즉시 다이얼로그, #? 도움말 태그)
 │   │   ├─ ChatBubble.qml         # 재사용 말풍선 컴포넌트 (HTML 하이퍼링크 렌더링 지원)
+│   │   ├─ PipWindow.qml          # PIP 마스코트 모드 (bubbleDirection: random/left/right)
+│   │   ├─ SettingsPanel.qml      # 설정 패널 (테마/캐릭터/세계관/PIP방향 섹션)
+│   │   ├─ SideMenuPanel.qml      # 사이드 내비게이션 패널 (DB/설정/관리 아코디언)
+│   │   ├─ MemoryDBPanel.qml      # ChromaDB 장기 메모리 + 세계관 CRUD 패널
+│   │   ├─ AdminPanel.qml         # 관리자 패널 (affection 직접 조작)
+│   │   ├─ CharacterCreatePanel.qml # 캐릭터 생성 패널
+│   │   ├─ CharacterBuildPanel.qml  # 캐릭터 빌드 패널
+│   │   ├─ EmotionPanel.qml       # 감정 오버레이 편집 패널
+│   │   ├─ WorldCreatePanel.qml   # 세계관 생성 패널 (culture/place/story 섹션 입력)
+│   │   ├─ CharacterDisplay.qml   # 레이어 합성 캐릭터 표시
+│   │   ├─ CharacterSelectPanel.qml # 캐릭터 변경 모달
+│   │   ├─ CharacterStatusPanel.qml # 캐릭터 상태 모달
+│   │   ├─ ResetConfirmPanel.qml  # 캐릭터 초기화 확인 모달
 │   │   ├─ FileOptionsPanel.qml   # 파일 변환 오버레이 패널 (이름변경/확장자변환)
 │   │   ├─ FolderClassifyPanel.qml # 폴더 분류 오버레이 패널
 │   │   └─ FileSearchPanel.qml    # 파일 검색 결과 오버레이 패널
@@ -283,9 +299,9 @@ Achat/
 │
 ├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
 │   ├─ LoRA_v8/                   # v8 (eval best 1.353, 5 epoch 과적합)
-│   ├─ LoRA_v9/adapter/           # v9 (eval best 1.511, 3 epoch, EWC λ=500)
-│   ├─ LoRA_v10/adapter/          # v10 (eval best 1.512, 3 epoch, character_schema 기반)
-│   └─ LoRA_v11/                  # v11 목표 — 3,170건 / 57파일 (감정전환·세계관반응·존댓말·성격6종 추가)
+│   ├─ LoRA_v9/adapter/           # v9 (eval best 1.511, 3 epoch, EWC λ=500, memory_test 4/5)
+│   ├─ LoRA_v10/adapter/          # v10 (eval best 1.512, 3 epoch, character_schema 기반, EWC 미적용)
+│   └─ LoRA_v11/adapter/          # ← 현재 사용 중 (eval best 1.5387, step 700, r=32/alpha=64, 3,170건)
 │
 ├─ data/
 │   └─ lora/
@@ -310,7 +326,7 @@ Achat/
 
 | 단계 | 실현 가능성 | 비고 |
 |---|---|---|
-| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v9 완료 (EWC λ=500, 3 epoch, memory_test 4/5) |
+| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v11 사용 중 (r=32/alpha=64, 3,170건, eval best 1.5387) |
 | LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
 | GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
 | Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
@@ -412,7 +428,9 @@ Achat/
 - [x] (실행 검증) LoRA_v8 GPU 학습 완료 (5 epoch, 2,401건, category_weights, eval best 1.353 / 과적합 발생)
 - [x] 훈련 데이터 system prompt 정제 — emotion/long_dialogue 234건에서 "너는 하루다." 제거
 - [x] `training/lora_train.py` `--data_dir` 기본값 `data/lora` → `training/data` 수정
-- [ ] (실행 검증) LoRA_v9 GPU 학습 완료 (3 epoch, EWC λ=500, 데이터 정제 후)
+- [x] (실행 검증) LoRA_v9 GPU 학습 완료 (3 epoch, EWC λ=500, eval best 1.511, memory_test 4/5)
+- [x] (실행 검증) LoRA_v10 GPU 학습 완료 (3 epoch, character_schema 기반, eval best 1.512, EWC 미적용)
+- [x] (실행 검증) LoRA_v11 GPU 학습 완료 (r=32/alpha=64, 3,170건, eval best 1.5387 at step 700, epoch 1.97)
 
 ---
 
@@ -448,6 +466,20 @@ Achat/
 - [x] `ui_ux/qml/main.qml` — `sideMenuOpen` 프로퍼티, CRUD Signal 연결, `memoryChanged` Connections
 - [x] `memory/long_term.py` — `delete_entry` / `add_entry` / `update_entry` CRUD 메서드
 - [x] `conversation/narration_hardcoded.py` / `narration_monitor.py` — LLM 없는 키워드 트리거 나레이션
+
+---
+
+### Phase 8 — 대화 품질 개선
+> 목표: 감정 지속성 / 나레이션 트리거 정밀도 / RAG 응답 품질 개선
+
+- [x] **개선1** `agent/core.py` — `_inject_function_feedback()` 기능 모드 피드백 주입 (Layer F 연속성)
+- [x] **개선2** `memory/long_term.py` — `search()` `n_results` 매개변수 추가, ChromaDB PersistentClient 마이그레이션
+- [x] **개선3** `narration/world_trigger.py` — 절대 점수(≥0.9) + 토큰 부분 매칭(0.5 가중치) 이중 판정, `world_nav.py` 배치 조회
+- [x] **개선4** `conversation/core/router.py` — `world_context` RAG 삽입 로직 안정화, `narration_content` 프롬프트 블록 추가
+- [x] **개선5** `ui_ux/qml/PipWindow.qml` — `bubbleDirection` 프로퍼티 (왼/오른쪽 말풍선), `resizeRequested` Signal, PIP 창 드래그 크기 조절
+- [x] **개선6** `ui_ux/bridge.py` — `getPipBubbleDir()` / `savePipBubbleDir()` 슬롯 추가, `reindexWorldKnowledge()` 슬롯 (VDB 재인덱스), `_rebuild_world_md()` ChromaDB → .md 단방향 동기화
+- [x] **개선7** `conversation/character/CH_MookHyeon.yaml` 신규 캐릭터 추가, `character_schema.yaml` 스키마 분리
+- [x] **개선8** `agent/core.py` `mood_decay` + `mood_hold` 감정 지속 메커니즘, `memory/summarizer.py` 요약 구조화, RAG 지시문 삽입, `model_version` 메타데이터
 
 ---
 
@@ -624,4 +656,3 @@ GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
   기능 모드용 자연어 → JSON 예시 데이터를 Phase 5 학습 데이터에 반드시 포함할 것.
 - **확장자 변환 범위**: 이미지(jpg/png/webp/bmp), 문서(txt/md)는 외부 의존 없음.
   영상/음성 변환은 ffmpeg 바이너리 필요 — 선택적 기능으로 분리 권장.
-- **인터넷 검색**: DuckDuckGo 비공식 API는 rate limit 있음. 안정성이 필요하면 SearXNG 셀프호스팅 권장.

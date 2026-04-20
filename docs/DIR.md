@@ -1,6 +1,6 @@
 # DIR — 파일시스템 현황 참조 문서
 
-> 이 문서는 실제 파일시스템 기준으로 작성됩니다. 최종 업데이트: 2026-04-14 (v11 학습 완료 + 불필요 파일 정리)
+> 이 문서는 실제 파일시스템 기준으로 작성됩니다. 최종 업데이트: 2026-04-20 (개선6~8 + MagicMock 픽스처 수정 + auto-reindex 완성)
 > 코드·설계와 불일치하는 항목은 ⚠️로 표시합니다.
 >
 > 범례: ✅ 완료 | 🔲 비어있음(구현 예정) | 📄 데이터/설정 파일 | ⚠️ 불일치/정리 필요
@@ -30,6 +30,7 @@ Achat/
 ├─ Dockerfile                         ✅ CUDA 12.8 + Ubuntu 24.04 + uv 기반
 │                                        ibus-hangul, libgl1, IBUS_USE_PORTAL=0
 ├─ .gitignore                         ✅ output/ 제외 (학습 체크포인트/어댑터)
+│                                        MagicMock/ 추가 (테스트 픽스처 부작용 방지, 2026-04-20)
 │
 ├─ .github/
 │   └─ workflows/
@@ -107,6 +108,7 @@ Achat/
 │   │                                   fired_stories: list[str] — 발동된 story item_title 목록 (2026-04-09)
 │   │                                   visited_places: list[str] — 방문한 장소 목록 (2026-04-09)
 │   │                                   explained_cultures: list[str] — 설명된 문화 항목 목록 (2026-04-09)
+│   │                                   mood_hold: int — 감정 지속 턴 카운터 (개선8, 2026-04-20)
 │   │
 │   ├─ loader/
 │   │   ├─ __init__.py               ✅ 패키지 초기화
@@ -134,7 +136,7 @@ Achat/
 ├─ narration/                         ✅ 세계관 트리거 패키지 (루트 레벨, 2026-04-09)
 │   ├─ __init__.py                   ✅ 패키지 초기화
 │   └─ world_trigger.py              ✅ 세계관 트리거 판단 + 나레이션 생성
-│                                       check_story_trigger(session, user_input, rag) — 코사인 유사도 ≥ 0.55
+│                                       check_story_trigger(session, user_input, rag) — 절대 점수 ≥ 0.9 + 토큰 부분 매칭(0.5 가중치) 이중 판정
 │                                       check_place_trigger(session, place_id) — visited_places 기반 1회
 │                                       check_culture_trigger(session, rag) — explained_cultures 소거법
 │
@@ -207,10 +209,12 @@ Achat/
 │
 ├─ tests/                            ← 모든 테스트 파일은 반드시 이 폴더에 저장한다
 │   │                                   (eval/ 폴더의 수동 검증 스크립트와 분리)
+│   │                                   전체: 474 passed (2026-04-20 기준, 이전 421)
 │   ├─ test_bridge_slots.py          ✅ ChatBridge 슬롯 단위 테스트
 │   │                                   stub agent + QCoreApplication 헤드리스 실행
 │   │                                   monkeypatch로 _ICONS_DIR / _CHAR_PARTS_DIR / 스크린 mock
 │   │                                   getCharacterStatus / resetCharacter / CRUD 슬롯 테스트 포함
+│   │                                   stub_agent 픽스처: agent.cfg = {} 필수 (없으면 MagicMock/ 디렉토리 생성 부작용)
 │   ├─ test_ui_structure.py          ✅ QML 파일 존재·qmldir 등록·프로퍼티·시그널 검증
 │   │                                   버그 회귀 방지 테스트 포함
 │   │                                   (pipBubbleOpen 바인딩 루프, delegate scope, panelRect 클릭 등)
@@ -225,6 +229,7 @@ Achat/
 │   │                                   (TestWebSearchTool 제거됨 — web_search.py 삭제)
 │   ├─ test_integration_flows.py     ✅ LocalSearchFullFlow / FolderClassifyFullFlow / FileOptionsFullFlow
 │   │                                   (TestWebSearchFullFlow 제거됨 — web_search.py 삭제)
+│   │                                   bridge 픽스처: agent.cfg = {} 필수 (MagicMock/ 부작용 방지)
 │   ├─ test_improvement4.py          ✅ 개선4 항목 검증 (deleteCharacter, getDefaultWorld 슬롯 등)
 │   ├─ test_improvement5.py          ✅ 개선5 전체 커버 (35개 테스트, 2026-04-09)
 │   └─ test_integration_improvement5.py ✅ 개선5 통합 테스트 (나레이션 버블 emit, Seaside.md world_id 등)
@@ -341,7 +346,7 @@ Achat/
 │       ├─ feedback_neg/             📄 교정·지적·반복루프 로그
 │       ├─ feedback_pos/             📄 칭찬·동의 로그
 │       ├─ memory/                   📄 기억 관련 로그
-│       ├─ advice/                   🔲 고민 상담 로그 (폴더 없음 — 해당 카테고리 미수집)
+│       ├─ advice/                   ✅ 고민 상담 로그 폴더 생성됨 (2026-04-20)
 │       └─ persona/                  🔲 페르소나 이탈 교정 로그 (폴더 없음 — 미수집)
 │
 └─ ui_ux/
@@ -363,7 +368,9 @@ Achat/
     │                                         ── 개선5 신규 슬롯 (2026-04-09) ──
     │                                         getWorldKnowledgeDB() / addWorldKnowledge(section, title, content)
     │                                         updateWorldKnowledge(entry_id, content) / deleteWorldKnowledge(entry_id)
-    │                                         reindexWorldKnowledge() — Seaside.md 재인덱싱
+    │                                         reindexWorldKnowledge() — ChromaDB → Seaside.md 재인덱싱 (add/update/delete/create 시 자동 호출)
+    │                                         ── 개선6 신규 슬롯 (2026-04-20) ──
+    │                                         getPipBubbleDir() / savePipBubbleDir(dir) — PIP 말풍선 방향 설정
     │                                         addPromptGuide(model_name, content, char_id) — model 키 정규화 저장
     │                                         updatePromptGuide(entry_id, content) / deletePromptGuide(entry_id)
     │                                         getPromptModelList() — DB 내 model_name 목록
@@ -430,6 +437,8 @@ Achat/
         ├─ PipWindow.qml             ✅ PIP 마스코트 모드 (아이콘 + 위로 확장 말풍선)
         │                               characterId 기반 icons/{id}/{id}.png + emotion 오버레이
         │                               mood 8종 이모지 플레이스홀더 / 5초 자동 닫힘 / expandRequested 시그널
+        │                               bubbleDirection 프로퍼티 (left/right) — 말풍선 방향 전환 (2026-04-20)
+        │                               resizeRequested 시그널 — 드래그 크기 조절 연동
         ├─ SettingsPanel.qml         ✅ 오른쪽 슬라이드인 설정 패널 (z:10)
         │                               캐릭터 / 세계관+act / 커스터마이징 / 초기화 / 테마 섹션
         │                               closeRequested / emotionPanelRequested / characterBuildRequested /
@@ -437,6 +446,7 @@ Achat/
         │                               characterCreateRequested 시그널 신규 (2026-04-09) — 캐릭터 생성 버튼 연결
         │                               세션 목록 display_name / {char_name}-{world_id} 표시 (2026-04-09)
         │                               session_id null 가드 추가 (2026-04-09)
+        │                               PIP 말풍선 방향 설정 섹션 추가 (2026-04-20) — getPipBubbleDir/savePipBubbleDir 연결
         ├─ SideMenuPanel.qml         ✅ 오른쪽 슬라이드인 사이드 내비게이션 패널 (z:25, 220px)
         │                               DB / 설정 / 관리 세 섹션 아코디언 구조
         │                               closeRequested / openMemoryDB / openSettings / openAdmin 시그널
@@ -453,6 +463,9 @@ Achat/
         │                                 카드 삭제: bridge.deletePromptGuide(id) / 수정: bridge.updatePromptGuide(id, text)
         ├─ AdminPanel.qml            ✅ 관리자 패널 — affection 직접 조작 (z:20)
         ├─ CharacterCreatePanel.qml  ✅ 캐릭터 생성 패널 — 신규 캐릭터 YAML 등록 (z:20)
+        ├─ CharacterBuildPanel.qml   ✅ 캐릭터 빌드 패널 — YAML 슬롯 편집 UI (개선7, 2026-04-20)
+        ├─ EmotionPanel.qml          ✅ 감정 상태 조회 패널 — mood/affection 시각화 (개선8, 2026-04-20)
+        ├─ FolderClassifyPanel.qml   ✅ 폴더 정리 도구 실행 패널 (기능 모드)
         ├─ CharacterDisplay.qml      ✅ 레이어 합성 캐릭터 표시 (128×160 px, z:2)
         │                               icons/{id}/{id}.png 우선 → 없으면 5레이어 파츠 합성
         │                               감정 오버레이: icons/{id}/emotion/{mood}.png
@@ -485,6 +498,7 @@ Achat/
 | ~~5~~ | ~~런타임 로그 gitignore 미적용~~ | `.gitignore` | ✅ training/log/daily|emotion|feedback_neg|feedback_pos|memory/ + data/sessions/ 패턴 추가, git rm --cached 완료 (2026-03-28) | 해결 |
 | 6 | config.py 배포 모델 없음 | `config.py` deploy.model_path | `./models/model_q4km.gguf` 참조하나 models/ 폴더 없음 — 배포 빌드 시 생성 필요 | 낮음 (배포 전 처리) |
 | 7 | 구버전 날짜 패턴 로그 잔존 | `training/log/daily/`, `emotion/` | `2026-03-17.jsonl` 등 날짜 패턴 파일이 현행 session_id 패턴과 혼재 | 낮음 |
+| ~~8~~ | ~~MagicMock/ 디렉토리 생성~~ | — | ✅ stub_agent 픽스처에 `agent.cfg = {}` 추가로 해결 + .gitignore 추가 (2026-04-20) | 해결 |
 
 ---
 
