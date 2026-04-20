@@ -114,7 +114,7 @@ Item {
                                 Image {
                                     anchors.fill: parent
                                     anchors.margins: 1
-                                    source: bridge ? "file:///" + bridge.characterId : ""
+                                    source: Qt.resolvedUrl("../assets/icons/" + modelData.id + "/" + modelData.id + ".png")
                                     fillMode: Image.PreserveAspectCrop
                                     visible: status === Image.Ready
                                 }

@@ -21,8 +21,8 @@ Item {
     readonly property var _emotions: [
         { key: "neutral",      label: "기본",   emoji: "😐" },
         { key: "happy",        label: "행복",   emoji: "😊" },
-        { key: "affectionate", label: "애정",   emoji: "🥰" },
-        { key: "touched",      label: "감동",   emoji: "🥹" },
+        { key: "affectionate", label: "애정",   emoji: "😍" },
+        { key: "touched",      label: "감동",   emoji: "😭" },
         { key: "curious",      label: "호기심", emoji: "🤔" },
         { key: "sad",          label: "슬픔",   emoji: "😢" },
         { key: "embarrassed",  label: "당황",   emoji: "😳" },
@@ -56,7 +56,8 @@ Item {
         )
     }
     function _defaultEmotionUrl(mood) {
-        return Qt.resolvedUrl("../assets/icons/default/emotion/" + mood + ".png")
+        // default emotion 이미지 없음 — 빈 문자열 반환 (emoji 플레이스홀더로 대체)
+        return ""
     }
 
     // ── imageImported 수신 ──────────────────────────────────────────────────
@@ -227,23 +228,27 @@ Item {
     // 감정/아이콘 이미지 슬롯
     component EmoSlot: Rectangle {
         id: emoSlot
-        property string slotType:  ""
-        property string label:     ""
-        property string emoji:     "😐"   // 이미지 없을 때 플레이스홀더 이모지
-        property string previewUrl: ""    // char 전용 이미지 URL
-        property string defaultUrl: ""    // 기본(default) 이미지 URL
-        property string fontFam:   ""
+        property string slotType:   ""
+        property string label:      ""
+        property string emoji:      "😐"
+        property string previewUrl: ""
+        property string defaultUrl: ""
+        property string fontFam:    ""
+
+        // 이미지가 실제로 표시 중인지
+        readonly property bool _hasImage: charImg.visible || defImg.visible
 
         radius: 8
         color:  emoDrop.containsDrag ? "#1A3A6A"
                                      : (emoMa.containsMouse ? "#272727" : "#202020")
         border.color: emoDrop.containsDrag ? "#4A90D9"
-                                           : (emoMa.containsMouse ? "#555" : "#333")
-        border.width: 1
+                                           : (emoMa.containsMouse ? "#555"
+                                              : (_hasImage ? "#3A5A3A" : "#333"))
+        border.width: _hasImage ? 2 : 1
         Behavior on color        { ColorAnimation { duration: 100 } }
         Behavior on border.color { ColorAnimation { duration: 100 } }
 
-        // char 전용 이미지
+        // char 전용 이미지 — 얼굴 크롭 (상단 45%)
         Image {
             id: charImg
             anchors { top: parent.top; left: parent.left; right: parent.right
@@ -252,47 +257,59 @@ Item {
             fillMode: Image.PreserveAspectFit
             smooth: true; mipmap: true; cache: false
             visible: emoSlot.previewUrl !== "" && status === Image.Ready
+            // 얼굴 영역(상단 45%) 크롭
+            sourceClipRect: status === Image.Ready
+                ? Qt.rect(0, 0, implicitWidth, Math.round(implicitHeight * 0.55))
+                : Qt.rect(0, 0, 0, 0)
         }
 
-        // default 이미지 (char 전용이 없을 때)
+        // default 이미지 (char 전용 없을 때) — 동일하게 얼굴 크롭
         Image {
+            id: defImg
             anchors { top: parent.top; left: parent.left; right: parent.right
                       margins: 6; bottom: emoLabel.top; bottomMargin: 4 }
             source: emoSlot.defaultUrl
             fillMode: Image.PreserveAspectFit
             smooth: true; mipmap: true; cache: false
             visible: !charImg.visible && emoSlot.defaultUrl !== "" && status === Image.Ready
+            sourceClipRect: status === Image.Ready
+                ? Qt.rect(0, 0, implicitWidth, Math.round(implicitHeight * 0.55))
+                : Qt.rect(0, 0, 0, 0)
         }
 
         // 플레이스홀더 (이미지 없을 때)
         Column {
             anchors.centerIn: parent
-            anchors.verticalCenterOffset: -10
-            visible: charImg.source === "" || charImg.status !== Image.Ready
-            spacing: 4
+            anchors.verticalCenterOffset: -8
+            visible: !emoSlot._hasImage
+            spacing: 3
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: emoSlot.emoji
-                font.pixelSize: emoSlot.height > 130 ? 28 : 20
+                font.pixelSize: emoSlot.height > 130 ? 30 : 22
+                font.family: "Segoe UI Emoji, Segoe UI Symbol, Apple Color Emoji, Noto Color Emoji"
+                renderType: Text.QtRendering
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "클릭 또는 드래그"
-                color: "#444"; font.pixelSize: 9
+                color: "#666"; font.pixelSize: 9
                 font.family: emoSlot.fontFam
             }
         }
 
-        // 레이블
+        // 레이블 (항상 하단 표시)
         Text {
             id: emoLabel
-            anchors { bottom: parent.bottom; left: parent.left; right: parent.right; bottomMargin: 6 }
+            anchors { bottom: parent.bottom; left: parent.left; right: parent.right; bottomMargin: 5 }
             text: emoSlot.label
-            color: "#666"; font.pixelSize: 10
+            color: emoSlot._hasImage ? "#7AC87A" : "#B0B0B0"
+            font.pixelSize: 10; font.bold: emoSlot._hasImage
             font.family: emoSlot.fontFam
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
             leftPadding: 4; rightPadding: 4
+            Behavior on color { ColorAnimation { duration: 150 } }
         }
 
         DropArea {

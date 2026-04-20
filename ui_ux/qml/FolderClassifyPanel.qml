@@ -84,43 +84,46 @@ Item {
                         { label: "종류별", desc: "이미지 / 동영상 / 문서 / 코드 / 압축 등으로 분류" },
                         { label: "확장자별", desc: "파일 확장자(.png, .mp4, .pdf ...)별로 폴더 생성" },
                     ]
-                    Row {
-                        spacing: 8
+                    // Row 안에 anchors.fill MouseArea 사용 불가 → Item으로 감쌈
+                    Item {
                         width: parent.width
-                        Item {
-                            width: 16; height: 36
-                            Rectangle {
-                                width: 16; height: 16; radius: 8
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: "transparent"
-                                border.color: classifyRoot._rule === index ? "#5A9EA8" : "#3A5060"
-                                border.width: 2
+                        height: 36
+
+                        Row {
+                            spacing: 8
+                            width: parent.width
+                            anchors.verticalCenter: parent.verticalCenter
+                            Item {
+                                width: 16; height: 36
                                 Rectangle {
-                                    anchors.centerIn: parent
-                                    width: 8; height: 8; radius: 4
-                                    color: "#5A9EA8"
-                                    visible: classifyRoot._rule === index
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: classifyRoot._rule = index
+                                    width: 16; height: 16; radius: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: "transparent"
+                                    border.color: classifyRoot._rule === index ? "#5A9EA8" : "#3A5060"
+                                    border.width: 2
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 8; height: 8; radius: 4
+                                        color: "#5A9EA8"
+                                        visible: classifyRoot._rule === index
+                                    }
                                 }
                             }
-                        }
-                        Column {
-                            spacing: 2
-                            Text {
-                                text: modelData.label
-                                font.pixelSize: 12
-                                font.family: classifyRoot.fontFamily
-                                color: classifyRoot._rule === index ? "#A8D0D8" : "#607080"
-                            }
-                            Text {
-                                text: modelData.desc
-                                font.pixelSize: 10
-                                font.family: classifyRoot.fontFamily
-                                color: "#3A5060"
+                            Column {
+                                spacing: 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: modelData.label
+                                    font.pixelSize: 12
+                                    font.family: classifyRoot.fontFamily
+                                    color: classifyRoot._rule === index ? "#A8D0D8" : "#607080"
+                                }
+                                Text {
+                                    text: modelData.desc
+                                    font.pixelSize: 10
+                                    font.family: classifyRoot.fontFamily
+                                    color: "#3A5060"
+                                }
                             }
                         }
                         MouseArea {

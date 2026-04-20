@@ -29,8 +29,8 @@ Item {
     readonly property var _moodLabel: ({
         "neutral":      "😶 무관심",
         "happy":        "😊 기분 좋음",
-        "affectionate": "🥰 호감",
-        "touched":      "🥹 감동",
+        "affectionate": "😍 호감",
+        "touched":      "😭 감동",
         "curious":      "🤔 호기심",
         "sad":          "😔 슬픔",
         "embarrassed":  "😳 당황",
@@ -39,12 +39,12 @@ Item {
     })
 
     readonly property var _tierLabel: ({
-        "stranger":     "낯선 사이",
-        "acquaintance": "지인",
-        "familiar":     "아는 사이",
-        "friendly":     "친한 편",
-        "close":        "친밀",
-        "intimate":     "깊은 신뢰",
+        "stranger":     "감정 억제",
+        "acquaintance": "드물게 반응",
+        "familiar":     "자연스럽게 묻어남",
+        "friendly":     "직접적 표현",
+        "close":        "솔직한 반응",
+        "intimate":     "즉각적·감추지 않음",
     })
 
     readonly property var _tierColor: ({
