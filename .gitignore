@@ -210,6 +210,9 @@ __marimo__/
 output/
 # ChromaDB 로컬 데이터
 chroma_verify/
+chroma_dev/
+chroma_deploy/
+MagicMock/
 *.sqlite3
 *.bin
 
@@ -227,3 +230,6 @@ training/log/memory/
 
 # 세션 런타임 데이터 (실행마다 재생성)
 data/sessions/
+
+# UI 에셋 (이미지/아이콘 — 바이너리, 저장소 제외)
+ui_ux/assets/
