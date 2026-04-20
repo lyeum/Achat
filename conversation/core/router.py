@@ -103,11 +103,12 @@ class ConversationRouter:
 
         # 5. LLM 생성
         if narration_data:
-            item_title, _doc = narration_data
+            _item_title, _doc = narration_data
             hint = (
-                f"[세계관 정보] '{item_title}'에 관한 내용이 있습니다. "
-                f"대화에서 '{item_title}'을 자연스럽게 한 문장으로 언급하며 답하세요. "
-                f"상세 설명은 나레이션으로 별도 표시되므로 직접 설명하지 않아도 됩니다."
+                f"[세계관 배경 — 나레이션으로 별도 표시됨]\n{_doc}\n"
+                "위 내용을 참고해 캐릭터 말투로 1~2문장 이내로 자연스럽게 언급한다. "
+                "직접 인용하거나 항목을 목록으로 나열하지 않는다. "
+                "위 정보 범위 밖의 내용을 만들어내지 않는다."
             )
             messages.insert(len(messages) - 1, {"role": "system", "content": hint})
         response = self.llm.generate(messages, stream=stream)
@@ -240,7 +241,8 @@ class ConversationRouter:
                 return story
             culture = check_culture_trigger(user_input, self.session, self.rag)
             return culture
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[router] world_trigger 예외 (world_id={getattr(self.session, 'world_id', None)}): {e}")
             return None
 
     def _run_summarizer(self) -> None:
