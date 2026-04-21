@@ -933,20 +933,11 @@ Window {
                                     onExited:  if (!parent._active) parent.border.color = root._th.tagBorder
                                     onClicked: {
                                         if (root.currentTag === modelData.key) {
-                                            // 같은 태그 재클릭 → 해제
+                                            // 같은 태그 재클릭 → 태그만 해제 (모드는 유지)
                                             root.currentTag    = ""
-                                            root.currentMode   = "chat"
                                             root.inputTagColor = root._th.accent
                                             root.searchDirectory = ""
                                         } else {
-                                            // #? 도움말 태그: 태그 활성화 후 사용자 입력 대기
-                                            if (modelData.key === "help") {
-                                                root.currentTag    = "help"
-                                                root.currentMode   = "function"
-                                                root.inputTagColor = modelData.color
-                                                return
-                                            }
-
                                             root.currentTag    = modelData.key
                                             root.currentMode   = "function"
                                             root.inputTagColor = modelData.color
@@ -961,9 +952,8 @@ Window {
                                                     root.fileOptionsPaths = pathsJson
                                                     root.fileOptionsOpen  = true
                                                 } else {
-                                                    // 취소 시 태그 해제
+                                                    // 취소 시 태그만 해제
                                                     root.currentTag    = ""
-                                                    root.currentMode   = "chat"
                                                     root.inputTagColor = root._th.accent
                                                 }
                                             } else if (modelData.key === "folder_classify") {
@@ -973,7 +963,6 @@ Window {
                                                     root.classifyPanelOpen = true
                                                 } else {
                                                     root.currentTag    = ""
-                                                    root.currentMode   = "chat"
                                                     root.inputTagColor = root._th.accent
                                                 }
                                             } else if (modelData.key === "local_search") {
@@ -982,7 +971,6 @@ Window {
                                                     root.searchDirectory = sd
                                                 } else {
                                                     root.currentTag    = ""
-                                                    root.currentMode   = "chat"
                                                     root.inputTagColor = root._th.accent
                                                 }
                                             }
@@ -1104,15 +1092,12 @@ Window {
             return
         }
 
-        // #? 도움말: 키워드로 해당 기능 설명 표시 후 태그 해제
+        // #? 도움말: 키워드로 해당 기능 설명 표시 (태그·모드 유지 — 다른 태그와 동일)
         if (root.currentTag === "help") {
             var helpResult = bridge.getHelpByKeyword(text)
             messageModel.append({ "role": "system", "content": helpResult })
             Qt.callLater(() => { chatList.positionViewAtEnd() })
-            inputField.text    = ""
-            root.currentTag    = ""
-            root.currentMode   = "chat"
-            root.inputTagColor = root._th.accent
+            inputField.text = ""
             return
         }
 

@@ -39,8 +39,14 @@ Item {
             height: 40
             color: "#0E1820"
             radius: 12
-            Rectangle { anchors { bottom: parent.bottom; left: parent.left; right: parent.right }; height: 12; color: parent.color }
-            Rectangle { anchors { bottom: parent.bottom; left: parent.left; right: parent.right }; height: 1; color: "#1E3C4A" }
+            Rectangle {
+                anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                height: 12; color: parent.color
+            }
+            Rectangle {
+                anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                height: 1; color: "#1E3C4A"
+            }
 
             Text {
                 anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }

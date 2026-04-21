@@ -1668,7 +1668,7 @@ class ChatBridge(QObject):
 
     _HELP_DETAIL: list[dict] = [
         {
-            "keys": ["프롬프트", "prompt", "변환"],
+            "keys": ["프롬프트", "prompt"],
             "text": (
                 "#프롬프트 변환\n"
                 "사용자가 사용하려는 모델과 입력하고 싶은 내용을 전달하면, 해당 모델에 대한 DB 지식을 활용해 프롬프트 형태로 가공해주는 기능입니다.\n"
@@ -1711,11 +1711,16 @@ class ChatBridge(QObject):
         """사용자가 입력한 키워드로 기능 도움말을 검색해 반환한다.
 
         매칭 없으면 전체 기능 목록을 반환한다.
+        매칭 점수가 가장 높은 항목(키 일치 수 최다)을 반환한다.
         """
         kw = keyword.lower().strip()
+        best, best_score = None, 0
         for item in self._HELP_DETAIL:
-            if any(k in kw or kw in k for k in item["keys"]):
-                return item["text"]
+            score = sum(1 for k in item["keys"] if k in kw)
+            if score > best_score:
+                best, best_score = item, score
+        if best_score > 0:
+            return best["text"]
         # 매칭 없으면 전체 목록
         lines = [
             "사용 가능한 기능 목록:\n",
