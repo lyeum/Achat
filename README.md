@@ -111,7 +111,7 @@ User Input
     │       ▼                      ▼                            │
     │   [단기 메모리]         [장기 메모리 VDB]                 │
     │    최근 3~5턴 직접 삽입   시맨틱 유사도 검색              │
-    │    (검색 없이)            (bge-m3, 임계값 0.52)           │
+    │    (검색 없이)            (bge-m3, 임계값 0.60)           │
     │       │                      │                            │
     │       └──────────┬───────────┘                            │
     │                  ▼                                         │
@@ -226,7 +226,7 @@ Achat/
 │
 ├─ rag/                            # RAG 파이프라인
 │   ├─ index.py                   # 세계관 문서 섹션 기반 청킹 + ChromaDB 인덱싱
-│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, threshold 0.52)
+│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, threshold 0.55)
 │   ├─ world_nav.py               # 이동 의도 감지 + 동적 장소 생성
 │   └─ sources/                   # 세계관 원본 문서
 │       └─ world/
@@ -376,7 +376,7 @@ Achat/
 - [x] `agent/state.py` — mood_triggers 키워드 매칭 (8종), affection 증감 (캐릭터 YAML affection_delta 우선)
 - [x] `agent/core.py` — 전체 컴포넌트 초기화 + 대화 모드 진입점 `chat()`
 - [x] `memory/short_term.py` — `get_recent()` 슬라이딩 윈도우
-- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.7, importance ≥ 0.5 필터)
+- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.60, importance ≥ 0.5 필터)
 - [x] `memory/summarizer.py` — N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 - [x] `conversation/core/router.py` — `handle_turn()` 전체 턴 파이프라인
   - VDB 검색 → PromptBuilder → LLM → mood/affection 업데이트 → 세션 기록 → 요약 트리거
@@ -389,7 +389,7 @@ Achat/
 > 상세 구현: [대화품질.md](대화품질.md) — 시맨틱 검색 전략, 캐릭터 관점 재서술
 
 - [x] `rag/index.py` — 세계관 문서 청킹(400자/overlap 50) + ChromaDB 인덱싱 (bge-m3, cosine space)
-- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, threshold 0.7 미만 빈 리스트 반환
+- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, threshold 0.55 미만 빈 리스트 반환
 - [x] `conversation/core/prompt_build.py` — `assemble(rag_results=)` 추가, Layer B에 RAG 결과 병합
 - [x] `conversation/core/router.py` — RAG 검색 연동 (장기 메모리 > 세계관 RAG 우선순위)
 
