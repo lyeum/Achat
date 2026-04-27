@@ -227,9 +227,16 @@ training/log/emotion/
 training/log/feedback_neg/
 training/log/feedback_pos/
 training/log/memory/
+training/log/advice/
 
 # 세션 런타임 데이터 (실행마다 재생성)
 data/sessions/
+
+# 배포 검증 임시 ChromaDB
+chroma_deploy_test/
+
+# GGUF 모델 파일 (대용량 바이너리)
+*.gguf
 
 # UI 에셋 (이미지/아이콘 — 바이너리, 저장소 제외)
 ui_ux/assets/
