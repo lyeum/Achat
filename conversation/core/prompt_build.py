@@ -9,9 +9,14 @@ BUDGET = {
     "layer_a": 300,    # 캐릭터 시스템 프롬프트 (고정)
     "layer_b": 200,    # 세계관 + Act (고정)
     "layer_c": 150,    # VDB 검색 결과 (동적, 없으면 0)
-    "layer_d": 300,    # 단기 히스토리 (동적)
+    "layer_d": 450,    # 단기 히스토리 (동적)
     "generation": 512,
 }
+
+# ── 모든 캐릭터에 강제 적용되는 기본 규칙 ──────────────────────────────────────
+_BASE_RULES: list[str] = [
+    "한자(漢字)·중국어 등 비한국어 문자를 문장에 섞지 않는다. 단, 사용자가 영어로 말을 걸면 영어로 대응할 수 있다.",
+]
 
 # ── speech.style preset 해석 ─────────────────────────────────────────────────
 _STYLE_PRESETS: dict[str, str] = {
@@ -104,11 +109,14 @@ class PromptBuilder:
         recent_ops: list[str] | None = None,
         user_input: str = "",
     ) -> list[dict]:
-        """Layer A~D(+F)를 조립해 messages 리스트를 반환한다."""
+        """Layer A~E(+F)를 조립해 messages 리스트를 반환한다."""
         layer_b = self._layer_b(rag_results or [])
         system_parts = [self._layer_a(user_input_len=len(user_input)), layer_b]
         if vdb_results:
             system_parts.append(self._layer_c(vdb_results))
+        layer_e = self._layer_e()
+        if layer_e:
+            system_parts.append(layer_e)
         if recent_ops:
             system_parts.append(self._layer_f(recent_ops))
 
@@ -206,17 +214,11 @@ class PromptBuilder:
         # 7. 대화 수위 파라미터
         parts.extend(self._conv_hints(c, tier, user_input_len))
 
-        # 8. 규칙
-        rules_list = c.get("rules", [])
-        if rules_list and all(isinstance(r, str) for r in rules_list):
-            parts.append(" ".join(rules_list))
-        elif rules_list:
-            parts.append(
-                "캐릭터를 벗어나는 발언, AI임을 언급하는 발언, "
-                "\"물론이죠\"·\"좋은 질문\" 같은 표현은 하지 않는다."
-            )
+        # 8. 규칙 (_BASE_RULES는 캐릭터 규칙 앞에 항상 삽입)
+        rules_list = _BASE_RULES + [r for r in c.get("rules", []) if isinstance(r, str)]
+        parts.append("[규칙]\n- " + "\n- ".join(rules_list))
 
-        return " ".join(parts)
+        return "\n".join(parts)
 
     def _layer_b(self, rag_results: list[str] | None = None) -> str:
         """세계관 설명 + 현재 Act 상황 + RAG 검색 결과."""
@@ -236,7 +238,9 @@ class PromptBuilder:
                 "[세계관 배경 — 대화와 관련된 배경 정보]\n"
                 + rag_text
                 + "\n이 정보는 캐릭터가 이미 알고 있는 배경이다. "
-                "직접 인용하거나 설명하지 말고, 대화 흐름 안에서 자연스럽게 녹여라."
+                "그대로 읽어주거나 목록으로 나열하지 않는다. "
+                "캐릭터의 말투로 자연스럽게 재가공해 대화에 녹여라. "
+                "모르는 내용은 모른다고 해도 된다."
             )
 
         return "\n\n".join(parts)
@@ -256,6 +260,23 @@ class PromptBuilder:
             if total <= BUDGET["layer_d"]:
                 return sliced
         return short_buf[-2:]
+
+    def _layer_e(self) -> str:
+        """Layer E — session_context + character_notes 통합 주입.
+
+        session_context: SHORT_TERM_N 초과로 evict된 이전 대화 요약 텍스트
+        character_notes: 이번 세션 내 캐릭터가 약속한 내용 목록
+        둘 다 비어 있으면 빈 문자열을 반환해 system_parts에서 제외된다.
+        """
+        parts: list[str] = []
+        ctx = getattr(self.session, "session_context", "").strip()
+        if ctx:
+            parts.append(f"[이전 대화 요약]\n{ctx}")
+        notes = getattr(self.session, "character_notes", [])
+        if notes:
+            notes_text = "\n".join(f"- {n}" for n in notes[-10:])
+            parts.append(f"[이번 세션 약속]\n{notes_text}")
+        return "\n\n".join(parts)
 
     def _layer_f(self, recent_ops: list[str]) -> str:
         """Layer F — 최근 기능 작업 컨텍스트."""
