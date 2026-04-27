@@ -82,7 +82,14 @@ mkdir -p "$DIST/chroma_deploy"
 # ── zip 압축 ─────────────────────────────────────────────────────────────────
 echo "[3/4] zip 압축: dist/achat.zip"
 cd "$ROOT/dist"
-zip -r "achat.zip" "achat/" -x "achat/models/model_q4km.gguf" > /dev/null
+uv run python3 -c "
+import zipfile, pathlib
+exclude = {'achat/models/model_q4km.gguf'}
+with zipfile.ZipFile('achat.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+    for f in pathlib.Path('achat').rglob('*'):
+        if f.is_file() and str(f).replace(chr(92), '/') not in exclude:
+            zf.write(f)
+"
 # GGUF 파일은 용량이 크므로 zip 제외 — 별도 배포
 
 echo "[4/4] 완료"

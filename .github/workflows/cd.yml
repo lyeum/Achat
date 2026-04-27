@@ -1,0 +1,76 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '릴리즈 태그 (예: v0.1.0)'
+        required: true
+
+jobs:
+  # ── 배포 패키지 생성 + GitHub Release ────────────────────────────────────────
+  release:
+    name: Package & Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: uv 설치
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: 배포 패키지 생성 (소스 전용, GGUF 제외)
+        run: bash scripts/package_deploy.sh
+        # --gguf 미지정 → models/README.txt 안내 파일만 포함
+
+      - name: 릴리즈 태그 확인
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: GitHub Release 생성 및 zip 업로드
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: "Achat ${{ steps.tag.outputs.name }}"
+          body: |
+            ## 설치 방법
+
+            1. `achat.zip` 다운로드 후 압축 해제
+            2. `models/` 폴더에 `model_q4km.gguf` 복사 (별도 배포)
+            3. `uv sync` 실행 (최초 1회)
+            4. `run.bat` 실행
+
+            ## 모델 파일 (별도)
+
+            `model_q4km.gguf` (~2GB) 는 용량 문제로 Release에 포함되지 않습니다.
+            개발자에게 별도 수령하거나 아래 절차로 직접 생성하세요.
+
+            ```
+            # Linux 개발 환경에서 실행
+            uv run python scripts/merge_lora.py --adapter output/LoRA_v11/adapter --output_dir output/merged_v11
+            bash scripts/convert_to_gguf.sh --merged output/merged_v11 --out_dir output/gguf --llama_cpp ~/llama.cpp
+            ```
+
+            ## 시스템 요구사항
+
+            - Windows 10/11 (x64)
+            - Python 3.10+
+            - RAM 4GB 이상
+            - AVX2 지원 CPU
+          files: dist/achat.zip
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.name, '-') }}
