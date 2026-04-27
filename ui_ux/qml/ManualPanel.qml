@@ -52,7 +52,7 @@ Item {
                 anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
                 text: "사용 설명서"
                 color: "#8ABCCC"
-                font.pixelSize: 13; font.bold: true
+                font.pixelSize: 15; font.bold: true
                 font.family: manualRoot.fontFamily
             }
 
@@ -61,7 +61,7 @@ Item {
                 width: 24; height: 24; radius: 12
                 color: closeHov.containsMouse ? "#2A3C4A" : "transparent"
                 Behavior on color { ColorAnimation { duration: 100 } }
-                Text { anchors.centerIn: parent; text: "✕"; color: "#607080"; font.pixelSize: 12 }
+                Text { anchors.centerIn: parent; text: "✕"; color: "#607080"; font.pixelSize: 14 }
                 MouseArea { id: closeHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: manualRoot.closeRequested() }
             }
         }
@@ -76,6 +76,10 @@ Item {
             }
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: ScrollBar {
+                contentItem: Rectangle { color: "transparent" }
+                background:  Rectangle { color: "transparent" }
+            }
 
             Column {
                 width: panel.width - 20
@@ -184,7 +188,7 @@ Item {
                     id: badgeLbl
                     anchors.centerIn: parent
                     text: badge
-                    color: "#D0E8F0"; font.pixelSize: 10; font.bold: true
+                    color: "#D0E8F0"; font.pixelSize: 12; font.bold: true
                     font.family: fontFamily
                 }
             }
@@ -195,7 +199,7 @@ Item {
             anchors { top: badgeRow.bottom; topMargin: 6; left: parent.left; right: parent.right }
             text: content
             color: "#8090A0"
-            font.pixelSize: 11
+            font.pixelSize: 13
             font.family: fontFamily
             wrapMode: Text.Wrap
             lineHeight: 1.45

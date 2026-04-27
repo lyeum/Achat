@@ -56,7 +56,7 @@ Item {
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
                 text: "캐릭터 변경"
-                color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                 font.family: charSelectRoot.fontFamily
             }
             Rectangle {
@@ -82,6 +82,10 @@ Item {
             }
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: ScrollBar {
+                contentItem: Rectangle { color: "transparent" }
+                background:  Rectangle { color: "transparent" }
+            }
 
             Column {
                 id: contentCol
@@ -121,7 +125,7 @@ Item {
                                 Text {
                                     anchors.centerIn: parent
                                     text: (modelData.name || modelData.id).slice(0, 1)
-                                    color: "#999"; font.pixelSize: 10
+                                    color: "#999"; font.pixelSize: 12
                                     font.family: charSelectRoot.fontFamily
                                 }
                             }
@@ -129,7 +133,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: modelData.name || modelData.id
-                                color: "#D0D0D0"; font.pixelSize: 13
+                                color: "#D0D0D0"; font.pixelSize: 15
                                 font.family: charSelectRoot.fontFamily
                                 elide: Text.ElideRight
                             }
@@ -178,7 +182,7 @@ Item {
                         }
                         Text {
                             text: "캐릭터 추가..."
-                            color: "#4A90D9"; font.pixelSize: 13
+                            color: "#4A90D9"; font.pixelSize: 15
                             font.family: charSelectRoot.fontFamily
                         }
                     }

@@ -124,7 +124,7 @@ Item {
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
                 text: "캐릭터 커스텀"
-                color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                 font.family: cbRoot.fontFamily
             }
             Rectangle {
@@ -159,14 +159,14 @@ Item {
                     width: 64; height: 28; radius: 6
                     color: cbCancelHov.containsMouse ? "#3C3C3C" : "#2A2A2A"
                     Behavior on color { ColorAnimation { duration: 100 } }
-                    Text { anchors.centerIn: parent; text: "취소"; color: "#AAA"; font.pixelSize: 12; font.family: cbRoot.fontFamily }
+                    Text { anchors.centerIn: parent; text: "취소"; color: "#AAA"; font.pixelSize: 14; font.family: cbRoot.fontFamily }
                     MouseArea { id: cbCancelHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { cbRoot._resetForClose(); cbRoot.closeRequested() } }
                 }
                 Rectangle {
                     width: 64; height: 28; radius: 6
                     color: cbSaveHov.containsMouse ? "#357ABD" : "#4A90D9"
                     Behavior on color { ColorAnimation { duration: 100 } }
-                    Text { anchors.centerIn: parent; text: "저장"; color: "white"; font.pixelSize: 12; font.family: cbRoot.fontFamily }
+                    Text { anchors.centerIn: parent; text: "저장"; color: "white"; font.pixelSize: 14; font.family: cbRoot.fontFamily }
                     MouseArea { id: cbSaveHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cbRoot._showCharPicker = true }
                 }
             }
@@ -197,7 +197,7 @@ Item {
                             anchors.centerIn: parent
                             text: modelData.label
                             color: cbRoot._catIdx === index ? "white" : "#AAA"
-                            font.pixelSize: 11; font.family: cbRoot.fontFamily
+                            font.pixelSize: 13; font.family: cbRoot.fontFamily
                         }
                         MouseArea {
                             id: tabHov; anchors.fill: parent; hoverEnabled: true
@@ -230,7 +230,10 @@ Item {
                 ScrollBar.vertical: ScrollBar {
                     policy: partsFlick.contentHeight > partsFlick.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
                     width: 4
-                }
+                
+    contentItem: Rectangle { color: "transparent" }
+    background: Rectangle { color: "transparent" }
+}
 
                 Grid {
                     id: partsGrid
@@ -250,7 +253,7 @@ Item {
                         Behavior on border.color { ColorAnimation { duration: 70 } }
                         Text {
                             anchors.centerIn: parent; text: "없음"
-                            color: parent.isSel ? "#8AAAF8" : "#555"; font.pixelSize: 10
+                            color: parent.isSel ? "#8AAAF8" : "#555"; font.pixelSize: 12
                             font.family: cbRoot.fontFamily
                         }
                         MouseArea {
@@ -289,7 +292,7 @@ Item {
                             Text {
                                 anchors.centerIn: parent
                                 text: "?"
-                                color: "#555"; font.pixelSize: 10
+                                color: "#555"; font.pixelSize: 12
                                 font.family: cbRoot.fontFamily
                                 visible: !cellImg.visible
                             }
@@ -480,7 +483,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: cbRoot._pickerStep === "char" ? "적용할 캐릭터 선택" : ("감정 선택 — " + cbRoot._pickerCharId)
-                        color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                        color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                         font.family: cbRoot.fontFamily
                     }
                 }
@@ -504,7 +507,7 @@ Item {
                             width: 60; height: 28; radius: 6
                             color: pkBackHov.containsMouse ? "#3C3C3C" : "#2A2A2A"
                             Behavior on color { ColorAnimation { duration: 100 } }
-                            Text { anchors.centerIn: parent; text: "← 뒤로"; color: "#AAA"; font.pixelSize: 12; font.family: cbRoot.fontFamily }
+                            Text { anchors.centerIn: parent; text: "← 뒤로"; color: "#AAA"; font.pixelSize: 14; font.family: cbRoot.fontFamily }
                             MouseArea { id: pkBackHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cbRoot._pickerStep = "char" }
                         }
                         Item { Layout.fillWidth: true }
@@ -512,7 +515,7 @@ Item {
                             width: 60; height: 28; radius: 6
                             color: pkCancelHov.containsMouse ? "#3C3C3C" : "#2A2A2A"
                             Behavior on color { ColorAnimation { duration: 100 } }
-                            Text { anchors.centerIn: parent; text: "취소"; color: "#AAA"; font.pixelSize: 12; font.family: cbRoot.fontFamily }
+                            Text { anchors.centerIn: parent; text: "취소"; color: "#AAA"; font.pixelSize: 14; font.family: cbRoot.fontFamily }
                             MouseArea { id: pkCancelHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: cbRoot._showCharPicker = false }
                         }
                     }
@@ -537,7 +540,7 @@ Item {
                             Text {
                                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 14 }
                                 text: modelData.name || modelData.id
-                                color: "#C8C8C8"; font.pixelSize: 13; font.bold: true
+                                color: "#C8C8C8"; font.pixelSize: 15; font.bold: true
                                 font.family: cbRoot.fontFamily
                             }
                         }
@@ -551,7 +554,7 @@ Item {
                             Text {
                                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 28 }
                                 text: "▸  메인 아이콘 등록"
-                                color: "#8AAAF8"; font.pixelSize: 12; font.family: cbRoot.fontFamily
+                                color: "#8AAAF8"; font.pixelSize: 14; font.family: cbRoot.fontFamily
                             }
                             MouseArea {
                                 id: mainIconHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -571,7 +574,7 @@ Item {
                             Text {
                                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 28 }
                                 text: "▸  감정 표현 지정"
-                                color: "#8AAAF8"; font.pixelSize: 12; font.family: cbRoot.fontFamily
+                                color: "#8AAAF8"; font.pixelSize: 14; font.family: cbRoot.fontFamily
                             }
                             MouseArea {
                                 id: emoPickHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -588,7 +591,11 @@ Item {
                             height: 1; color: "#2A2A2A"
                         }
                     }
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
+                    }
                 }
 
                 // ── [2단계] 감정 선택 (3×3 그리드) ──────────────────────────
@@ -626,7 +633,7 @@ Item {
                                 anchors.centerIn: parent
                                 spacing: 2
                                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.emoji; font.pixelSize: 22 }
-                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: "#AAA"; font.pixelSize: 10; font.family: cbRoot.fontFamily }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: "#AAA"; font.pixelSize: 12; font.family: cbRoot.fontFamily }
                             }
                             MouseArea {
                                 id: emoMoodHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor

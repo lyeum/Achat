@@ -97,7 +97,7 @@ Item {
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
                 text: "캐릭터 상태"
-                color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                 font.family: statusRoot.fontFamily
             }
             Rectangle {
@@ -143,7 +143,7 @@ Item {
                     anchors.centerIn: parent
                     text: statusRoot._tierLabel[statusRoot._data.tier] || statusRoot._data.tier
                     color: statusRoot._tierColor[statusRoot._data.tier] || "#888"
-                    font.pixelSize: 11; font.family: statusRoot.fontFamily
+                    font.pixelSize: 13; font.family: statusRoot.fontFamily
                 }
             }
 
@@ -156,13 +156,13 @@ Item {
                     Layout.fillWidth: true
                     Text {
                         text: "친밀도"
-                        color: "#888"; font.pixelSize: 11
+                        color: "#888"; font.pixelSize: 13
                         font.family: statusRoot.fontFamily
                     }
                     Item { Layout.fillWidth: true }
                     Text {
                         text: statusRoot._data.affection + " / 100"
-                        color: "#AAA"; font.pixelSize: 11
+                        color: "#AAA"; font.pixelSize: 13
                         font.family: statusRoot.fontFamily
                     }
                 }
@@ -185,13 +185,13 @@ Item {
                 Layout.fillWidth: true
                 Text {
                     text: "감정"
-                    color: "#888"; font.pixelSize: 11
+                    color: "#888"; font.pixelSize: 13
                     font.family: statusRoot.fontFamily
                 }
                 Item { Layout.fillWidth: true }
                 Text {
                     text: statusRoot._moodLabel[statusRoot._data.mood] || statusRoot._data.mood
-                    color: "#D0D0D0"; font.pixelSize: 12
+                    color: "#D0D0D0"; font.pixelSize: 14
                     font.family: statusRoot.fontFamily
                 }
             }
@@ -201,13 +201,13 @@ Item {
                 Layout.fillWidth: true
                 Text {
                     text: "대화 횟수"
-                    color: "#888"; font.pixelSize: 11
+                    color: "#888"; font.pixelSize: 13
                     font.family: statusRoot.fontFamily
                 }
                 Item { Layout.fillWidth: true }
                 Text {
                     text: statusRoot._data.turn_count + " 턴"
-                    color: "#D0D0D0"; font.pixelSize: 12
+                    color: "#D0D0D0"; font.pixelSize: 14
                     font.family: statusRoot.fontFamily
                 }
             }

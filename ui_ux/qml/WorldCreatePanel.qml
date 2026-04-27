@@ -50,7 +50,7 @@ Item {
 
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 14 }
-                text: "세계관 생성"; color: "#C0C0E0"; font.pixelSize: 13; font.bold: true
+                text: "세계관 생성"; color: "#C0C0E0"; font.pixelSize: 15; font.bold: true
                 font.family: wcRoot.fontFamily
             }
             Rectangle {
@@ -58,7 +58,7 @@ Item {
                 width: 22; height: 22; radius: 11
                 color: wcCloseHov.containsMouse ? "#C03030" : "#333348"
                 Behavior on color { ColorAnimation { duration: 100 } }
-                Text { anchors.centerIn: parent; text: "X"; color: "#CCC"; font.pixelSize: 10; font.bold: true }
+                Text { anchors.centerIn: parent; text: "X"; color: "#CCC"; font.pixelSize: 12; font.bold: true }
                 MouseArea { id: wcCloseHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: wcRoot.closeRequested() }
             }
         }
@@ -79,16 +79,16 @@ Item {
                 Item { height: 12; width: 1 }
 
                 // ── world_id ────────────────────────────────────────────────
-                Text { text: "세계관 ID"; color: "#7070A8"; font.pixelSize: 10; font.bold: true; font.family: wcRoot.fontFamily }
+                Text { text: "세계관 ID"; color: "#7070A8"; font.pixelSize: 12; font.bold: true; font.family: wcRoot.fontFamily }
                 Item { height: 4; width: 1 }
                 Rectangle {
                     width: parent.width; height: 26; radius: 4; color: "#181828"; border.color: "#2A2A42"; border.width: 1; clip: true
                     TextInput {
                         id: wcWorldId; anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 6
-                        color: "#E0E0E0"; font.pixelSize: 11; font.family: wcRoot.fontFamily
+                        color: "#E0E0E0"; font.pixelSize: 13; font.family: wcRoot.fontFamily
                     }
                     Text { anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
-                        text: "ex) my_world"; color: "#505070"; font.pixelSize: 11; font.family: wcRoot.fontFamily
+                        text: "ex) my_world"; color: "#505070"; font.pixelSize: 13; font.family: wcRoot.fontFamily
                         visible: wcWorldId.text.length === 0 && !wcWorldId.activeFocus }
                 }
 
@@ -148,7 +148,7 @@ Item {
             Text {
                 id: wcErrText
                 anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 14 }
-                color: "#E06060"; font.pixelSize: 10; font.family: wcRoot.fontFamily
+                color: "#E06060"; font.pixelSize: 12; font.family: wcRoot.fontFamily
                 visible: text.length > 0
             }
 
@@ -157,7 +157,7 @@ Item {
                 width: 80; height: 30; radius: 6
                 color: wcSaveHov.containsMouse ? "#4A4ACA" : "#35358A"
                 Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "저장"; color: "#D0D0FF"; font.pixelSize: 12; font.bold: true; font.family: wcRoot.fontFamily }
+                Text { anchors.centerIn: parent; text: "저장"; color: "#D0D0FF"; font.pixelSize: 14; font.bold: true; font.family: wcRoot.fontFamily }
                 MouseArea {
                     id: wcSaveHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: {
@@ -205,7 +205,7 @@ Item {
         // 섹션 헤더
         RowLayout {
             width: parent.width
-            Text { text: secBlock.sectionLabel; color: "#7070A8"; font.pixelSize: 10; font.bold: true; font.family: secBlock.fontFam; Layout.fillWidth: true }
+            Text { text: secBlock.sectionLabel; color: "#7070A8"; font.pixelSize: 12; font.bold: true; font.family: secBlock.fontFam; Layout.fillWidth: true }
             Rectangle {
                 width: addSecLbl.implicitWidth + 14; height: 20; radius: 4
                 color: addSecHov.containsMouse ? "#2A3A5A" : "#1A2A44"
@@ -255,9 +255,9 @@ Item {
         // 제목
         Rectangle {
             width: parent.width; height: 24; radius: 4; color: "#181828"; border.color: "#2A2A42"; border.width: 1; clip: true
-            TextInput { id: titleInput; anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 6; color: "#E0E0E0"; font.pixelSize: 10; font.family: itemForm.fontFam }
+            TextInput { id: titleInput; anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 6; color: "#E0E0E0"; font.pixelSize: 12; font.family: itemForm.fontFam }
             Text { anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
-                text: "제목"; color: "#404060"; font.pixelSize: 10; font.family: itemForm.fontFam
+                text: "제목"; color: "#404060"; font.pixelSize: 12; font.family: itemForm.fontFam
                 visible: titleInput.text.length === 0 && !titleInput.activeFocus }
         }
 
@@ -268,20 +268,24 @@ Item {
                 anchors.fill: parent; anchors.margins: 6
                 contentWidth: width; contentHeight: contentEdit.implicitHeight
                 clip: true; flickableDirection: Flickable.VerticalFlick
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                TextEdit { id: contentEdit; width: parent.width; color: "#D0D0E8"; font.pixelSize: 10; font.family: itemForm.fontFam; wrapMode: TextEdit.Wrap; selectByMouse: true }
+                ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
+                    }
+                TextEdit { id: contentEdit; width: parent.width; color: "#D0D0E8"; font.pixelSize: 12; font.family: itemForm.fontFam; wrapMode: TextEdit.Wrap; selectByMouse: true }
             }
             Text { anchors { left: parent.left; top: parent.top; leftMargin: 8; topMargin: 6 }
-                text: "내용"; color: "#404060"; font.pixelSize: 10; font.family: itemForm.fontFam
+                text: "내용"; color: "#404060"; font.pixelSize: 12; font.family: itemForm.fontFam
                 visible: contentEdit.text.length === 0 && !contentEdit.activeFocus }
         }
 
         // 트리거 키워드
         Rectangle {
             width: parent.width; height: 24; radius: 4; color: "#181828"; border.color: "#2A2A42"; border.width: 1; clip: true
-            TextInput { id: triggerInput; anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 6; color: "#A0A0C0"; font.pixelSize: 10; font.family: itemForm.fontFam }
+            TextInput { id: triggerInput; anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 6; color: "#A0A0C0"; font.pixelSize: 12; font.family: itemForm.fontFam }
             Text { anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
-                text: "트리거 키워드 (선택)  ex) 등대, 전설"; color: "#404060"; font.pixelSize: 10; font.family: itemForm.fontFam
+                text: "트리거 키워드 (선택)  ex) 등대, 전설"; color: "#404060"; font.pixelSize: 12; font.family: itemForm.fontFam
                 visible: triggerInput.text.length === 0 && !triggerInput.activeFocus }
         }
     }

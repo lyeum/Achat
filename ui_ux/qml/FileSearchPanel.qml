@@ -76,7 +76,7 @@ Item {
                 text: searchRoot._error
                     ? "오류: " + searchRoot._error
                     : (searchRoot.query ? "\"" + searchRoot.query + "\" — " + searchRoot._results.length + "건" : "")
-                font.pixelSize: 11
+                font.pixelSize: 13
                 font.family: searchRoot.fontFamily
                 color: searchRoot._error ? "#C05050" : "#5A8090"
                 width: parent.width
@@ -108,8 +108,10 @@ Item {
                 clip: true
 
                 ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                }
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
+                    }
 
                 delegate: Rectangle {
                     width: resultList.width
@@ -132,7 +134,7 @@ Item {
                                 var parts = modelData.path.split("/")
                                 return parts[parts.length - 1]
                             }
-                            font.pixelSize: 12
+                            font.pixelSize: 14
                             font.bold: true
                             font.family: searchRoot.fontFamily
                             color: "#A8D0D8"
@@ -149,7 +151,7 @@ Item {
                         Text {
                             width: parent.width
                             text: modelData.snippet || ""
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             font.family: searchRoot.fontFamily
                             color: "#607080"
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -169,7 +171,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: "열기"
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             font.family: searchRoot.fontFamily
                             color: "#A0D0D8"
                         }
@@ -199,7 +201,7 @@ Item {
                     anchors.centerIn: parent
                     visible: searchRoot._results.length === 0 && !searchRoot._error
                     text: "검색 결과가 없습니다."
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                     font.family: searchRoot.fontFamily
                     color: "#3A5060"
                 }
@@ -220,7 +222,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "열람완료"
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                     font.family: searchRoot.fontFamily
                     color: "#FFFFFF"
                 }

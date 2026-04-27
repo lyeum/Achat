@@ -71,6 +71,10 @@ Window {
     // 세계관 생성 패널
     property bool   worldCreateOpen:       false
 
+    // 세계관 이미지 관리 패널
+    property bool   worldImageOpen:        false
+    property string worldLocationJson:     "[]"
+
     // 메뉴얼 패널
     property bool   manualOpen:            false
 
@@ -244,15 +248,15 @@ Window {
         onActiveChanged: if (active) root.startSystemMove()
     }
 
-    // ── hover 투명도 (HoverHandler — 이벤트 가로채지 않음) ────────────────
-    HoverHandler { id: windowHover }
-    opacity: windowHover.hovered || isBubble ? 1.0 : 0.85
-    Behavior on opacity { NumberAnimation { duration: 300 } }
+    // ── 항상 불투명 ──────────────────────────────────────────────────────
+    opacity: 1.0
 
-    // ── 한글 폰트 (Windows 폰트 경로에서 로드) ───────────────────────────
+    // ── 한글 폰트 (플랫폼별 경로) ─────────────────────────────────────────
     FontLoader {
         id: koreanFont
-        source: "file:///mnt/c/Windows/Fonts/malgun.ttf"
+        source: Qt.platform.os === "windows"
+                ? "file:///C:/Windows/Fonts/malgun.ttf"
+                : "file:///mnt/c/Windows/Fonts/malgun.ttf"
     }
 
     // ── 브리지 이벤트 수신 ───────────────────────────────────────────────
@@ -319,6 +323,52 @@ Window {
                 messageModel.append({ "role": history[i].role, "content": history[i].content })
             }
             Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+
+        function onRagIndexRequired() {
+            ragDialog.open()
+        }
+
+        function onFlushDialogRequested(turns) {
+            flushDialog.totalTurns = turns
+            flushDialog.open()
+        }
+    }
+
+    // ── RAG 재인덱싱 안내 대화상자 ───────────────────────────────────────
+    Dialog {
+        id: ragDialog
+        title: "세계관 데이터 초기화 필요"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label {
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            text: "세계관 RAG 데이터베이스가 비어 있습니다.\n\n'확인'을 누르면 재인덱싱을 진행한 뒤 대화를 시작합니다.\n(처음 실행 시 약 10~30초 소요)"
+        }
+        onAccepted: {
+            bridge.reindexWorldKnowledge()
+        }
+    }
+
+    // ── 5일 경과 대화 정리 대화상자 ─────────────────────────────────────
+    Dialog {
+        id: flushDialog
+        property int totalTurns: 0
+        title: "대화기록 자동 정리"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.Yes | Dialog.No
+        Label {
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            text: "5일이 지나 대화기록이 자동으로 정리됩니다.\n최근 10턴만 남기고 이전 기록을 삭제합니다.\n\n진행하시겠습니까?"
+        }
+        onAccepted: {
+            bridge.confirmFlush()
         }
     }
 
@@ -450,6 +500,10 @@ Window {
             onWorldCreateRequested: {
                 root.worldCreateOpen = true
             }
+            onWorldImageRequested: {
+                root.worldLocationJson = bridge.getWorldLocations()
+                root.worldImageOpen    = true
+            }
             onAdminRequested: {
                 root.adminConvJson  = bridge.getConvParams()
                 root.adminPanelOpen = true
@@ -558,6 +612,31 @@ Window {
             }
         }
 
+        // ── bridge.locationImageImported → 세계관 이미지 패널 갱신 ───────
+        Connections {
+            target: bridge
+            function onLocationImageImported(worldId, location) {
+                if (root.worldImageOpen)
+                    root.worldLocationJson = bridge.getWorldLocations()
+            }
+        }
+
+        // ── bridge.sleepStateChanged → PIP 절전 상태 반영 ────────────────
+        Connections {
+            target: bridge
+            function onSleepStateChanged(sleeping) {
+                if (root.isBubble)
+                    pipView.isSleeping = sleeping
+            }
+        }
+
+        // ── PIP 절전/깨우기 연결 ─────────────────────────────────────────
+        Connections {
+            target: pipView
+            function onSleepRequested() { if (bridge) bridge.enterSleep() }
+            function onWakeRequested()  { if (bridge) bridge.wakeUp()     }
+        }
+
         // ── 관리자 패널 오버레이 ──────────────────────────────────────────
         AdminPanel {
             anchors.fill: parent
@@ -612,6 +691,15 @@ Window {
             z: 25
             fontFamily: koreanFont.font.family
             onCloseRequested: root.worldCreateOpen = false
+        }
+
+        WorldImagePanel {
+            anchors.fill: parent
+            visible: root.worldImageOpen && !root.isBubble
+            z: 25
+            fontFamily:    koreanFont.font.family
+            worldsJson:    root.worldLocationJson
+            onCloseRequested: root.worldImageOpen = false
         }
 
         ManualPanel {
@@ -845,7 +933,7 @@ Window {
                     anchors.top: parent.top
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    height: parent.height - 232  // 캐릭터 아이콘 가시 영역(272-40=232px) 제외
+                    height: parent.height - 341  // 캐릭터 아이콘 가시 영역(381-40=341px) 제외
                     clip: true
                     spacing: 4
                     bottomMargin: 8
@@ -873,11 +961,8 @@ Window {
 
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
-                        contentItem: Rectangle {
-                            implicitWidth: 4
-                            radius: 2
-                            color: root._th.scrollbar
-                        }
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
                     }
                 }
 
@@ -886,7 +971,7 @@ Window {
                 Item {
                     visible: root.currentMode === "function"
                     anchors {
-                        left:   parent.left;  leftMargin:  240  // 캐릭터(218) + 간격(22)
+                        left:   parent.left;  leftMargin:  327  // 캐릭터(305) + 간격(22)
                         right:  parent.right; rightMargin: 8
                         bottom: parent.bottom
                     }
@@ -990,7 +1075,7 @@ Window {
                 CharacterDisplay {
                     id: charDisplay
                     z: 2
-                    width: 218; height: 272
+                    width: 305; height: 381
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: -40   // 40px 아래 입력창 영역으로 오버랩
                     x: 8
