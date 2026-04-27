@@ -145,8 +145,8 @@ class TestSummarizerImportance:
         assert self.score("오늘 기분이 좋다고 말했다.") == 0.6
 
     def test_no_keyword_scores_default(self):
-        """키워드 없는 일반 대화 → 기본값 0.5 반환."""
-        assert self.score("날씨 얘기를 했다.") == 0.5
+        """키워드 없는 일반 대화 → 기본값 0.0 반환 (저장 임계값 0.65 미달)."""
+        assert self.score("날씨 얘기를 했다.") == 0.0
 
     def test_high_keyword_overrides_mid(self):
         """이름 키워드가 있으면 mid 키워드 무관하게 1.0을 반환해야 한다."""
@@ -454,11 +454,11 @@ class TestAffectionSemanticGating:
         assert router._aff_gate == 0.75
 
     def test_low_importance_suppresses_affection(self):
-        """잡담(importance=0.5) 발화는 affection을 변화시키지 않는다."""
+        """잡담(importance=0.0) 발화는 affection을 변화시키지 않는다."""
         from memory.summarizer import score_importance
         # 키워드 없는 잡담
         score = score_importance("오늘 날씨 좋다")
-        assert score == 0.5  # low → 게이팅
+        assert score == 0.0  # low → 게이팅
 
     def test_mid_importance_allows_affection(self):
         """감정 표현(importance>=0.6) 발화는 affection 변화를 허용한다."""
