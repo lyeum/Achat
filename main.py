@@ -7,20 +7,21 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 faulthandler.enable()
 
 # Qt 초기화 전 입력기 / 플랫폼 환경변수 설정 (WSL2 한글 입력)
 # WAYLAND_DISPLAY가 있으면 Qt ibus 플러그인이 portal 모드를 강제 사용하지만,
-# WSL2 환경에서 org.freedesktop.IBus.Portal은 session bus에 미등록 → input context 생성 실패
-# xcb(X11) 플랫폼을 쓰므로 WAYLAND_DISPLAY 언셋해도 화면 출력에 영향 없음
-# 주의: libxcb-cursor0 설치 필요 (sudo apt-get install -y libxcb-cursor0)
-os.environ.pop("WAYLAND_DISPLAY", None)          # portal 모드 방지 (force direct IBUS_ADDRESS)
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-os.environ["QT_IM_MODULE"] = "ibus"
-os.environ["GTK_IM_MODULE"] = "ibus"
-os.environ["XMODIFIERS"] = "@im=ibus"
+if sys.platform != "win32":
+    # WSL2 환경에서 org.freedesktop.IBus.Portal은 session bus에 미등록 → input context 생성 실패
+    # 주의: libxcb-cursor0 설치 필요 (sudo apt-get install -y libxcb-cursor0)
+    os.environ.pop("WAYLAND_DISPLAY", None)
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    os.environ["QT_IM_MODULE"] = "ibus"
+    os.environ["GTK_IM_MODULE"] = "ibus"
+    os.environ["XMODIFIERS"] = "@im=ibus"
 os.environ["IBUS_USE_PORTAL"] = "0"              # setdefault 대신 강제 오버라이드
 
 
@@ -124,7 +125,7 @@ SCENARIO_ID  = "morning_walk"
 ACT_ID       = "act_1"
 
 
-_PID_FILE = Path("/tmp/achat.pid")
+_PID_FILE = Path(tempfile.gettempdir()) / "achat.pid"
 
 
 def _cleanup_previous() -> None:
@@ -133,9 +134,15 @@ def _cleanup_previous() -> None:
         return
     try:
         old_pid = int(_PID_FILE.read_text().strip())
-        os.kill(old_pid, signal.SIGTERM)
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.kernel32.TerminateProcess(
+                ctypes.windll.kernel32.OpenProcess(1, False, old_pid), 1
+            )
+        else:
+            os.kill(old_pid, signal.SIGTERM)
         logger.info(f"[startup] 이전 프로세스 종료 (PID {old_pid})")
-    except (ProcessLookupError, ValueError):
+    except (ProcessLookupError, ValueError, OSError):
         pass  # 이미 종료됨
     finally:
         _PID_FILE.unlink(missing_ok=True)
@@ -219,10 +226,13 @@ def main() -> None:
     from ui_ux.widget import UIEngine
 
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
+    app.setQuitOnLastWindowClosed(True)
 
     # QML 엔진 + 브리지
     ui = UIEngine(agent)
+
+    # 앱 종료 직전 세션 저장
+    app.aboutToQuit.connect(ui.bridge._sync_session_state)
 
     # 트레이 아이콘
     tray = AppTrayIcon(ui_engine=ui, bridge=ui.bridge)
