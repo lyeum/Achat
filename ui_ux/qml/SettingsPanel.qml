@@ -22,12 +22,14 @@ Item {
     signal characterBuildRequested()
     signal characterCreateRequested()
     signal newSessionRequested(bool keepMemory)
+    signal resetSessionRequested()
     signal resetConfirmRequested()
     signal themeChangeRequested(string themeId)
     signal memoryDBRequested()
     signal adminRequested()
     signal sessionSwitchRequested(string sessionId)
     signal worldCreateRequested()
+    signal windowScaleChangeRequested(int scaleIdx)
 
     // ── 섹션 펼침 상태 ────────────────────────────────────────────────────────
     property bool secCharExpanded:   true   // 캐릭터: 기본 펼침
@@ -36,6 +38,13 @@ Item {
     property bool secSessionExpanded: false
     property bool secThemeExpanded:  false
     property bool secDataExpanded:   false  // 데이터 섹션
+    property bool secDisplayExpanded: false // 화면 섹션
+    property bool secPipExpanded:    false  // PIP 모드 섹션
+
+    property int    currentWindowScale: 1   // 0=소형, 1=중형, 2=대형
+    property string pipBubbleDir:  "random" // "random" | "left" | "right"
+
+    signal pipBubbleDirChangeRequested(string dir)
 
     // ── 배경 딤 (클릭으로 닫기) ──────────────────────────────────────────────
     Rectangle {
@@ -71,15 +80,6 @@ Item {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                 height: 12
                 color: parent.color
-            }
-
-            Text {
-                anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
-                text: "설정"
-                color: "#E0E0E0"
-                font.pixelSize: 13
-                font.bold: true
-                font.family: settingsRoot.fontFamily
             }
 
             Rectangle {
@@ -137,6 +137,26 @@ Item {
                         width: parent.width
                         spacing: 0
 
+                        SettingsButton {
+                            width: charCol.width
+                            label: "+ 캐릭터 생성"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.characterCreateRequested()
+                            }
+                        }
+
+                        SettingsButton {
+                            width: charCol.width
+                            label: "+ 캐릭터 초기화"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.resetConfirmRequested()
+                            }
+                        }
+
                         Repeater {
                             model: {
                                 try { return JSON.parse(settingsRoot.characterListJson) }
@@ -182,26 +202,6 @@ Item {
                                         }
                                     }
                                 }
-                            }
-                        }
-
-                        SettingsButton {
-                            width: charCol.width
-                            label: "+ 캐릭터 생성"
-                            fontFamily: settingsRoot.fontFamily
-                            onActivated: {
-                                settingsRoot.closeRequested()
-                                settingsRoot.characterCreateRequested()
-                            }
-                        }
-
-                        SettingsButton {
-                            width: charCol.width
-                            label: "+ 캐릭터 초기화"
-                            fontFamily: settingsRoot.fontFamily
-                            onActivated: {
-                                settingsRoot.closeRequested()
-                                settingsRoot.resetConfirmRequested()
                             }
                         }
                     }
@@ -372,6 +372,11 @@ Item {
                     }
                 }
 
+                // ── 그룹 구분선 1 (캐릭터/세계관/커스터마이징 ↔ 세션관리/DB) ─────────
+                Item { width: 1; height: 4 }
+                Rectangle { width: parent.width; height: 1; color: "#2A2A3A" }
+                Item { width: 1; height: 4 }
+
                 // ══════════════════════════════════════════════════════════════
                 // 세션 관리 섹션
                 // ══════════════════════════════════════════════════════════════
@@ -393,6 +398,37 @@ Item {
                         width: parent.width
                         spacing: 0
 
+                        // ── 새 세션 버튼들 ─────────────────────────────────────
+                        SettingsButton {
+                            width: sessionCol.width
+                            label: "+ 새 대화 (기억 초기화)"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.newSessionRequested(false)
+                            }
+                        }
+
+                        SettingsButton {
+                            width: sessionCol.width
+                            label: "+ 새 대화 (기억 유지)"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.newSessionRequested(true)
+                            }
+                        }
+
+                        SettingsButton {
+                            width: sessionCol.width
+                            label: "현재 대화 초기화"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.resetSessionRequested()
+                            }
+                        }
+
                         // ── 과거 세션 목록 ─────────────────────────────────────
                         Repeater {
                             model: {
@@ -405,7 +441,7 @@ Item {
 
                                 // 날짜 + 세션 ID 요약
                                 Rectangle {
-                                    anchors { left: parent.left; right: sessSwitchBtn.left; rightMargin: 4; top: parent.top; bottom: parent.bottom }
+                                    anchors { left: parent.left; right: sessBtnRow.left; rightMargin: 4; top: parent.top; bottom: parent.bottom }
                                     color: "transparent"
 
                                     Column {
@@ -435,21 +471,40 @@ Item {
                                     }
                                 }
 
-                                // 전환 버튼 (현재 세션은 비활성)
-                                Rectangle {
-                                    id: sessSwitchBtn
+                                // 전환 / 삭제 버튼 (현재 세션은 비활성)
+                                Row {
+                                    id: sessBtnRow
                                     visible: modelData.session_id !== settingsRoot.activeSessionId
-                                    width: visible ? 36 : 0
-                                    height: 24; radius: 4
                                     anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-                                    color: sessHov.containsMouse ? "#2A3A5A" : "#1A2A40"
-                                    Behavior on color { ColorAnimation { duration: 100 } }
-                                    Text { anchors.centerIn: parent; text: "전환"; color: "#6090C0"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
-                                    MouseArea {
-                                        id: sessHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            settingsRoot.sessionSwitchRequested(modelData.session_id)
-                                            settingsRoot.closeRequested()
+                                    spacing: 3
+
+                                    Rectangle {
+                                        width: 34; height: 24; radius: 4
+                                        color: sessHov.containsMouse ? "#2A3A5A" : "#1A2A40"
+                                        Behavior on color { ColorAnimation { duration: 100 } }
+                                        Text { anchors.centerIn: parent; text: "전환"; color: "#6090C0"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                        MouseArea {
+                                            id: sessHov; anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor; preventStealing: true
+                                            onClicked: {
+                                                settingsRoot.sessionSwitchRequested(modelData.session_id)
+                                                settingsRoot.closeRequested()
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 30; height: 24; radius: 4
+                                        color: sessDelHov.containsMouse ? "#802020" : "#3A1818"
+                                        Behavior on color { ColorAnimation { duration: 100 } }
+                                        Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                        MouseArea {
+                                            id: sessDelHov; anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor; preventStealing: true
+                                            onClicked: {
+                                                bridge.deleteSession(modelData.session_id)
+                                                settingsRoot.sessionListJson = bridge.listSessions(bridge.characterId)
+                                            }
                                         }
                                     }
                                 }
@@ -457,29 +512,13 @@ Item {
                                 Rectangle { anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; height: 1; color: "#1A1A2E" }
                             }
                         }
-
-                        // ── 새 세션 버튼들 ─────────────────────────────────────
-                        SettingsButton {
-                            width: sessionCol.width
-                            label: "+ 새 대화 (기억 초기화)"
-                            fontFamily: settingsRoot.fontFamily
-                            onActivated: {
-                                settingsRoot.closeRequested()
-                                settingsRoot.newSessionRequested(false)
-                            }
-                        }
-
-                        SettingsButton {
-                            width: sessionCol.width
-                            label: "+ 새 대화 (기억 유지)"
-                            fontFamily: settingsRoot.fontFamily
-                            onActivated: {
-                                settingsRoot.closeRequested()
-                                settingsRoot.newSessionRequested(true)
-                            }
-                        }
                     }
                 }
+
+                // ── 그룹 구분선 2 (세션관리/DB ↔ 테마/해상도변경) ──────────────────
+                Item { width: 1; height: 4 }
+                Rectangle { width: parent.width; height: 1; color: "#2A2A3A" }
+                Item { width: 1; height: 4 }
 
                 // ══════════════════════════════════════════════════════════════
                 // 테마 섹션
@@ -638,6 +677,178 @@ Item {
                                 settingsRoot.memoryDBRequested()
                             }
                         }
+                    }
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // 해상도 변경 섹션
+                // ══════════════════════════════════════════════════════════════
+                SectionHeader {
+                    label: "해상도 변경"
+                    fontFamily: settingsRoot.fontFamily
+                    expanded: settingsRoot.secDisplayExpanded
+                    onToggled: settingsRoot.secDisplayExpanded = !settingsRoot.secDisplayExpanded
+                }
+
+                Item {
+                    width: parent.width
+                    height: settingsRoot.secDisplayExpanded ? displayCol.implicitHeight + 12 : 0
+                    clip: true
+                    Behavior on height { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+
+                    Column {
+                        id: displayCol
+                        width: parent.width
+                        spacing: 0
+
+                        Item { width: 1; height: 8 }
+
+                        // 해상도 크기 선택 버튼 3개
+                        Item {
+                            width: parent.width
+                            height: 36
+
+                            Row {
+                                anchors { left: parent.left; right: parent.right;
+                                          leftMargin: 8; rightMargin: 8 }
+                                spacing: 6
+
+                                Repeater {
+                                    model: [
+                                        { label: "소형", idx: 0, desc: "432×624" },
+                                        { label: "중형", idx: 1, desc: "520×760" },
+                                        { label: "대형", idx: 2, desc: "620×900" },
+                                    ]
+                                    Rectangle {
+                                        width: (parent.width - 12) / 3
+                                        height: 28; radius: 6
+                                        color: settingsRoot.currentWindowScale === modelData.idx
+                                               ? "#357ABD" : (scaleHov.containsMouse ? "#2E2E2E" : "#242424")
+                                        Behavior on color { ColorAnimation { duration: 100 } }
+                                        border.color: settingsRoot.currentWindowScale === modelData.idx
+                                                      ? "#4A90D9" : "transparent"
+                                        border.width: 1
+
+                                        Column {
+                                            anchors.centerIn: parent
+                                            spacing: 1
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: modelData.label
+                                                color: settingsRoot.currentWindowScale === modelData.idx
+                                                       ? "white" : "#AAA"
+                                                font.pixelSize: 11; font.bold: settingsRoot.currentWindowScale === modelData.idx
+                                                font.family: settingsRoot.fontFamily
+                                            }
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: modelData.desc
+                                                color: settingsRoot.currentWindowScale === modelData.idx
+                                                       ? "#A8D0FF" : "#555"
+                                                font.pixelSize: 9
+                                                font.family: settingsRoot.fontFamily
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: scaleHov
+                                            anchors.fill: parent
+                                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                settingsRoot.currentWindowScale = modelData.idx
+                                                settingsRoot.windowScaleChangeRequested(modelData.idx)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Item { width: 1; height: 4 }
+                    }
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // PIP 모드 섹션
+                // ══════════════════════════════════════════════════════════════
+                SectionHeader {
+                    label: "PIP 모드"
+                    fontFamily: settingsRoot.fontFamily
+                    expanded: settingsRoot.secPipExpanded
+                    onToggled: settingsRoot.secPipExpanded = !settingsRoot.secPipExpanded
+                }
+
+                Item {
+                    width: parent.width
+                    height: settingsRoot.secPipExpanded ? pipCol.implicitHeight + 12 : 0
+                    clip: true
+                    Behavior on height { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+
+                    Column {
+                        id: pipCol
+                        width: parent.width
+                        spacing: 0
+
+                        Item { width: 1; height: 8 }
+
+                        // 말풍선 방향 레이블
+                        Text {
+                            x: 8
+                            text: "말풍선 방향"
+                            color: "#888"; font.pixelSize: 11
+                            font.family: settingsRoot.fontFamily
+                        }
+
+                        Item { width: 1; height: 6 }
+
+                        // 방향 선택 버튼 3개
+                        Item {
+                            width: parent.width
+                            height: 30
+
+                            Row {
+                                anchors { left: parent.left; right: parent.right;
+                                          leftMargin: 8; rightMargin: 8 }
+                                spacing: 6
+
+                                Repeater {
+                                    model: [
+                                        { label: "랜덤", dir: "random" },
+                                        { label: "왼쪽", dir: "left"   },
+                                        { label: "오른쪽", dir: "right" },
+                                    ]
+                                    Rectangle {
+                                        width: (parent.width - 12) / 3
+                                        height: 26; radius: 6
+                                        color: settingsRoot.pipBubbleDir === modelData.dir
+                                               ? "#357ABD" : (pipDirHov.containsMouse ? "#2E2E2E" : "#242424")
+                                        Behavior on color { ColorAnimation { duration: 100 } }
+                                        border.color: settingsRoot.pipBubbleDir === modelData.dir
+                                                      ? "#4A90D9" : "transparent"
+                                        border.width: 1
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.label
+                                            color: settingsRoot.pipBubbleDir === modelData.dir ? "white" : "#AAA"
+                                            font.pixelSize: 11
+                                            font.bold: settingsRoot.pipBubbleDir === modelData.dir
+                                            font.family: settingsRoot.fontFamily
+                                        }
+                                        MouseArea {
+                                            id: pipDirHov
+                                            anchors.fill: parent
+                                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                settingsRoot.pipBubbleDir = modelData.dir
+                                                settingsRoot.pipBubbleDirChangeRequested(modelData.dir)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Item { width: 1; height: 4 }
                     }
                 }
 

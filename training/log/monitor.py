@@ -31,21 +31,24 @@ def _read_state() -> dict | None:
 
 
 def _count_today(category: str) -> tuple[int, int]:
-    """(전체, 미검토) 건수 반환."""
+    """(전체, 미검토) 건수 반환 — 모든 세션 파일을 스캔하고 logged_at 날짜로 필터링."""
     today = datetime.now().strftime("%Y-%m-%d")
-    f = LOG_DIR / category / f"{today}.jsonl"
-    if not f.exists():
+    cat_dir = LOG_DIR / category
+    if not cat_dir.is_dir():
         return 0, 0
     total, unreviewed = 0, 0
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        total += 1
-        try:
-            if not json.loads(line).get("reviewed", True):
-                unreviewed += 1
-        except Exception:
-            pass
+    for jl in cat_dir.glob("*.jsonl"):
+        for line in jl.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                if entry.get("logged_at", "").startswith(today):
+                    total += 1
+                    if not entry.get("reviewed", True):
+                        unreviewed += 1
+            except Exception:
+                pass
     return total, unreviewed
 
 
@@ -53,15 +56,19 @@ def _recent_entries(n: int = 6) -> list[dict]:
     today = datetime.now().strftime("%Y-%m-%d")
     entries = []
     for cat in CATEGORIES:
-        f = LOG_DIR / cat / f"{today}.jsonl"
-        if not f.exists():
+        cat_dir = LOG_DIR / cat
+        if not cat_dir.is_dir():
             continue
-        lines = [ln for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]
-        for line in lines[-2:]:
-            try:
-                entries.append(json.loads(line))
-            except Exception:
-                pass
+        for jl in cat_dir.glob("*.jsonl"):
+            for line in jl.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("logged_at", "").startswith(today):
+                        entries.append(entry)
+                except Exception:
+                    pass
     entries.sort(key=lambda x: x.get("logged_at", ""))
     return entries[-n:]
 

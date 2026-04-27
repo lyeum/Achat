@@ -16,7 +16,8 @@ class WorldRetriever:
         import chromadb
 
         self._cfg = config
-        self.threshold: float = config.get("vdb_threshold", 0.7)
+        # rag_threshold 우선, 없으면 vdb_threshold 폴백
+        self.threshold: float = config.get("rag_threshold", config.get("vdb_threshold", 0.7))
         self.n_results: int   = config.get("vdb_top_k", 2)
         self._ef = None  # lazy: 첫 query/add_document 호출 시 로드
 

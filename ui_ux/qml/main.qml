@@ -19,6 +19,10 @@ Window {
     property string charListJson:      "[]"    // getCharacterList() 캐시
     property string worldListJson:     "[]"    // getWorldList() 캐시
 
+    // 창 해상도 (0=소형 432×624, 1=중형 520×760, 2=대형 620×900)
+    property int    windowScaleIndex:      1
+    readonly property var _winSizes: [ {w:432,h:624}, {w:520,h:760}, {w:620,h:900} ]
+
     // 커스터마이징
     property bool   emotionPanelOpen:      false
     property bool   characterBuildOpen:    false
@@ -28,6 +32,8 @@ Window {
     property string charStatusJson:        "{}"
     property string customPartsJson:       "{}"
     property string allPartsListJson:      "{}"
+    property int    charIconVersion:       0     // 메인 아이콘 교체 시 증가 → 캐시 버스팅
+    property string pipBubbleDir:          "random"  // PIP 말풍선 방향
 
     // 파일 변환 패널
     property bool   fileOptionsOpen:       false
@@ -64,6 +70,9 @@ Window {
 
     // 세계관 생성 패널
     property bool   worldCreateOpen:       false
+
+    // 메뉴얼 패널
+    property bool   manualOpen:            false
 
     // ── 테마 ──────────────────────────────────────────────────────────────────
     property string currentTheme: "ocean"
@@ -133,7 +142,7 @@ Window {
 
     // 창 크기: 풀창은 width 바인딩만 사용. height는 heightAnim이 직접 제어
     // (풀창↔PIP 전환 시 height 바인딩이 애니메이션에 의해 깨지는 문제 방지)
-    width:  isBubble ? (pipBubbleOpen ? 280 : 160) : 432
+    width:  isBubble ? (pipBubbleOpen || pipView.inputOpen ? 240 : 160) : _winSizes[windowScaleIndex].w
 
     flags:  Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     color:  "transparent"
@@ -142,7 +151,9 @@ Window {
 
     // 첫 렌더링 후 우하단 배치 (height는 바인딩 없이 명시적으로 초기화)
     Component.onCompleted: {
-        root.height = 624
+        if (bridge) root.windowScaleIndex = bridge.getWindowScale()
+        if (bridge) root.pipBubbleDir = bridge.getPipBubbleDir()
+        root.height = _winSizes[root.windowScaleIndex].h
         x = Screen.width  - width  - 40
         y = Screen.height - height - 60
         _loadCustomization()
@@ -185,16 +196,18 @@ Window {
 
     onPipBubbleOpenChanged: {
         if (!isBubble) return
-        // PipWindow 내부 상태를 동기화 (외부에서 pipBubbleOpen을 바꾼 경우)
+        // PipWindow 내부 상태 동기화 (외부에서 pipBubbleOpen을 바꾼 경우)
         if (pipView.bubbleOpen !== pipBubbleOpen) pipView.bubbleOpen = pipBubbleOpen
+        // 높이 변경은 pipView.resizeRequested 신호가 처리
+    }
 
-        if (pipBubbleOpen) {
-            pipAnchorY = root.y + root.height   // 아이콘 하단 Y 저장 (열 때 1회)
-            yAnim.to = pipAnchorY - 310; yAnim.start()
-            heightAnim.to = 310;         heightAnim.start()
-        } else {
-            yAnim.to = pipAnchorY - 160; yAnim.start()
-            heightAnim.to = 160;         heightAnim.start()
+    // PipWindow가 요청하는 높이로 애니메이션 (버블/입력창 토글 시)
+    Connections {
+        target: pipView
+        function onResizeRequested(h) {
+            if (!root.isBubble) return
+            yAnim.to = pipAnchorY - h; yAnim.start()
+            heightAnim.to = h;         heightAnim.start()
         }
     }
 
@@ -210,9 +223,10 @@ Window {
         } else {
             // PIP → 풀창: 애니메이션 중단 후 height/y 명시적 복원
             yAnim.stop(); heightAnim.stop()
-            root.height = 624
+            var fh = _winSizes[root.windowScaleIndex].h
+            root.height = fh
             // 아이콘 bottom 기준으로 풀창을 위로 배치, 화면 밖으로 나가지 않게 클램프
-            root.y = Math.min(Screen.height - 624 - 20, Math.max(0, pipAnchorY - 624))
+            root.y = Math.min(Screen.height - fh - 20, Math.max(0, pipAnchorY - fh))
         }
     }
 
@@ -327,10 +341,13 @@ Window {
             id: pipView
             visible: root.isBubble
             anchors.fill: parent
-            fontFamily:   koreanFont.font.family
-            currentMood:  root.currentMood
-            characterId:  bridge ? bridge.characterId : ""
-            inputEnabled: root.inputReady
+            fontFamily:      koreanFont.font.family
+            currentMood:     root.currentMood
+            characterId:     bridge ? bridge.characterId : ""
+            partsJson:       root.customPartsJson
+            iconVersion:     root.charIconVersion
+            inputEnabled:    root.inputReady
+            bubbleDirection: root.pipBubbleDir
 
             onBubbleOpenChanged: root.pipBubbleOpen = bubbleOpen
 
@@ -361,14 +378,18 @@ Window {
             anchors.fill: parent
             visible: root.characterBuildOpen && !root.isBubble
             z: 20
-            fontFamily:       koreanFont.font.family
-            partsJson:        root.customPartsJson
-            allPartsListJson: root.allPartsListJson
+            fontFamily:        koreanFont.font.family
+            partsJson:         root.customPartsJson
+            allPartsListJson:  root.allPartsListJson
+            characterListJson: root.charListJson
             onCloseRequested: root.characterBuildOpen = false
-            onSaved: function(pJson) {
-                bridge.saveCustomization(JSON.stringify({ parts: JSON.parse(pJson) }))
-                root.customPartsJson    = pJson
-                root.characterBuildOpen = false
+            onSavedAsIcon: function(charId, pJson) {
+                bridge.exportCompositeAsPng(charId, "icon", pJson)
+                if (charId === bridge.characterId)
+                    root.customPartsJson = pJson
+            }
+            onSavedAsEmotion: function(charId, mood, pJson) {
+                bridge.exportCompositeAsPng(charId, "emotion_" + mood, pJson)
             }
         }
 
@@ -377,14 +398,25 @@ Window {
             anchors.fill: parent
             visible: root.settingsOpen && !root.isBubble
             z: 10
-            fontFamily:        koreanFont.font.family
-            characterListJson: root.charListJson
-            worldListJson:     root.worldListJson
-            currentTheme:      root.currentTheme
-            currentCharId:     bridge ? bridge.characterId : ""
-            sessionListJson:   root.sessionListJson
-            activeSessionId:   bridge ? bridge.activeSessionId : ""
+            fontFamily:          koreanFont.font.family
+            characterListJson:   root.charListJson
+            worldListJson:       root.worldListJson
+            currentTheme:        root.currentTheme
+            currentCharId:       bridge ? bridge.characterId : ""
+            sessionListJson:     root.sessionListJson
+            activeSessionId:     bridge ? bridge.activeSessionId : ""
+            currentWindowScale:  root.windowScaleIndex
+            pipBubbleDir:        root.pipBubbleDir
             onCloseRequested: root.settingsOpen = false
+            onPipBubbleDirChangeRequested: function(dir) {
+                root.pipBubbleDir = dir
+                if (bridge) bridge.savePipBubbleDir(dir)
+            }
+            onWindowScaleChangeRequested: function(scaleIdx) {
+                root.windowScaleIndex = scaleIdx
+                root.height = root._winSizes[scaleIdx].h
+                if (bridge) bridge.saveWindowScale(scaleIdx)
+            }
             onThemeChangeRequested: function(themeId) {
                 root.currentTheme = themeId
                 if (bridge) bridge.saveTheme(themeId)
@@ -402,6 +434,9 @@ Window {
             }
             onNewSessionRequested: function(keepMemory) {
                 bridge.newSession(keepMemory)
+            }
+            onResetSessionRequested: {
+                bridge.resetSession()
             }
             onResetConfirmRequested: {
                 root.settingsOpen    = false
@@ -421,7 +456,7 @@ Window {
             }
             onSessionSwitchRequested: function(sessionId) {
                 bridge.switchSession(sessionId)
-                root.statusJson = bridge.getCharacterStatus()
+                root.charStatusJson = bridge.getCharacterStatus()
             }
         }
 
@@ -515,6 +550,14 @@ Window {
             }
         }
 
+        // ── bridge.imageImported → 메인 아이콘 캐시 버스팅 ───────────────
+        Connections {
+            target: bridge
+            function onImageImported(slotType, result) {
+                if (slotType === "icon") root.charIconVersion++
+            }
+        }
+
         // ── 관리자 패널 오버레이 ──────────────────────────────────────────
         AdminPanel {
             anchors.fill: parent
@@ -524,6 +567,7 @@ Window {
             convJson:    root.adminConvJson
             affection:   bridge ? bridge.currentAffection : 30
             affLocked:   bridge ? bridge.affectionLocked  : false
+            currentMood: root.currentMood
             onCloseRequested: root.adminPanelOpen = false
             onAffectionSet: function(v) {
                 bridge.setAffection(v)
@@ -538,6 +582,10 @@ Window {
             onConvParamChanged: function(param, tierOrKey, value) {
                 bridge.setConvParam(param, tierOrKey, value)
                 root.adminConvJson = bridge.getConvParams()
+            }
+            onMoodSet: function(mood) {
+                bridge.setMood(mood)
+                root.charStatusJson = bridge.getCharacterStatus()
             }
         }
 
@@ -564,6 +612,14 @@ Window {
             z: 25
             fontFamily: koreanFont.font.family
             onCloseRequested: root.worldCreateOpen = false
+        }
+
+        ManualPanel {
+            anchors.fill: parent
+            visible: root.manualOpen && !root.isBubble
+            z: 26
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.manualOpen = false
         }
 
         // ── 확장 모드 ────────────────────────────────────────────────────
@@ -650,6 +706,23 @@ Window {
                                 root.adminConvJson = bridge.getConvParams()
                                 root.adminPanelOpen = true
                             }
+                        }
+                    }
+
+                    // 메뉴얼 버튼
+                    Rectangle {
+                        width: 20; height: 20; radius: 10
+                        color: manualBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "?"
+                            color: root._th.accent; font.pixelSize: 11; font.bold: true
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: manualBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.manualOpen = true
                         }
                     }
 
@@ -772,7 +845,7 @@ Window {
                     anchors.top: parent.top
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    height: parent.height - 120  // 캐릭터 아이콘 가시 영역(120px) 제외
+                    height: parent.height - 232  // 캐릭터 아이콘 가시 영역(272-40=232px) 제외
                     clip: true
                     spacing: 4
                     bottomMargin: 8
@@ -813,7 +886,7 @@ Window {
                 Item {
                     visible: root.currentMode === "function"
                     anchors {
-                        left:   parent.left;  leftMargin:  140  // 캐릭터(128) + 간격(12)
+                        left:   parent.left;  leftMargin:  240  // 캐릭터(218) + 간격(22)
                         right:  parent.right; rightMargin: 8
                         bottom: parent.bottom
                     }
@@ -863,25 +936,11 @@ Window {
                                     onExited:  if (!parent._active) parent.border.color = root._th.tagBorder
                                     onClicked: {
                                         if (root.currentTag === modelData.key) {
-                                            // 같은 태그 재클릭 → 해제
+                                            // 같은 태그 재클릭 → 태그만 해제 (모드는 유지)
                                             root.currentTag    = ""
-                                            root.currentMode   = "chat"
                                             root.inputTagColor = root._th.accent
                                             root.searchDirectory = ""
                                         } else {
-                                            // #? 도움말 태그: 즉시 도움말 표시 후 해제
-                                            if (modelData.key === "help") {
-                                                var helpKeys = ["file_convert","folder_classify","local_search","prompt_convert"]
-                                                var helpLines = []
-                                                for (var hi = 0; hi < helpKeys.length; hi++) {
-                                                    var ht = bridge.getHelpText(helpKeys[hi])
-                                                    if (ht) helpLines.push(ht)
-                                                }
-                                                messageModel.append({ "role": "system", "content": helpLines.join("\n") })
-                                                Qt.callLater(() => { chatList.positionViewAtEnd() })
-                                                return
-                                            }
-
                                             root.currentTag    = modelData.key
                                             root.currentMode   = "function"
                                             root.inputTagColor = modelData.color
@@ -896,9 +955,8 @@ Window {
                                                     root.fileOptionsPaths = pathsJson
                                                     root.fileOptionsOpen  = true
                                                 } else {
-                                                    // 취소 시 태그 해제
+                                                    // 취소 시 태그만 해제
                                                     root.currentTag    = ""
-                                                    root.currentMode   = "chat"
                                                     root.inputTagColor = root._th.accent
                                                 }
                                             } else if (modelData.key === "folder_classify") {
@@ -908,7 +966,6 @@ Window {
                                                     root.classifyPanelOpen = true
                                                 } else {
                                                     root.currentTag    = ""
-                                                    root.currentMode   = "chat"
                                                     root.inputTagColor = root._th.accent
                                                 }
                                             } else if (modelData.key === "local_search") {
@@ -917,7 +974,6 @@ Window {
                                                     root.searchDirectory = sd
                                                 } else {
                                                     root.currentTag    = ""
-                                                    root.currentMode   = "chat"
                                                     root.inputTagColor = root._th.accent
                                                 }
                                             }
@@ -934,13 +990,14 @@ Window {
                 CharacterDisplay {
                     id: charDisplay
                     z: 2
-                    width: 128; height: 160
+                    width: 218; height: 272
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: -40   // 40px 아래 입력창 영역으로 오버랩
                     x: 8
                     characterId: bridge ? bridge.characterId : ""
                     partsJson:   root.customPartsJson
                     currentMood: root.currentMood
+                    iconVersion: root.charIconVersion
                 }
             }
 
@@ -979,7 +1036,7 @@ Window {
                                 verticalAlignment: Text.AlignVCenter
                                 text: root.currentTag !== ""
                                       ? (root._tagHints[root.currentTag] || "입력하세요...")
-                                      : "메시지 입력..."
+                                      : "텍스트 입력  *행동이나 감정 묘사*"
                                 color: "#555"
                                 font: inputField.font
                                 visible: inputField.text === "" && !inputField.activeFocus
@@ -1035,6 +1092,15 @@ Window {
         if (root.currentMode === "function" && root.currentTag === "") {
             messageModel.append({ "role": "system", "content": "기능 태그를 먼저 선택해주세요." })
             Qt.callLater(() => { chatList.positionViewAtEnd() })
+            return
+        }
+
+        // #? 도움말: 키워드로 해당 기능 설명 표시 (태그·모드 유지 — 다른 태그와 동일)
+        if (root.currentTag === "help") {
+            var helpResult = bridge.getHelpByKeyword(text)
+            messageModel.append({ "role": "system", "content": helpResult })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+            inputField.text = ""
             return
         }
 

@@ -194,6 +194,7 @@ class ChatBridge(QObject):
         session.fired_stories      = list(getattr(state, "fired_stories",      []) or [])
         session.visited_places     = list(getattr(state, "visited_places",     []) or [])
         session.explained_cultures = list(getattr(state, "explained_cultures", []) or [])
+        session.session_context    = getattr(state, "session_context", "") or ""
 
         # 대화 기록 복원
         char_id = self._agent.character.get("id", "")
@@ -248,6 +249,7 @@ class ChatBridge(QObject):
         state.fired_stories      = list(getattr(session, "fired_stories", []) or [])
         state.visited_places     = list(getattr(session, "visited_places", []) or [])
         state.explained_cultures = list(getattr(session, "explained_cultures", []) or [])
+        state.session_context    = getattr(session, "session_context", "") or ""
         self._session_manager.save_state(state)
 
         # 대화 기록 저장 (dialogue_log가 없는 SessionState 호환 포함)
@@ -652,6 +654,127 @@ class ChatBridge(QObject):
                 json.dumps(data["parts"], ensure_ascii=False, indent=2), encoding="utf-8"
             )
 
+    @Slot(str, str)
+    def saveCustomizationFor(self, char_id: str, json_data: str) -> None:
+        """지정한 캐릭터의 커스터마이징 파츠 선택을 저장한다.
+
+        Parameters
+        ----------
+        char_id : str
+            저장 대상 캐릭터 ID.
+        json_data : str
+            ``{"parts": {...}}`` 형태의 JSON.
+            저장 경로: icons/{char_id}/parts.json
+        """
+        import json
+
+        if not char_id:
+            return
+
+        icon_dir = _ICONS_DIR / char_id
+        icon_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            data = json.loads(json_data)
+        except Exception as e:  # noqa: BLE001
+            self.messageAdded.emit("system", f"[커스터마이징 저장 실패] {e}")
+            return
+
+        if "parts" in data:
+            (icon_dir / "parts.json").write_text(
+                json.dumps(data["parts"], ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+    @Slot(str, str, str, result=bool)
+    def exportCompositeAsPng(self, char_id: str, slot_type: str, parts_json: str) -> bool:
+        """파츠 합성 결과를 PNG로 내보낸다.
+
+        Parameters
+        ----------
+        char_id : str
+            대상 캐릭터 ID.
+        slot_type : str
+            "icon"           → icons/{char_id}/{char_id}.png 저장 + parts.json 갱신
+            "emotion_{mood}" → icons/{char_id}/emotion/{mood}.png 저장
+        parts_json : str
+            {"base": "file.png", "hair": "file.png", ...} 형태의 JSON.
+
+        Returns
+        -------
+        bool
+            저장 성공 여부.
+        """
+        import json
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtGui import QImage, QPainter
+
+        try:
+            parts = json.loads(parts_json)
+        except Exception:
+            return False
+
+        render_order = ["base", "eye", "eyebrow", "nose", "mouth", "emotion", "hair", "cloth"]
+
+        # 캔버스 크기: 첫 유효 레이어 기준, 기본 512
+        canvas = 512
+        for pt in render_order:
+            fn = parts.get(pt, "")
+            if fn:
+                probe = QImage(str(_CHAR_PARTS_DIR / pt / fn))
+                if not probe.isNull():
+                    canvas = max(probe.width(), probe.height())
+                    break
+
+        out_img = QImage(canvas, canvas, QImage.Format.Format_ARGB32)
+        out_img.fill(0)
+        painter = QPainter(out_img)
+
+        for pt in render_order:
+            fn = parts.get(pt, "")
+            if not fn:
+                continue
+            path = _CHAR_PARTS_DIR / pt / fn
+            if not path.exists():
+                continue
+            layer = QImage(str(path))
+            if layer.isNull():
+                continue
+            if layer.width() != canvas or layer.height() != canvas:
+                layer = layer.scaled(
+                    canvas, canvas,
+                    _Qt.AspectRatioMode.KeepAspectRatio,
+                    _Qt.TransformationMode.SmoothTransformation,
+                )
+            x = (canvas - layer.width()) // 2
+            y = (canvas - layer.height()) // 2
+            painter.drawImage(x, y, layer)
+
+        painter.end()
+
+        icon_dir = _ICONS_DIR / char_id
+        icon_dir.mkdir(parents=True, exist_ok=True)
+
+        if slot_type == "icon":
+            out_path = icon_dir / f"{char_id}.png"
+            (icon_dir / "parts.json").write_text(
+                json.dumps(parts, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        elif slot_type.startswith("emotion_"):
+            mood = slot_type[len("emotion_"):]
+            if not mood:
+                return False
+            emo_dir = icon_dir / "emotion"
+            emo_dir.mkdir(parents=True, exist_ok=True)
+            out_path = emo_dir / f"{mood}.png"
+        else:
+            return False
+
+        ok = out_img.save(str(out_path), "PNG")
+        if ok:
+            self.imageImported.emit(slot_type, QUrl.fromLocalFile(str(out_path)).toString())
+        return ok
+
     @Slot(result=str)
     def getAllPartsList(self) -> str:
         """파츠 타입별 사용 가능한 파일 목록을 JSON 문자열로 반환한다.
@@ -662,11 +785,11 @@ class ChatBridge(QObject):
             ``{"base": ["base_01.png", ...], "hair": [...], ...}`` 형태의 JSON.
 
         파츠 폴더: characters/{type}/*.png
-        타입: base / hair / eye / mouth / cloth
+        타입: base / hair / eye / eyebrow / nose / mouth / cloth
         """
         import json
 
-        part_types = ["base", "hair", "eye", "eyebrow", "mouth", "cloth"]
+        part_types = ["base", "hair", "eye", "eyebrow", "nose", "mouth", "emotion", "cloth"]
         result: dict[str, list[str]] = {}
         for pt in part_types:
             d = _CHAR_PARTS_DIR / pt
@@ -786,6 +909,10 @@ class ChatBridge(QObject):
                         new_state.scenario_id = scenario_id
                         new_state.act_id      = act_id
                         new_state.location    = self._location
+                        # 세계관 진입 시 트리거 상태 초기화 → 장소/스토리 나레이션 재발동 보장
+                        new_state.visited_places    = []
+                        new_state.fired_stories     = []
+                        new_state.explained_cultures = []
                         self._session_manager.save_state(new_state)
                         self._rebuild_agent(new_state)
                     else:
@@ -922,8 +1049,7 @@ class ChatBridge(QObject):
         self._current_mood = new_mood
         self.moodChanged.emit(new_mood)
 
-        label = "새 세션이 시작되었습니다." if not keep_memory else "새 세션 시작 (기억 유지)."
-        self.messageAdded.emit("system", label)
+        self.chatReset.emit([])
 
     @Slot(str, result=str)
     def listSessions(self, char_id: str) -> str:
@@ -999,8 +1125,63 @@ class ChatBridge(QObject):
 
         self.affectionChanged.emit(new_session.affection)
         self.moodChanged.emit(new_session.mood)
-        sid_short = session_id[:14] if len(session_id) > 14 else session_id
-        self.messageAdded.emit("system", f"세션 '{sid_short}' 로 전환했습니다.")
+        # 채팅창을 새 세션 기록으로 교체
+        history = self.getSessionHistory()
+        self.chatReset.emit(history)
+        return True
+
+    @Slot(str, result=bool)
+    def deleteSession(self, session_id: str) -> bool:
+        """지정한 session_id의 세션을 삭제한다.
+
+        현재 활성 세션은 삭제할 수 없다.
+        """
+        char_id = (self._agent.character or {}).get("id", "")
+        if not char_id or not session_id:
+            return False
+
+        current_session = getattr(self._agent, "session", None)
+        if current_session and getattr(current_session, "session_id", None) == session_id:
+            return False  # 현재 활성 세션 삭제 불가
+
+        try:
+            self._session_manager._evict_session(char_id, session_id)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @Slot(result=bool)
+    def resetSession(self) -> bool:
+        """현재 세션의 대화 기록과 상태를 초기화한다 (세션 ID는 유지).
+
+        - dialogue_log 초기화
+        - session_context / mood / affection / turn_count 초기화
+        - VDB 에피소딕 기억은 보존 (세션 ID 유지이므로)
+        - chatReset 시그널 emit
+        """
+        if getattr(self._agent, "_stub", True):
+            return False
+
+        char_id = self._agent.character.get("id", "")
+        new_state = self._session_manager.reset_current(char_id)
+        if new_state is None:
+            return False
+
+        session = getattr(self._agent, "session", None)
+        if session:
+            session.turn_count       = 0
+            session.mood             = "neutral"
+            session.mood_hold        = 0
+            session.affection        = new_state.affection  # 초기값 유지
+            session.session_context  = ""
+            session.dialogue_log     = []
+            session.fired_stories    = []
+            session.visited_places   = []
+            session.explained_cultures = []
+
+        self.affectionChanged.emit(getattr(session, "affection", 30))
+        self.moodChanged.emit("neutral")
+        self.chatReset.emit([])
         return True
 
     @Slot(result=str)
@@ -1445,6 +1626,20 @@ class ChatBridge(QObject):
         session.affection_lock_value = None
         self.affectionChanged.emit(session.affection)
 
+    @Slot(str)
+    def setMood(self, mood: str) -> None:
+        """관리자 직접 설정. mood를 즉시 변경한다."""
+        valid = {"neutral", "happy", "affectionate", "touched", "curious",
+                 "sad", "embarrassed", "annoyed", "angry"}
+        if mood not in valid:
+            return
+        session = getattr(self._agent, "session", None)
+        if session is None:
+            return
+        session.mood = mood
+        self._current_mood = mood
+        self.moodChanged.emit(mood)
+
     # ── 테마 설정 ─────────────────────────────────────────────────────────────
 
     @Slot(result=str)
@@ -1472,6 +1667,31 @@ class ChatBridge(QObject):
         except Exception:  # noqa: BLE001
             pass
 
+    @Slot(result=int)
+    def getWindowScale(self) -> int:
+        """저장된 창 크기 인덱스를 반환한다. 0=소형, 1=중형(기본), 2=대형."""
+        try:
+            if _PREFS_PATH.exists():
+                val = json.loads(_PREFS_PATH.read_text(encoding="utf-8")).get("window_scale", 1)
+                return int(val) if val in (0, 1, 2) else 1
+        except Exception:  # noqa: BLE001
+            pass
+        return 1
+
+    @Slot(int)
+    def saveWindowScale(self, scale: int) -> None:
+        """창 크기 인덱스를 preferences.json에 저장한다."""
+        try:
+            data: dict = {}
+            if _PREFS_PATH.exists():
+                data = json.loads(_PREFS_PATH.read_text(encoding="utf-8"))
+            data["window_scale"] = scale
+            _PREFS_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     # ── 도움말 / 최초 안내 ──────────────────────────────────────────────────────
 
     _HELP_TEXT: dict[str, str] = {
@@ -1482,10 +1702,71 @@ class ChatBridge(QObject):
         "help":           "#? — 각 기능에 대한 간략한 설명을 표시합니다",
     }
 
+    _HELP_DETAIL: list[dict] = [
+        {
+            "keys": ["프롬프트", "prompt"],
+            "text": (
+                "#프롬프트 변환\n"
+                "사용자가 사용하려는 모델과 입력하고 싶은 내용을 전달하면, 해당 모델에 대한 DB 지식을 활용해 프롬프트 형태로 가공해주는 기능입니다.\n"
+                "예) \"Flux 모델로 카페 창가에 앉아 커피 마시는 여성 이미지 만들어줘\""
+            ),
+        },
+        {
+            "keys": ["폴더", "분류", "정리", "folder"],
+            "text": (
+                "#폴더 정리\n"
+                "사용자가 선택한 폴더 범주 안에서 지정한 기준에 맞춰 폴더를 정리해주는 기능입니다.\n"
+                "예) \"Downloads 폴더를 확장자별로 분류해줘\""
+            ),
+        },
+        {
+            "keys": ["검색", "찾기", "search", "로컬"],
+            "text": (
+                "#로컬 검색\n"
+                "사용자가 지정한 폴더 범위에서 검색하려는 내용에 맞는 문서, 스크립트 파일을 검색해주는 기능입니다.\n"
+                "예) \"Documents 폴더에서 '프로젝트 보고서' 관련 파일 찾아줘\""
+            ),
+        },
+        {
+            "keys": ["파일", "이름", "rename", "확장자", "변경", "변환"],
+            "text": (
+                "#파일 이름 변환\n"
+                "일괄적으로 파일의 이름을 변경할 수 있게 해주는 기능입니다.\n"
+                "예) \"선택한 파일들 이름을 모두 소문자로 바꿔줘\""
+            ),
+        },
+    ]
+
     @Slot(str, result=str)
     def getHelpText(self, key: str) -> str:
         """기능 키에 해당하는 한 줄 도움말을 반환한다."""
         return self._HELP_TEXT.get(key, "")
+
+    @Slot(str, result=str)
+    def getHelpByKeyword(self, keyword: str) -> str:
+        """사용자가 입력한 키워드로 기능 도움말을 검색해 반환한다.
+
+        매칭 없으면 전체 기능 목록을 반환한다.
+        매칭 점수가 가장 높은 항목(키 일치 수 최다)을 반환한다.
+        """
+        kw = keyword.lower().strip()
+        best, best_score = None, 0
+        for item in self._HELP_DETAIL:
+            score = sum(1 for k in item["keys"] if k in kw)
+            if score > best_score:
+                best, best_score = item, score
+        if best_score > 0:
+            return best["text"]
+        # 매칭 없으면 전체 목록
+        lines = [
+            "사용 가능한 기능 목록:\n",
+            "• 프롬프트 변환 — 모델용 프롬프트 자동 가공",
+            "• 폴더 정리 — 기준에 맞춰 파일 자동 분류",
+            "• 로컬 검색 — 폴더 내 문서/스크립트 검색",
+            "• 파일 이름 변환 — 파일명 일괄 변경",
+            "\n궁금한 기능 이름을 입력하면 자세한 설명을 드릴게요.",
+        ]
+        return "\n".join(lines)
 
     @Slot(result=bool)
     def getShownTagIntro(self) -> bool:
@@ -1498,6 +1779,31 @@ class ChatBridge(QObject):
         except Exception:  # noqa: BLE001
             pass
         return False
+
+    @Slot(result=str)
+    def getPipBubbleDir(self) -> str:
+        """PIP 말풍선 방향을 반환한다. 'random' | 'left' | 'right'."""
+        try:
+            if _PREFS_PATH.exists():
+                val = json.loads(_PREFS_PATH.read_text(encoding="utf-8")).get("pip_bubble_dir", "random")
+                return val if val in ("random", "left", "right") else "random"
+        except Exception:  # noqa: BLE001
+            pass
+        return "random"
+
+    @Slot(str)
+    def savePipBubbleDir(self, direction: str) -> None:
+        """PIP 말풍선 방향을 preferences.json에 저장한다."""
+        try:
+            data: dict = {}
+            if _PREFS_PATH.exists():
+                data = json.loads(_PREFS_PATH.read_text(encoding="utf-8"))
+            data["pip_bubble_dir"] = direction
+            _PREFS_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     @Slot(bool)
     def setShownTagIntro(self, value: bool) -> None:
@@ -1681,7 +1987,9 @@ class ChatBridge(QObject):
         content: str,
         trigger_keywords: str = "",
     ) -> str:
-        """세계관 RAG 항목을 ChromaDB에 추가하고 Seaside.md 소스 파일을 업데이트한다.
+        """세계관 RAG 항목을 ChromaDB에 직접 추가하고 소스 .md 파일을 갱신한다.
+
+        재인덱싱은 호출자가 필요 시 수행한다 (배치 추가 후 1회 reindex 패턴).
 
         Returns
         -------
@@ -1708,25 +2016,27 @@ class ChatBridge(QObject):
                 )
 
             chunk_id = _re.sub(r"[^\w가-힣-]", "_", f"{world_id}_{section}_{item_title}")
-            doc_text = f"{item_title}\n{content}"
+            src_filename = self._get_world_md_filename(world_id)
             meta = {
                 "world_id":         world_id,
                 "section":          section,
                 "item_title":       item_title,
                 "trigger_keywords": trigger_keywords,
-                "source":           "Seaside.md",
+                "source":           src_filename,
             }
-            col.upsert(ids=[chunk_id], documents=[doc_text], metadatas=[meta])
+            # content만 저장 (index_world 파서와 일치)
+            col.upsert(ids=[chunk_id], documents=[content], metadatas=[meta])
 
-            # 소스 파일 업데이트
-            self._append_to_world_source(world_id, section, item_title, content, trigger_keywords)
+            # 소스 .md 파일을 ChromaDB 기준으로 재생성 (단일 소스 동기화)
+            self._rebuild_world_md(world_id)
             return chunk_id
         except Exception as e:  # noqa: BLE001
+            logger.warning(f"[bridge] addWorldKnowledge 실패: {e}")
             return ""
 
     @Slot(str, str, result=bool)
     def updateWorldKnowledge(self, chunk_id: str, content: str) -> bool:
-        """세계관 RAG 항목 내용을 수정한다."""
+        """세계관 RAG 항목 내용을 수정하고 소스 파일을 갱신한 뒤 재인덱싱한다."""
         import chromadb
         cfg = getattr(self._agent, "cfg", {})
         chroma_path = cfg.get("chroma_path", "./chroma_dev")
@@ -1737,48 +2047,115 @@ class ChatBridge(QObject):
             if not existing["ids"]:
                 return False
             meta = existing["metadatas"][0]
-            item_title = meta.get("item_title", "")
-            col.update(ids=[chunk_id], documents=[f"{item_title}\n{content}"])
+            world_id = meta.get("world_id", "")
+            # content만 저장 (index_world 파서와 일치)
+            col.update(ids=[chunk_id], documents=[content])
+            # 소스 파일 동기화 후 재인덱싱 (임베딩 갱신)
+            self._rebuild_world_md(world_id)
+            self.reindexWorldKnowledge()
             return True
         except Exception:  # noqa: BLE001
             return False
 
     @Slot(str, result=bool)
     def deleteWorldKnowledge(self, chunk_id: str) -> bool:
-        """세계관 RAG 항목을 ChromaDB에서 삭제하고 소스 파일을 재생성한다."""
+        """세계관 RAG 항목을 ChromaDB에서 삭제하고 소스 파일을 갱신한 뒤 재인덱싱한다."""
         import chromadb
         cfg = getattr(self._agent, "cfg", {})
         chroma_path = cfg.get("chroma_path", "./chroma_dev")
         try:
             client = chromadb.PersistentClient(path=chroma_path)
             col = client.get_collection("world_knowledge")
-            existing = col.get(ids=[chunk_id])
+            existing = col.get(ids=[chunk_id], include=["metadatas"])
             if not existing["ids"]:
                 return False
+            world_id = existing["metadatas"][0].get("world_id", "")
             col.delete(ids=[chunk_id])
-            # 재인덱싱으로 소스 파일 동기화
+            # 삭제 후 소스 파일 재생성 → 재인덱싱 (소스 파일이 먼저 갱신되어야 reindex가 정확함)
+            self._rebuild_world_md(world_id)
             self.reindexWorldKnowledge()
             return True
         except Exception:  # noqa: BLE001
             return False
 
-    def _append_to_world_source(
-        self,
-        world_id: str,
-        section: str,
-        item_title: str,
-        content: str,
-        trigger_keywords: str = "",
-    ) -> None:
-        """세계관 소스 .md 파일에 새 항목을 append한다."""
+    def _get_world_md_filename(self, world_id: str) -> str:
+        """world_id에 해당하는 .md 파일명을 반환한다 (없으면 '{world_id}.md')."""
         cfg = getattr(self._agent, "cfg", {})
         rag_dir = Path(cfg.get("rag_world_dir", "./rag/sources/world"))
-        src_path = rag_dir / "Seaside.md"
-        if not src_path.exists():
-            return
-        with src_path.open("a", encoding="utf-8") as f:
-            kw_line = f"\n트리거 키워드: [{trigger_keywords}]" if trigger_keywords else ""
-            f.write(f"\n### {item_title}{kw_line}\n{content}\n")
+        for md_path in rag_dir.glob("*.md"):
+            try:
+                first = md_path.read_text(encoding="utf-8").split("\n")[0].strip()
+                if first == f"# {world_id}":
+                    return md_path.name
+            except Exception:
+                pass
+        return f"{world_id}.md"
+
+    def _rebuild_world_md(self, world_id: str) -> None:
+        """ChromaDB의 world_id 항목으로 소스 .md 파일을 완전히 재생성한다.
+
+        소스 파일은 ChromaDB의 단순 직렬화이므로 항상 ChromaDB가 기준이 된다.
+        재인덱싱(`reindexWorldKnowledge`)을 별도 호출해야 임베딩이 갱신된다.
+        """
+        import chromadb
+        cfg = getattr(self._agent, "cfg", {})
+        chroma_path = cfg.get("chroma_path", "./chroma_dev")
+        rag_dir = Path(cfg.get("rag_world_dir", "./rag/sources/world"))
+        try:
+            client = chromadb.PersistentClient(path=chroma_path)
+            existing = [c.name for c in client.list_collections()]
+            if "world_knowledge" not in existing:
+                return
+            col = client.get_collection("world_knowledge")
+            results = col.get(
+                where={"world_id": world_id},
+                include=["documents", "metadatas"],
+            )
+            if not results.get("ids"):
+                return
+
+            sections_order = ["culture", "place", "story"]
+            groups: dict[str, list] = {s: [] for s in sections_order}
+            for doc, meta in zip(results["documents"], results["metadatas"]):
+                sec = meta.get("section", "")
+                if sec in groups:
+                    groups[sec].append({
+                        "item_title":       meta.get("item_title", ""),
+                        "trigger_keywords": meta.get("trigger_keywords", ""),
+                        "content":          doc,
+                    })
+
+            lines: list[str] = [f"# {world_id}", ""]
+            for sec in sections_order:
+                items = groups[sec]
+                if not items:
+                    continue
+                lines += [f"## {sec}", ""]
+                for it in items:
+                    lines.append(f"### {it['item_title']}")
+                    kw = it["trigger_keywords"].strip()
+                    if kw:
+                        lines.append(f"트리거 키워드: [{kw}]")
+                    lines.append(it["content"].strip())
+                    lines.append("")
+
+            # 기존 파일 경로 탐색 (없으면 world_id.md 생성)
+            src_path: Path | None = None
+            for md_path in rag_dir.glob("*.md"):
+                try:
+                    first = md_path.read_text(encoding="utf-8").split("\n")[0].strip()
+                    if first == f"# {world_id}":
+                        src_path = md_path
+                        break
+                except Exception:
+                    pass
+            if src_path is None:
+                src_path = rag_dir / f"{world_id}.md"
+
+            src_path.write_text("\n".join(lines), encoding="utf-8")
+            logger.debug(f"[bridge] world md 재생성: {src_path.name} ({len(results['ids'])}개 항목)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[bridge] _rebuild_world_md 실패 ({world_id}): {e}")
 
     # ── 프롬프트 가이드 CRUD ─────────────────────────────────────────────────
 

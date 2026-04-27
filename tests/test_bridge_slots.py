@@ -37,6 +37,7 @@ def stub_agent():
     agent.router = None
     agent.llm = None
     agent.long_term = None
+    agent.cfg = {}
     return agent
 
 

@@ -128,6 +128,8 @@ class LLMClient:
             messages=messages,
             max_tokens=max_tokens,
             stream=stream,
+            repeat_penalty=1.15,
+            repeat_last_n=64,
         )
         if stream:
             full = ""
@@ -152,7 +154,7 @@ class LLMClient:
             gen_kwargs: dict = dict(do_sample=False, repetition_penalty=1.3)
         else:
             # 대화: sampling 유지
-            gen_kwargs = dict(do_sample=True, temperature=0.8, repetition_penalty=1.1)
+            gen_kwargs = dict(do_sample=True, temperature=0.8, repetition_penalty=1.15)
 
         with torch.no_grad():
             out = self._model.generate(

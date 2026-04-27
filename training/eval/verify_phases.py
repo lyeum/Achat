@@ -58,7 +58,7 @@ _AUTO_DIALOGUE = [
     "고마워, 네가 들어줘서.",                           # 6
     "이 마을에 오래 살았어?",                           # 7
     "바다 마을 생활이 어때?",                           # 8
-    "그냥 날씨 얘기 해볼까, 오늘 맑아.",               # 9
+    "요즘 좋아하는 노래 있어?",                         # 9 — 세계관 무관 발화 (RAG 미삽입 기대)
     "오늘 하루 어땠어?",                               # 10 ← 요약 저장 트리거
     "등대지기 전설에 대해 들어봤어?",                   # 11 ← 세계관 RAG 기대
     "내 이름 기억해?",                                 # 12 ← VDB Layer C 기대
@@ -136,6 +136,8 @@ def run_verification(adapter_path: str | None = None) -> dict[str, bool]:
 
     logger.info("ChromaDB 초기화 중...")
     long_term = LongTermMemory(cfg)
+    # 이전 실행 기억 제거 — dedup으로 count 불변 시 요약 저장 FAIL 방지
+    long_term.clear_all(character["id"])
 
     logger.info("RAG 인덱싱 중 (force 재인덱싱)...")
     index_world(str(RAG_SOURCE_DIR), chroma_path=cfg["chroma_path"], force=True)
@@ -190,12 +192,12 @@ def run_verification(adapter_path: str | None = None) -> dict[str, bool]:
     world_turn = results[10]  # "등대지기 전설에 대해 들어봤어?" — turn 11
     checks["[Phase3] 세계관 질문 시 RAG Layer B 삽입"] = world_turn["rag_hits"] > 0
 
-    # 5. 무관한 질문(9번째 턴 — 날씨) RAG 미삽입 확인
-    weather_turn = results[8]  # "그냥 날씨 얘기 해볼까, 오늘 맑아."
-    world_rag_hits   = world_turn["rag_hits"]
-    weather_rag_hits = weather_turn["rag_hits"]
+    # 5. 무관한 질문(9번째 턴 — 노래) RAG 미삽입 확인
+    unrelated_turn = results[8]  # "요즘 좋아하는 노래 있어?" — 세계관 무관
+    world_rag_hits    = world_turn["rag_hits"]
+    unrelated_rag_hits = unrelated_turn["rag_hits"]
     checks["[Phase3] 무관한 질문 시 RAG 삽입 안 됨"] = (
-        weather_rag_hits == 0 or weather_rag_hits < world_rag_hits
+        unrelated_rag_hits == 0 or unrelated_rag_hits < world_rag_hits
     )
 
     # ── 결과 출력 ──────────────────────────────────────────────────────

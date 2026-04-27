@@ -474,7 +474,9 @@ python training/eval/speed_bench.py --backend transformers
 - [x] (실행 검증) LoRA_v9 GPU 학습 완료 (3 epoch, EWC λ=500, 정제 데이터, eval best 1.511 at step 600)
   - memory_test 4/5 (80%) — 이름 기억 1건 잔존 실패. 직업/감정/선호/계획 기억 모두 통과.
   - ai_tell 0건/10개 응답 — 유지
-- [ ] (실행 검증) `memory_test.py` — 5/5 통과 목표 (v10~)
+- [x] (실행 검증) LoRA_v10 GPU 학습 완료 (상세 기록 별도)
+- [x] (실행 검증) LoRA_v11 GPU 학습 완료 — 현재 운용 중 (`output/LoRA_v11/adapter/`)
+- [ ] (실행 검증) `memory_test.py` — 5/5 통과 목표 (v12~)
 - [ ] 기능 모드 JSON 출력 정확도 확인 (data/lora/function 데이터로 별도 평가 필요)
 - [ ] 최종 채택 모델 결정
 

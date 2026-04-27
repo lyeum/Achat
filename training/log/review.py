@@ -94,7 +94,7 @@ def _move_entry(path: Path, line_idx: int, entry: dict, new_cat: str) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _print_entry(idx: int, total: int, path: Path, entry: dict) -> None:
+def _print_entry(idx: int, total: int, path: Path, line_idx: int, entry: dict) -> None:
     cat     = entry.get("category", "?")
     trigger = entry.get("emotion_trigger", "")
     t_range = entry.get("turn_range", "")
@@ -104,7 +104,7 @@ def _print_entry(idx: int, total: int, path: Path, entry: dict) -> None:
 
     print()
     print(_c("header", f"{'─'*54}"))
-    print(_c("header", f"  [{idx+1}/{total}]  {path.parent.name}/{path.name}  줄?"))
+    print(_c("header", f"  [{idx+1}/{total}]  {path.parent.name}/{path.name}  L{line_idx+1}"))
     print(_c("cat",    f"  카테고리 : {cat}  ({trigger})"))
     print(            f"  turn     : {t_range}  |  affection: {aff}  mood: {mood}")
     print(            f"  logged   : {logged}")
@@ -151,7 +151,7 @@ def run(cat_filter: str | None) -> None:
 
     for i, (path, raw_idx, entry) in enumerate(items):
         adj_idx = raw_idx + offset.get(path, 0)
-        _print_entry(i, len(items), path, entry)
+        _print_entry(i, len(items), path, adj_idx, entry)
 
         while True:
             key = input(_c("prompt", "  > ")).strip().lower()

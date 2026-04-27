@@ -25,7 +25,7 @@ def check_story_trigger(
     user_input: str,
     session: "SessionState",
     retriever: "WorldRetriever",
-    threshold: float = 0.55,
+    threshold: float = 0.9,
 ) -> tuple[str, str] | None:
     """user_input이 story 트리거 키워드와 유사하면 해당 스토리 내용을 반환한다.
 
@@ -51,23 +51,32 @@ def check_story_trigger(
     if not candidates:
         return None
 
-    # 키워드 기반 간단 매칭 (임베딩 없이 텍스트 포함 여부로 근사)
+    # 키워드 기반 매칭 (구문 일치 + 토큰 부분 일치)
     user_lower = user_input.lower()
     best: dict | None = None
-    best_score = 0
+    best_score = 0.0
 
     for item in candidates:
         kw_str = item["metadata"].get("trigger_keywords", "")
         if not kw_str:
             continue
         keywords = [k.strip() for k in kw_str.split(",") if k.strip()]
-        # 매칭 개수 / 총 키워드 수 = 근사 유사도
-        matched = sum(1 for kw in keywords if kw in user_lower or kw in user_input)
+        matched = 0.0
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower in user_lower:
+                # 구문 전체 일치 (높은 가중치)
+                matched += 1.0
+            else:
+                # 토큰 수준 부분 일치: 다음절 키워드의 개별 단어 매칭
+                tokens = [t for t in kw_lower.split() if len(t) >= 2]
+                if any(t in user_lower for t in tokens):
+                    matched += 0.5
         if matched == 0:
             continue
-        score = matched / max(len(keywords), 1)
-        if score > best_score:
-            best_score = score
+        # score = 절대 매칭 합계 (비율 불사용 — 키워드 수에 무관하게 1건 일치면 충분)
+        if matched > best_score:
+            best_score = matched
             best = item
 
     if best is None or best_score < threshold:
@@ -107,11 +116,18 @@ def check_place_trigger(
     except Exception:  # noqa: BLE001
         return None
 
-    # 장소 이름(item_title 또는 document 안에 place 이름)으로 매칭
+    # 장소 이름(item_title / trigger_keywords / document)으로 매칭
+    # W_sea.yaml은 영문 키(beach, breakwater …)를 사용하므로 trigger_keywords도 검사
     matched = None
+    needle = new_place.lower()
     for item in items:
         title = item["metadata"].get("item_title", "")
-        if new_place.lower() in title.lower() or new_place.lower() in item["document"].lower():
+        keywords = item["metadata"].get("trigger_keywords", "")
+        if (
+            needle in title.lower()
+            or needle in keywords.lower()
+            or needle in item["document"].lower()
+        ):
             matched = item
             break
 
@@ -134,7 +150,7 @@ def check_culture_trigger(
     user_input: str,
     session: "SessionState",
     retriever: "WorldRetriever",
-    threshold: float = 0.2,
+    threshold: float = 0.9,
 ) -> tuple[str, str] | None:
     """사용자 발화가 culture 항목의 trigger_keywords와 일치하면 해당 항목을 반환한다.
 
@@ -160,7 +176,7 @@ def check_culture_trigger(
     if not candidates:
         return None
 
-    # 항목별 trigger_keywords 키워드 매칭 (story 트리거와 동일 방식)
+    # 항목별 trigger_keywords 키워드 매칭 (구문 일치 + 토큰 부분 일치)
     user_lower = user_input.lower()
     best: dict | None = None
     best_score = 0.0
@@ -170,12 +186,20 @@ def check_culture_trigger(
         if not kw_str:
             continue
         keywords = [k.strip() for k in kw_str.split(",") if k.strip()]
-        matched = sum(1 for kw in keywords if kw in user_lower or kw in user_input)
+        matched = 0.0
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower in user_lower:
+                matched += 1.0
+            else:
+                tokens = [t for t in kw_lower.split() if len(t) >= 2]
+                if any(t in user_lower for t in tokens):
+                    matched += 0.5
         if matched == 0:
             continue
-        score = matched / max(len(keywords), 1)
-        if score > best_score:
-            best_score = score
+        # score = 절대 매칭 합계 (키워드 수에 무관)
+        if matched > best_score:
+            best_score = matched
             best = item
 
     if best is None or best_score < threshold:

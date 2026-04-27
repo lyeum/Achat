@@ -3,7 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
 // 관리자 패널 — 타이틀바 "관리" 버튼으로 열림
-// 친밀도 직접 변경 / 대화 파라미터(response_length · openness · directness) 즉시 조정
+// 친밀도 / 감정 상태 / 직접성 즉시 조정
 Item {
     id: adminRoot
 
@@ -11,12 +11,14 @@ Item {
     property string convJson:     "{}"   // bridge.getConvParams() 결과
     property int    affection:    30     // bridge.currentAffection
     property bool   affLocked:    false  // bridge.affectionLocked
+    property string currentMood:  "neutral"  // bridge.currentMood
 
     signal closeRequested()
     signal affectionSet(int value)
     signal affectionLocked(int value)
     signal affectionUnlocked()
     signal convParamChanged(string param, string tierOrKey, real value)
+    signal moodSet(string mood)
 
     // ── 파싱 ─────────────────────────────────────────────────────────────────
     property var _conv: {
@@ -24,8 +26,17 @@ Item {
         catch(e) { return {} }
     }
 
-    readonly property var _tiers: ["stranger", "acquaintance", "familiar", "friendly", "close", "intimate"]
-    readonly property var _tierKo: ["낯선", "지인", "아는", "친한", "친밀", "신뢰"]
+    readonly property var _moods: [
+        { key: "neutral",      label: "기본"   },
+        { key: "happy",        label: "행복"   },
+        { key: "affectionate", label: "애정"   },
+        { key: "touched",      label: "감동"   },
+        { key: "curious",      label: "호기심" },
+        { key: "sad",          label: "슬픔"   },
+        { key: "embarrassed",  label: "당황"   },
+        { key: "annoyed",      label: "짜증"   },
+        { key: "angry",        label: "분노"   },
+    ]
 
     // ── 배경 딤 ──────────────────────────────────────────────────────────────
     Rectangle {
@@ -46,10 +57,10 @@ Item {
     Rectangle {
         id: modal
         width: 290
-        // 드래그로 이동 가능 — 초기 위치는 상단 중앙
         x: (adminRoot.width - width) / 2
         y: 48
-        height: Math.min(scrollView.contentHeight + headerRect.height + 8, adminRoot.height - 56)
+        height: Math.min(headerRect.height + contentCol.implicitHeight + footerRect.height + 8,
+                         adminRoot.height - 56)
         color: "#141420"
         radius: 12
         border.color: "#2A2A42"
@@ -85,7 +96,6 @@ Item {
                     onClicked: adminRoot.closeRequested()
                 }
             }
-            // 헤더 드래그 → 모달 이동
             MouseArea {
                 anchors { left: parent.left; right: parent.right; leftMargin: 0; rightMargin: 32 }
                 height: parent.height
@@ -96,10 +106,8 @@ Item {
                     if (pressed) {
                         var dx = mouse.x - _start.x
                         var dy = mouse.y - _start.y
-                        var nx = modal.x + dx
-                        var ny = modal.y + dy
-                        modal.x = Math.max(0, Math.min(nx, adminRoot.width  - modal.width))
-                        modal.y = Math.max(0, Math.min(ny, adminRoot.height - modal.height))
+                        modal.x = Math.max(0, Math.min(modal.x + dx, adminRoot.width  - modal.width))
+                        modal.y = Math.max(0, Math.min(modal.y + dy, adminRoot.height - modal.height))
                     }
                 }
             }
@@ -109,13 +117,13 @@ Item {
         ScrollView {
             id: scrollView
             anchors {
-                top: headerRect.bottom; bottom: parent.bottom
+                top: headerRect.bottom; bottom: footerRect.top
                 left: parent.left; right: parent.right
-                topMargin: 4; bottomMargin: 4
+                topMargin: 4; bottomMargin: 0
             }
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            contentWidth: availableWidth  // Flickable 수평 스크롤 비활성화 → 슬라이더 이벤트 보호
+            contentWidth: availableWidth
 
             Column {
                 id: contentCol
@@ -123,22 +131,18 @@ Item {
                 x: 10
                 spacing: 0
 
-                // ── 친밀도 섹션 ───────────────────────────────────────────────
+                // ── 친밀도 ────────────────────────────────────────────────────
                 Item { width: 1; height: 10 }
 
                 Text {
                     text: "친밀도"
                     color: "#7070A8"; font.pixelSize: 10; font.bold: true
-                    font.family: adminRoot.fontFamily
-                    leftPadding: 2
+                    font.family: adminRoot.fontFamily; leftPadding: 2
                 }
-
                 Item { width: 1; height: 6 }
 
-                // 현재값 + 슬라이더
                 RowLayout {
-                    width: parent.width
-                    spacing: 8
+                    width: parent.width; spacing: 8
 
                     Item {
                         id: affTrack
@@ -165,12 +169,14 @@ Item {
                         }
                         MouseArea {
                             id: affMa
-                            anchors.fill: parent
-                            preventStealing: true
+                            anchors.fill: parent; preventStealing: true
                             enabled: !adminRoot.affLocked
                             cursorShape: Qt.SizeHorCursor
                             onPressed:  affTrack._dragging = true
-                            onReleased: affTrack._dragging = false
+                            onReleased: {
+                                affTrack._dragging = false
+                                adminRoot.affectionSet(Math.round(affTrack.trackVal * 100))
+                            }
                             onPositionChanged: {
                                 if (pressed) {
                                     var v = Math.round(mouseX / affTrack.width * 100)
@@ -184,110 +190,45 @@ Item {
                         text: Math.round(affTrack.trackVal * 100)
                         color: "#A0A0D0"; font.pixelSize: 12; font.bold: true
                         font.family: adminRoot.fontFamily
-                        Layout.preferredWidth: 28
-                        horizontalAlignment: Text.AlignRight
+                        Layout.preferredWidth: 28; horizontalAlignment: Text.AlignRight
                     }
                 }
 
-                Item { width: 1; height: 4 }
+                Item { width: 1; height: 12 }
+                Rectangle { width: parent.width; height: 1; color: "#222238" }
+                Item { width: 1; height: 10 }
 
-                // 적용 / 잠금 버튼
-                RowLayout {
+                // ── 감정 상태 ─────────────────────────────────────────────────
+                Text {
+                    text: "감정 상태"
+                    color: "#7070A8"; font.pixelSize: 10; font.bold: true
+                    font.family: adminRoot.fontFamily; leftPadding: 2
+                }
+                Item { width: 1; height: 6 }
+
+                Grid {
                     width: parent.width
-                    spacing: 6
+                    columns: 3
+                    spacing: 4
 
-                    Rectangle {
-                        Layout.fillWidth: true; height: 24; radius: 5
-                        color: applyHov.containsMouse ? "#3A3A80" : "#252548"
-                        Behavior on color { ColorAnimation { duration: 100 } }
-                        Text { anchors.centerIn: parent; text: "적용"; color: "#A0A0E0"; font.pixelSize: 11; font.family: adminRoot.fontFamily }
-                        MouseArea {
-                            id: applyHov; anchors.fill: parent; hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: adminRoot.affectionSet(Math.round(affTrack.trackVal * 100))
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true; height: 24; radius: 5
-                        color: lockHov.containsMouse ? (adminRoot.affLocked ? "#6A2020" : "#206A30") : (adminRoot.affLocked ? "#3A1818" : "#183A20")
-                        Behavior on color { ColorAnimation { duration: 100 } }
-                        Text {
-                            anchors.centerIn: parent
-                            text: adminRoot.affLocked ? "[ 잠금 해제 ]" : "[ 잠금 ]"
-                            color: adminRoot.affLocked ? "#E06060" : "#60C080"
-                            font.pixelSize: 11; font.family: adminRoot.fontFamily
-                        }
-                        MouseArea {
-                            id: lockHov; anchors.fill: parent; hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (adminRoot.affLocked) adminRoot.affectionUnlocked()
-                                else adminRoot.affectionLocked(Math.round(affTrack.trackVal * 100))
-                            }
-                        }
-                    }
-                }
-
-                Item { width: 1; height: 14 }
-                Rectangle { width: parent.width; height: 1; color: "#222238" }
-                Item { width: 1; height: 12 }
-
-                // ── 응답 길이 섹션 ────────────────────────────────────────────
-                Text {
-                    text: "응답 길이  (response_length)"
-                    color: "#7070A8"; font.pixelSize: 10; font.bold: true
-                    font.family: adminRoot.fontFamily
-                }
-                Item { width: 1; height: 6 }
-
-                Repeater {
-                    model: adminRoot._tiers
-
-                    Item {
-                        id: rlRow
-                        width: contentCol.width; height: 24
-                        property int tierIndex: index
-                        property real curVal: {
-                            var rl = adminRoot._conv.response_length
-                            if (!rl) return 0.4
-                            return (typeof rl === "object") ? (rl[modelData] !== undefined ? rl[modelData] : 0.4) : rl
-                        }
-                        function selIdx() { return curVal <= 0.35 ? 0 : curVal <= 0.65 ? 1 : 2 }
-                        readonly property var _rlVals: [0.2, 0.5, 0.8]
-
-                        RowLayout {
-                            anchors.fill: parent; spacing: 4
-
+                    Repeater {
+                        model: adminRoot._moods
+                        Rectangle {
+                            width: (contentCol.width - 8) / 3
+                            height: 24; radius: 5
+                            property bool sel: adminRoot.currentMood === modelData.key
+                            color: sel ? "#2A3A6A" : (moodHov.containsMouse ? "#1E2A50" : "#1C1C30")
+                            border.color: sel ? "#4A6ACA" : "#2A2A42"; border.width: 1
+                            Behavior on color { ColorAnimation { duration: 80 } }
                             Text {
-                                text: adminRoot._tierKo[rlRow.tierIndex]
-                                color: "#606080"; font.pixelSize: 10
-                                font.family: adminRoot.fontFamily
-                                Layout.preferredWidth: 36
+                                anchors.centerIn: parent; text: modelData.label
+                                color: parent.sel ? "#8AAAF8" : "#505078"
+                                font.pixelSize: 10; font.family: adminRoot.fontFamily
                             }
-
-                            Repeater {
-                                model: ["짧게", "보통", "길게"]
-                                Rectangle {
-                                    Layout.fillWidth: true; height: 22; radius: 4
-                                    property bool sel: rlRow.selIdx() === index
-                                    color: sel ? "#2A4A7A" : "#1C1C30"
-                                    border.color: sel ? "#4A8ACA" : "#2A2A42"; border.width: 1
-                                    Behavior on color { ColorAnimation { duration: 80 } }
-                                    Text {
-                                        anchors.centerIn: parent; text: modelData
-                                        color: parent.sel ? "#8AC0F8" : "#505078"
-                                        font.pixelSize: 10; font.family: adminRoot.fontFamily
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            var tier = adminRoot._tiers[rlRow.tierIndex]
-                                            var val  = rlRow._rlVals[index]
-                                            adminRoot.convParamChanged("response_length", tier, val)
-                                        }
-                                    }
-                                }
+                            MouseArea {
+                                id: moodHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: adminRoot.moodSet(modelData.key)
                             }
                         }
                     }
@@ -295,91 +236,24 @@ Item {
 
                 Item { width: 1; height: 12 }
                 Rectangle { width: parent.width; height: 1; color: "#222238" }
-                Item { width: 1; height: 12 }
+                Item { width: 1; height: 10 }
 
-                // ── 감정 개방도 섹션 ──────────────────────────────────────────
+                // ── 직접성 ────────────────────────────────────────────────────
                 Text {
-                    text: "감정 개방도  (openness)"
+                    text: "직접성"
                     color: "#7070A8"; font.pixelSize: 10; font.bold: true
-                    font.family: adminRoot.fontFamily
-                }
-                Item { width: 1; height: 6 }
-
-                Repeater {
-                    model: adminRoot._tiers
-
-                    Item {
-                        id: opRow
-                        width: contentCol.width; height: 24
-                        property int tierIndex: index
-                        property real curVal: {
-                            var op = adminRoot._conv.openness
-                            if (!op) return 0.3
-                            return (typeof op === "object") ? (op[modelData] !== undefined ? op[modelData] : 0.3) : op
-                        }
-                        function selIdx() { return curVal <= 0.25 ? 0 : curVal <= 0.6 ? 1 : 2 }
-                        readonly property var _opVals: [0.1, 0.4, 0.8]
-
-                        RowLayout {
-                            anchors.fill: parent; spacing: 4
-
-                            Text {
-                                text: adminRoot._tierKo[opRow.tierIndex]
-                                color: "#606080"; font.pixelSize: 10
-                                font.family: adminRoot.fontFamily
-                                Layout.preferredWidth: 36
-                            }
-
-                            Repeater {
-                                model: ["낮음", "보통", "높음"]
-                                Rectangle {
-                                    Layout.fillWidth: true; height: 22; radius: 4
-                                    property bool sel: opRow.selIdx() === index
-                                    color: sel ? "#4A2A5A" : "#1C1C30"
-                                    border.color: sel ? "#9A4ACA" : "#2A2A42"; border.width: 1
-                                    Behavior on color { ColorAnimation { duration: 80 } }
-                                    Text {
-                                        anchors.centerIn: parent; text: modelData
-                                        color: parent.sel ? "#C08AF8" : "#505078"
-                                        font.pixelSize: 10; font.family: adminRoot.fontFamily
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            var tier = adminRoot._tiers[opRow.tierIndex]
-                                            var val  = opRow._opVals[index]
-                                            adminRoot.convParamChanged("openness", tier, val)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Item { width: 1; height: 12 }
-                Rectangle { width: parent.width; height: 1; color: "#222238" }
-                Item { width: 1; height: 12 }
-
-                // ── 직접성 섹션 ───────────────────────────────────────────────
-                Text {
-                    text: "직접성  (directness)"
-                    color: "#7070A8"; font.pixelSize: 10; font.bold: true
-                    font.family: adminRoot.fontFamily
+                    font.family: adminRoot.fontFamily; leftPadding: 2
                 }
                 Item { width: 1; height: 6 }
 
                 RowLayout {
-                    width: contentCol.width
-                    spacing: 6
+                    width: parent.width; spacing: 6
 
                     Text {
                         text: "돌려말함"
-                        color: "#606080"; font.pixelSize: 10
-                        font.family: adminRoot.fontFamily
+                        color: "#606080"; font.pixelSize: 10; font.family: adminRoot.fontFamily
                     }
 
-                    // 커스텀 슬라이더 (preventStealing: true → ScrollView 이벤트 탈취 방지)
                     Item {
                         id: drTrack
                         Layout.fillWidth: true; height: 20
@@ -406,8 +280,7 @@ Item {
                         }
                         MouseArea {
                             id: drMa
-                            anchors.fill: parent
-                            preventStealing: true
+                            anchors.fill: parent; preventStealing: true
                             cursorShape: Qt.SizeHorCursor
                             onPressed: drTrack._dragging = true
                             onReleased: {
@@ -425,20 +298,70 @@ Item {
 
                     Text {
                         text: "직접적"
-                        color: "#606080"; font.pixelSize: 10
-                        font.family: adminRoot.fontFamily
+                        color: "#606080"; font.pixelSize: 10; font.family: adminRoot.fontFamily
                     }
 
                     Text {
                         text: drTrack.drVal.toFixed(2)
-                        color: "#9A8060"; font.pixelSize: 10
-                        font.family: adminRoot.fontFamily
-                        Layout.preferredWidth: 30
-                        horizontalAlignment: Text.AlignRight
+                        color: "#9A8060"; font.pixelSize: 10; font.family: adminRoot.fontFamily
+                        Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight
                     }
                 }
 
-                Item { width: 1; height: 14 }
+                Item { width: 1; height: 10 }
+            }
+        }
+
+        // ── 하단 고정 버튼 행 ─────────────────────────────────────────────────
+        Rectangle {
+            id: footerRect
+            anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+            height: 44
+            color: "#1C1C30"
+            radius: 12
+            Rectangle {
+                anchors { top: parent.top; left: parent.left; right: parent.right }
+                height: 12; color: parent.color
+            }
+
+            RowLayout {
+                anchors { fill: parent; leftMargin: 10; rightMargin: 10; topMargin: 8; bottomMargin: 8 }
+                spacing: 6
+
+                Rectangle {
+                    Layout.fillWidth: true; height: 26; radius: 5
+                    color: lockHov.containsMouse ? (adminRoot.affLocked ? "#6A2020" : "#206A30") : (adminRoot.affLocked ? "#3A1818" : "#183A20")
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: adminRoot.affLocked ? "잠금 해제" : "친밀도 잠금"
+                        color: adminRoot.affLocked ? "#E06060" : "#60C080"
+                        font.pixelSize: 11; font.family: adminRoot.fontFamily
+                    }
+                    MouseArea {
+                        id: lockHov; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (adminRoot.affLocked) adminRoot.affectionUnlocked()
+                            else adminRoot.affectionLocked(Math.round(affTrack.trackVal * 100))
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 60; height: 26; radius: 5
+                    color: closeBtnHov.containsMouse ? "#2A2A50" : "#1E1E3A"
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Text {
+                        anchors.centerIn: parent; text: "닫기"
+                        color: "#8080B0"; font.pixelSize: 11; font.family: adminRoot.fontFamily
+                    }
+                    MouseArea {
+                        id: closeBtnHov; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: adminRoot.closeRequested()
+                    }
+                }
             }
         }
     }

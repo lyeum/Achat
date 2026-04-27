@@ -16,6 +16,7 @@ train_monitor.py — 학습 과적합 모니터링 및 조기 종료
 종료 조건:
   - eval_loss 가 N_RISE 번 연속으로 상승
   - train/eval loss gap 이 GAP_THRESHOLD 초과
+  - eval_loss 가 PLATEAU_N 번 연속 best 미개선 (plateau)
   중 하나라도 충족되면 SIGTERM → 프로세스 정상 종료 대기
 """
 
@@ -41,11 +42,16 @@ N_RISE = 3
 # train / eval loss gap 이 이 값을 초과하면 즉시 종료
 GAP_THRESHOLD = 1.2
 
+# eval_loss 가 연속으로 몇 번 best 를 갱신하지 못하면 plateau 로 판단해 종료
+# save_steps=50 기준: PLATEAU_N=5 → best 이후 250 스텝에서 종료
+PLATEAU_N = 5
+
 # trainer_state.json 폴링 간격 (초)
 POLL_INTERVAL = 15
 
 # 프로세스 종료 대기 최대 시간 (초)
-TERMINATE_TIMEOUT = 60
+# SIGTERM 후 lora_train이 어댑터를 저장하는 데 최대 ~90s 소요될 수 있으므로 여유 있게 설정
+TERMINATE_TIMEOUT = 120
 
 # ─── 유틸 ─────────────────────────────────────────────────────────────────────
 
@@ -107,6 +113,7 @@ def check_overfitting(
     train_losses: list[float],
     n_rise: int = N_RISE,
     gap_threshold: float = GAP_THRESHOLD,
+    plateau_n: int = PLATEAU_N,
 ) -> tuple[bool, str]:
     """
     과적합 여부 판단.
@@ -133,6 +140,18 @@ def check_overfitting(
                 f"train/eval 손실 격차 초과 "
                 f"(train={latest_train:.4f}, eval={latest_eval:.4f}, "
                 f"gap={gap:.4f} > {gap_threshold})"
+            )
+
+    # 조건 3: plateau — plateau_n 번 연속 best 미갱신
+    # train 이 eval 보다 훨씬 낮아졌는데 eval 이 더 이상 개선되지 않는 상태를 감지.
+    # (조건 1·2가 걸리지 않는 "완만한 포화" 패턴 대응)
+    if len(eval_losses) >= plateau_n + 1:
+        best = min(eval_losses)
+        recent = eval_losses[-plateau_n:]
+        if all(loss > best for loss in recent):
+            return True, (
+                f"eval_loss plateau 감지 — {plateau_n}회 연속 best 미갱신 "
+                f"(best={best:.4f}, 최근={recent[-1]:.4f})"
             )
 
     return False, ""
@@ -184,6 +203,17 @@ def main() -> None:
         default=POLL_INTERVAL,
         help=f"폴링 간격 초 (기본: {POLL_INTERVAL})",
     )
+    parser.add_argument(
+        "--plateau_n",
+        type=int,
+        default=PLATEAU_N,
+        help=f"eval_loss best 미갱신 연속 허용 횟수 (기본: {PLATEAU_N}, 0=비활성)",
+    )
+    parser.add_argument(
+        "--skip_eval",
+        action="store_true",
+        help="학습 완료 후 자동 평가 건너뜀",
+    )
 
     # '--' 이후의 인자를 학습 명령어로 취급
     argv = sys.argv[1:]
@@ -208,7 +238,9 @@ def main() -> None:
 
     n_rise = args.n_rise
     gap_threshold = args.gap
+    plateau_n = args.plateau_n
     poll_interval = args.poll
+    skip_eval = args.skip_eval
 
     output_dir = parse_output_dir(cmd_parts)
 
@@ -216,13 +248,18 @@ def main() -> None:
     logger.info("학습 모니터 시작")
     logger.info(f"  명령어   : {original_cmd}")
     logger.info(f"  출력 경로: {output_dir}")
-    logger.info(f"  종료 조건: eval_loss {n_rise}회 연속 상승  OR  gap > {gap_threshold}")
+    logger.info(f"  종료 조건: eval_loss {n_rise}회 연속 상승  OR  gap > {gap_threshold}  OR  plateau {plateau_n}회")
     logger.info(f"  폴링 간격: {poll_interval}s")
     logger.info("=" * 60)
 
     # ── 학습 프로세스 시작 ────────────────────────────────────────────────────
+    # train_monitor가 eval을 담당하므로 lora_train 내부 eval 실행을 억제한다.
+    launch_cmd = list(cmd_parts)
+    if "--skip_eval" not in launch_cmd:
+        launch_cmd.append("--skip_eval")
+
     proc = subprocess.Popen(
-        cmd_parts,
+        launch_cmd,
         cwd=str(ROOT),
         env={**os.environ},
     )
@@ -259,6 +296,7 @@ def main() -> None:
                 train_losses,
                 n_rise=n_rise,
                 gap_threshold=gap_threshold,
+                plateau_n=plateau_n,
             )
 
             if should_stop:
@@ -295,6 +333,39 @@ def main() -> None:
     # ── VRAM 정리 ─────────────────────────────────────────────────────────────
     logger.info("VRAM 정리 중...")
     release_vram()
+
+    # ── 자동 평가 ─────────────────────────────────────────────────────────────
+    # lora_train이 단독 실행(train_monitor 없이)되면 lora_train 내부에서 eval을 실행.
+    # train_monitor를 통해 실행된 경우: 조기 종료/정상 완료 모두 여기서 eval을 담당.
+    # lora_train에 --skip_eval을 전달해 중복 실행을 막는다.
+    if not skip_eval:
+        adapter_path = output_dir / "adapter"
+        if adapter_path.exists():
+            eval_dir = ROOT / "training" / "eval"
+            eval_scripts = [
+                (eval_dir / "ai_tell_checker.py", ["--adapter", str(adapter_path)]),
+                (eval_dir / "memory_test.py",     ["--adapter", str(adapter_path)]),
+                (eval_dir / "scenario_eval.py",   ["--adapter", str(adapter_path)]),
+            ]
+            logger.info("")
+            logger.info("[ 자동 평가 시작 ]")
+            for script, extra_args in eval_scripts:
+                if not script.exists():
+                    logger.warning(f"평가 스크립트 없음 — 건너뜀: {script.name}")
+                    continue
+                logger.info(f"  실행 중: {script.name}")
+                result = subprocess.run(
+                    [sys.executable, str(script)] + extra_args,
+                    cwd=str(ROOT),
+                )
+                if result.returncode != 0:
+                    logger.warning(f"  종료 코드 {result.returncode}: {script.name}")
+                else:
+                    logger.info(f"  완료: {script.name}")
+        else:
+            logger.warning(f"어댑터 없음 — 자동 평가 건너뜀: {adapter_path}")
+    else:
+        logger.info("--skip_eval: 자동 평가 건너뜀")
 
     # ── 최종 요약 ─────────────────────────────────────────────────────────────
     logger.info("")

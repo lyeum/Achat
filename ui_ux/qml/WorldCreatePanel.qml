@@ -182,6 +182,7 @@ Item {
                         }
 
                         if (saved === 0) { wcErrText.text = "저장할 항목이 없습니다. 제목과 내용을 입력하세요."; return }
+                        bridge.reindexWorldKnowledge()
                         wcErrText.text = ""
                         wcRoot.closeRequested()
                     }

@@ -28,6 +28,11 @@ class ConversationSession:
     mood_hold: int = 0                       # 현재 mood 유지 남은 턴 수 (0 = neutral로 복귀 가능)
     dialogue_log: list[dict] = field(default_factory=list)
 
+    # 중기 컨텍스트 — SHORT_TERM_N 초과 턴이 evict 될 때 누적되는 요약 텍스트
+    session_context: str = ""
+    # 세션 내 캐릭터 약속 목록 (~할게, ~기억할게 등 감지)
+    character_notes: list[str] = field(default_factory=list)
+
     # SessionManager가 부여하는 영속 세션 ID (None = 비관리 세션, 하위 호환 유지)
     session_id: Optional[str] = None
 

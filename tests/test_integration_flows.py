@@ -44,6 +44,7 @@ def bridge():
     agent.world = {"world_id": "seaside_world"}
     agent.router = None
     agent.llm = None
+    agent.cfg = {}
     from ui_ux.bridge import ChatBridge
     return ChatBridge(agent)
 

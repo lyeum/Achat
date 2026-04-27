@@ -157,8 +157,8 @@ def index_world(
                 # 특수문자 제거 (ChromaDB id 제약)
                 chunk_id = re.sub(r"[^\w가-힣-]", "_", chunk_id)
                 ids.append(chunk_id)
-                # 검색 대상 텍스트: 내용만 저장 (제목은 item_title 메타데이터 활용)
-                docs.append(item["content"])
+                # 제목 + 내용 저장 — 제목만으로 검색("등대지기 전설에 대해...")해도 매칭되도록
+                docs.append(f"{item['item_title']}\n{item['content']}")
                 metas.append({
                     "world_id":         item["world_id"],
                     "section":          item["section"],

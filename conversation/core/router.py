@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+import threading
+
 from loguru import logger
 
 from agent import state as state_mod
@@ -10,6 +13,11 @@ from conversation.narration_monitor import NarrationMonitor
 from memory import short_term, summarizer
 from memory.long_term import LongTermMemory
 from rag.retrieve import WorldRetriever
+
+# 약속 패턴: 어시스턴트 응답에서 감지해 character_notes에 추가
+_PROMISE_RE = re.compile(
+    r"[가-힣a-zA-Z0-9]+(?:할게|해줄게|기억할게|기억해줄게|약속할게|해볼게|알아볼게|확인해볼게)"
+)
 
 
 class ConversationRouter:
@@ -103,21 +111,23 @@ class ConversationRouter:
 
         # 5. LLM 생성
         if narration_data:
-            item_title, _doc = narration_data
+            _item_title, _doc = narration_data
             hint = (
-                f"[세계관 정보] '{item_title}'에 관한 내용이 있습니다. "
-                f"대화에서 '{item_title}'을 자연스럽게 한 문장으로 언급하며 답하세요. "
-                f"상세 설명은 나레이션으로 별도 표시되므로 직접 설명하지 않아도 됩니다."
+                f"[세계관 배경 — 나레이션으로 별도 표시됨]\n{_doc}\n"
+                "위 내용을 참고해 캐릭터 말투로 1~2문장 이내로 자연스럽게 언급한다. "
+                "직접 인용하거나 항목을 목록으로 나열하지 않는다. "
+                "위 정보 범위 밖의 내용을 만들어내지 않는다."
             )
             messages.insert(len(messages) - 1, {"role": "system", "content": hint})
         response = self.llm.generate(messages, stream=stream)
 
         # 6. mood / affection 업데이트 (사용자 입력 기준)
         # trigger_events 우선 적용 — 발동 시 일반 mood/aff 업데이트 건너뜀
+        aff_before = self.session.affection
         triggered = state_mod.check_trigger_events(self.session, user_input, self.character)
         if not triggered:
             new_mood = state_mod.update_mood(self.session, user_input, self.character)
-            # semantic 중요도 게이팅: 잡담(0.5) 발화는 affection 변화 억제
+            # semantic 중요도 게이팅: 잡담(0.0) 발화는 affection 변화 억제
             importance = summarizer.score_importance(user_input)
             if importance >= self._aff_gate:
                 state_mod.update_affection(self.session, new_mood, self.character)
@@ -125,6 +135,14 @@ class ConversationRouter:
                 logger.debug(
                     f"[router] aff 게이팅 — importance={importance:.2f} < {self._aff_gate} → 변화 억제"
                 )
+        aff_delta = abs(self.session.affection - aff_before)
+
+        # 6-6: 어시스턴트 응답에서 약속 패턴 감지 → character_notes 추가
+        for promise in _PROMISE_RE.findall(response):
+            note = promise.strip()
+            if note and note not in self.session.character_notes:
+                self.session.character_notes.append(note)
+                logger.debug(f"[router] 약속 감지: {note!r}")
 
         # 7. 세션 기록
         self.session.add_turn(user_input, response)
@@ -133,16 +151,21 @@ class ConversationRouter:
             f"mood={self.session.mood} aff={self.session.affection}"
         )
 
-        # 8. 요약 트리거 — chat 모드에서만, 중요 발화 포함 여부 사전 검사
-        if (
-            mode == "chat"
-            and summarizer.check_trigger(self.session, self._trigger_n)
-            and summarizer.should_summarize(self.session.dialogue_log, self._trigger_n)
-        ):
-            self._run_summarizer()
-        elif mode == "chat" and summarizer.check_trigger(self.session, self._trigger_n):
-            logger.debug("[router] 요약 조건 미충족 (중요 키워드 없음) — 생략")
+        # Q: SHORT_TERM_N 초과 시 eviction → session_context 누적
+        short_term.evict_to_context(self.session)
 
+        # 8. 요약 트리거 — chat 모드에서만
+        #    Y: aff_delta >= 5 또는 trigger_event 발동 시 즉시 flush
+        if mode == "chat":
+            immediate = triggered or aff_delta >= 5
+            if immediate and summarizer.should_summarize(self.session.dialogue_log, self._trigger_n):
+                logger.debug(f"[router] 즉시 flush (triggered={triggered}, aff_delta={aff_delta})")
+                threading.Thread(target=self._run_summarizer, daemon=True).start()
+            elif (
+                summarizer.check_trigger(self.session, self._trigger_n)
+                and summarizer.should_summarize(self.session.dialogue_log, self._trigger_n)
+            ):
+                threading.Thread(target=self._run_summarizer, daemon=True).start()
         # 9. play_log 기록은 호출자(bridge.py or conversation/main.py)가 담당
         #    training/log/conversation_logger.py ConversationLogger.on_turn() 참조
 
@@ -240,7 +263,8 @@ class ConversationRouter:
                 return story
             culture = check_culture_trigger(user_input, self.session, self.rag)
             return culture
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[router] world_trigger 예외 (world_id={getattr(self.session, 'world_id', None)}): {e}")
             return None
 
     def _run_summarizer(self) -> None:

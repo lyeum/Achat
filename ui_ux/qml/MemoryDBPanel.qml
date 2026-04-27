@@ -718,6 +718,7 @@ Item {
                                     var cnt   = wAddContent.text.trim()
                                     if (!title || !cnt) return
                                     bridge.addWorldKnowledge(wAddWorldId.text.trim(), wAddSection.text.trim(), title, cnt, wAddTrigger.text.trim())
+                                    bridge.reindexWorldKnowledge()
                                     dbRoot.worldDbJson = bridge.getWorldKnowledgeDB()
                                     wAddTitle.text = ""; wAddContent.text = ""; wAddTrigger.text = ""
                                     dbRoot._worldAddFormOpen = false
