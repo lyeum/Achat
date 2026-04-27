@@ -9,9 +9,8 @@ from conversation.core.session import ConversationSession
 from memory.long_term import LongTermMemory
 
 # 중요도 판정 키워드 (M_schema.json importance_rules 기준)
-# 이름 키워드는 1.0으로 강제 — VDB 검색 실패(4/5) 원인이 낮은 importance로 인한 누락
-# 구조화 포맷에서 이름 항목이 채워진 경우 ("이름: -" 는 제외)
-_NAME_KEYWORDS = ["이름: ", "이름은", "이름이", "이름"]
+# 이름 키워드는 1.0으로 강제 — prose 요약에서 자연어로 언급된 경우만 해당
+_NAME_KEYWORDS = ["이름은", "이름이", "이름을", "이름"]
 _HIGH_KEYWORDS = [
     "부탁", "약속", "싫어", "좋아해", "화해", "미안", "고마워",
     "기억해줘", "잊지마", "중요해", "말해줄게", "비밀", "처음으로",
@@ -25,13 +24,10 @@ _MID_KEYWORDS  = [
 
 
 _SUMMARIZE_SYSTEM = """\
-아래 대화에서 사용자에 대한 정보를 추출해. 반드시 아래 형식으로만 답해.
-정보가 없는 항목은 '-'로 표시해. 형식 외 다른 말은 쓰지 마.
-
-이름: [대화에서 언급된 경우만, 없으면 -]
-사건: [중요한 사건, 감정적 순간, 약속 — 없으면 -]
-감정: [사용자가 드러낸 감정 상태 — 없으면 -]
-기타: [취미, 선호도, 반복 화제 — 없으면 -]"""
+아래 대화에서 '사용자'에 대해 기억할 중요한 정보를 자연스러운 문장으로 요약해.
+추출 대상: 사용자의 이름·직업, 사용자가 겪은 사건, 사용자가 드러낸 감정·취향·선호도, 캐릭터가 사용자에게 한 약속.
+주의: 사용자가 캐릭터를 배려해서 물어본 정보나 캐릭터 본인의 특성·취향은 포함하지 마.
+실제로 드러난 것만 포함하고, 없는 정보는 꾸며내지 마. 2~4문장으로 작성해."""
 
 
 def check_trigger(session: ConversationSession, trigger_n: int) -> bool:
@@ -53,15 +49,9 @@ def should_summarize(dialogue_log: list[dict], trigger_n: int) -> bool:
 def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
     """최근 trigger_n턴 대화를 LLM으로 요약한다.
 
-    Parameters
-    ----------
-    dialogue_log : 전체 대화 로그 (user/assistant 교대)
-    llm          : LLMClient 인스턴스
-    trigger_n    : 요약 대상 턴 수
-
     Returns
     -------
-    구조화된 요약 문자열 (이름 / 사건 / 감정 / 기타 형식)
+    자연어 산문 요약 문자열 (VDB에 그대로 저장)
     """
     recent = dialogue_log[-(trigger_n * 2):]
     history_text = "\n".join(
@@ -72,8 +62,8 @@ def summarize(dialogue_log: list[dict], llm, trigger_n: int) -> str:
         {"role": "system", "content": _SUMMARIZE_SYSTEM},
         {"role": "user",   "content": history_text},
     ]
-    summary = llm.generate(messages, stream=False, max_tokens=150)
-    logger.debug(f"[summarizer] 요약 생성: {summary[:60]}...")
+    summary = llm.generate(messages, stream=False, max_tokens=250)
+    logger.debug(f"[summarizer] 요약 생성: {summary[:80]}...")
     return summary
 
 
@@ -85,15 +75,15 @@ def score_importance(summary: str) -> float:
     - mid (0.5~0.8): 감정적 사건, 취향/선호도, 반복 화제
     - low (<0.5)   : 일상 잡담 → 저장 안 함
     """
-    score = 0.5  # 기본값 — 키워드 없어도 일단 저장
+    score = 0.0  # 기본값 — 키워드 매칭 시에만 점수 부여
     for kw in _NAME_KEYWORDS:
-        if kw in summary and "이름: -" not in summary:
+        if kw in summary:
             return 1.0  # 이름 정보는 최고 중요도 — 누락 방지
     for kw in _HIGH_KEYWORDS:
         if kw in summary:
             score = max(score, 0.85)
             break
-    if score == 0.5:  # high 키워드 미매칭 시에만 mid 키워드 검사
+    if score == 0.0:  # high 키워드 미매칭 시에만 mid 키워드 검사
         for kw in _MID_KEYWORDS:
             if kw in summary:
                 score = max(score, 0.6)
@@ -115,7 +105,7 @@ def write_to_vdb(
     -------
     저장 여부 (True: 저장됨, False: 중요도 미달로 생략)
     """
-    if score < 0.5:
+    if score < 0.65:
         logger.debug(f"[summarizer] 중요도 미달({score:.2f}), 저장 생략")
         return False
 

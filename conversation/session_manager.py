@@ -36,6 +36,8 @@ class SessionState:
     fired_stories: list = field(default_factory=list)        # 발동된 story item_title 목록
     visited_places: list = field(default_factory=list)       # 방문한 장소 목록
     explained_cultures: list = field(default_factory=list)   # 세션 내 설명된 culture 항목
+    # 중기 컨텍스트 스냅샷 (Z)
+    session_context: str = ""
 
 
 @dataclass
@@ -270,6 +272,49 @@ class SessionManager:
                 return state
         # 없으면 신규 생성 (world_id 포함)
         return self._create_session(char_id, world_id=world_id)
+
+    def reset_current(self, char_id: str) -> SessionState | None:
+        """현재 활성 세션의 대화 기록과 session_context를 초기화한다.
+
+        VDB 에피소딕 기억 삭제는 호출자가 담당한다.
+        초기화된 SessionState를 반환하고, 활성 세션이 없으면 None을 반환한다.
+        """
+        state = self.get_active()
+        if state is None or state.char_id != char_id:
+            return None
+        state.turn_count       = 0
+        state.mood             = "neutral"
+        state.mood_hold        = 0
+        state.session_context  = ""
+        state.fired_stories    = []
+        state.visited_places   = []
+        state.explained_cultures = []
+        self._save_state(state)
+        # 대화 기록도 초기화
+        self._dialogue_path(char_id, state.session_id).write_text(
+            "[]", encoding="utf-8"
+        )
+        return state
+
+    def delete_session(self, char_id: str, session_id: str) -> bool:
+        """특정 세션을 완전히 삭제한다. 삭제 성공 시 True.
+
+        삭제 후 다른 세션이 있으면 가장 최근 것을 활성화한다.
+        없으면 active.json을 제거한다.
+        """
+        self._evict_session(char_id, session_id)
+        # 현재 활성이 삭제된 세션이면 다음 세션으로 전환
+        ptr = self._load_active()
+        if ptr and ptr.get("session_id") == session_id:
+            index = self._load_index(char_id)
+            if index:
+                latest = max(index, key=lambda x: x.get("last_active", ""))
+                self._save_active(char_id, latest["session_id"])
+            else:
+                p = self._active_path()
+                if p.exists():
+                    p.unlink()
+        return True
 
     # ── 내부 ──────────────────────────────────────────────────────────────────
 

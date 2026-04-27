@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
+
+_VDB_QUOTA = 200          # 캐릭터당 최대 저장 항목 수
+_TTL_DAYS_LOW = 30        # score 0.65~0.90 항목의 TTL (일)
+_DEDUP_COSINE = 0.85      # cosine 유사도 이상이면 기존 항목 업데이트
 
 
 class LongTermMemory:
@@ -79,12 +83,31 @@ class LongTermMemory:
             "timestamp":    meta.get("timestamp", datetime.now(timezone.utc).isoformat()),
         }
 
+        # W: cosine 유사도 0.85 이상 기존 항목이 있으면 해당 ID로 upsert (중복 방지)
+        store_id = entry["id"]
+        if col.count() > 0:
+            try:
+                dup = col.query(
+                    query_texts=[entry["content"]],
+                    n_results=1,
+                    include=["distances"],
+                )
+                dist = dup["distances"][0][0] if dup["distances"] and dup["distances"][0] else 1.0
+                if dist <= (1.0 - _DEDUP_COSINE):
+                    store_id = dup["ids"][0][0]
+                    logger.debug(f"[long_term] 중복 감지(cosine={1-dist:.2f}) → 기존 항목 업데이트: {store_id}")
+            except Exception:  # noqa: BLE001
+                pass
+
         col.upsert(
-            ids=[entry["id"]],
+            ids=[store_id],
             documents=[entry["content"]],
             metadatas=[flat_meta],
         )
-        logger.debug(f"[long_term] 저장: {entry['id']} (importance={flat_meta['importance']:.2f})")
+        logger.debug(f"[long_term] 저장: {store_id} (importance={flat_meta['importance']:.2f})")
+
+        # X: quota 초과 시 importance 낮은 항목 삭제
+        self._enforce_quota(col, character_id)
 
     def query(self, text: str, character_id: str) -> list[str]:
         """시맨틱 검색. 유사도 threshold 미만이면 빈 리스트를 반환한다.
@@ -96,10 +119,15 @@ class LongTermMemory:
         if col.count() == 0:
             return []
 
+        self.prune_expired(character_id)
+        remaining = col.count()
+        if remaining == 0:
+            return []
+
         results = col.query(
             query_texts=[text],
-            n_results=min(self.top_k, col.count()),
-            where={"importance": {"$gte": 0.5}},
+            n_results=min(self.top_k, remaining),
+            where={"importance": {"$gte": 0.65}},
             include=["documents", "distances"],
         )
 
@@ -116,6 +144,53 @@ class LongTermMemory:
             f"{len(filtered)}개 threshold 통과"
         )
         return filtered
+
+    def prune_expired(self, character_id: str) -> int:
+        """V: score < 0.90이고 30일 초과된 항목을 삭제한다.
+
+        score >= 0.90은 영구 보관.
+        Returns 삭제된 항목 수.
+        """
+        col = self._collection(character_id)
+        if col.count() == 0:
+            return 0
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=_TTL_DAYS_LOW)).isoformat()
+        try:
+            result = col.get(include=["metadatas"])
+        except Exception:  # noqa: BLE001
+            return 0
+
+        to_delete = []
+        for doc_id, meta in zip(result["ids"], result["metadatas"]):
+            imp = float(meta.get("importance", 0.0))
+            ts  = meta.get("timestamp", "")
+            if imp < 0.90 and ts and ts < cutoff:
+                to_delete.append(doc_id)
+
+        if to_delete:
+            col.delete(ids=to_delete)
+            logger.info(f"[long_term] TTL 만료 삭제: {character_id} {len(to_delete)}개")
+        return len(to_delete)
+
+    def _enforce_quota(self, col, character_id: str) -> None:
+        """X: 캐릭터별 VDB 항목이 _VDB_QUOTA를 초과하면 importance 낮은 것부터 삭제."""
+        count = col.count()
+        if count <= _VDB_QUOTA:
+            return
+        try:
+            result = col.get(include=["metadatas"])
+        except Exception:  # noqa: BLE001
+            return
+
+        pairs = sorted(
+            zip(result["ids"], result["metadatas"]),
+            key=lambda x: float(x[1].get("importance", 0.0)),
+        )
+        excess = count - _VDB_QUOTA
+        to_delete = [doc_id for doc_id, _ in pairs[:excess]]
+        col.delete(ids=to_delete)
+        logger.info(f"[long_term] quota 초과 삭제: {character_id} {len(to_delete)}개")
 
     def clear_session(self, character_id: str, session_id: str) -> int:
         """해당 session_id의 에피소딕 기억을 모두 삭제한다.
