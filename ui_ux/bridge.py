@@ -194,6 +194,7 @@ class ChatBridge(QObject):
         session.fired_stories      = list(getattr(state, "fired_stories",      []) or [])
         session.visited_places     = list(getattr(state, "visited_places",     []) or [])
         session.explained_cultures = list(getattr(state, "explained_cultures", []) or [])
+        session.session_context    = getattr(state, "session_context", "") or ""
 
         # 대화 기록 복원
         char_id = self._agent.character.get("id", "")
@@ -248,6 +249,7 @@ class ChatBridge(QObject):
         state.fired_stories      = list(getattr(session, "fired_stories", []) or [])
         state.visited_places     = list(getattr(session, "visited_places", []) or [])
         state.explained_cultures = list(getattr(session, "explained_cultures", []) or [])
+        state.session_context    = getattr(session, "session_context", "") or ""
         self._session_manager.save_state(state)
 
         # 대화 기록 저장 (dialogue_log가 없는 SessionState 호환 포함)
@@ -1147,6 +1149,40 @@ class ChatBridge(QObject):
             return True
         except Exception:  # noqa: BLE001
             return False
+
+    @Slot(result=bool)
+    def resetSession(self) -> bool:
+        """현재 세션의 대화 기록과 상태를 초기화한다 (세션 ID는 유지).
+
+        - dialogue_log 초기화
+        - session_context / mood / affection / turn_count 초기화
+        - VDB 에피소딕 기억은 보존 (세션 ID 유지이므로)
+        - chatReset 시그널 emit
+        """
+        if getattr(self._agent, "_stub", True):
+            return False
+
+        char_id = self._agent.character.get("id", "")
+        new_state = self._session_manager.reset_current(char_id)
+        if new_state is None:
+            return False
+
+        session = getattr(self._agent, "session", None)
+        if session:
+            session.turn_count       = 0
+            session.mood             = "neutral"
+            session.mood_hold        = 0
+            session.affection        = new_state.affection  # 초기값 유지
+            session.session_context  = ""
+            session.dialogue_log     = []
+            session.fired_stories    = []
+            session.visited_places   = []
+            session.explained_cultures = []
+
+        self.affectionChanged.emit(getattr(session, "affection", 30))
+        self.moodChanged.emit("neutral")
+        self.chatReset.emit([])
+        return True
 
     @Slot(result=str)
     def getCharacterStatus(self) -> str:

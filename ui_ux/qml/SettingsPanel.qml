@@ -22,6 +22,7 @@ Item {
     signal characterBuildRequested()
     signal characterCreateRequested()
     signal newSessionRequested(bool keepMemory)
+    signal resetSessionRequested()
     signal resetConfirmRequested()
     signal themeChangeRequested(string themeId)
     signal memoryDBRequested()
@@ -415,6 +416,16 @@ Item {
                             onActivated: {
                                 settingsRoot.closeRequested()
                                 settingsRoot.newSessionRequested(true)
+                            }
+                        }
+
+                        SettingsButton {
+                            width: sessionCol.width
+                            label: "현재 대화 초기화"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.resetSessionRequested()
                             }
                         }
 

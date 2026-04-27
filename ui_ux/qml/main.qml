@@ -435,6 +435,9 @@ Window {
             onNewSessionRequested: function(keepMemory) {
                 bridge.newSession(keepMemory)
             }
+            onResetSessionRequested: {
+                bridge.resetSession()
+            }
             onResetConfirmRequested: {
                 root.settingsOpen    = false
                 root.charListJson    = bridge.getCharacterList()
