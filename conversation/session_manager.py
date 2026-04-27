@@ -38,6 +38,8 @@ class SessionState:
     explained_cultures: list = field(default_factory=list)   # 세션 내 설명된 culture 항목
     # 중기 컨텍스트 스냅샷 (Z)
     session_context: str = ""
+    # 대화 자동 정리 기준 시각 (빈 문자열 = 미정리)
+    last_flush_at: str = ""
 
 
 @dataclass
@@ -157,7 +159,8 @@ class SessionManager:
             return None
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            return SessionState(**data)
+            valid = {f.name for f in SessionState.__dataclass_fields__.values()}
+            return SessionState(**{k: v for k, v in data.items() if k in valid})
         except Exception:
             return None
 

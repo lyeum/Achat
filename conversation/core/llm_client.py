@@ -129,7 +129,6 @@ class LLMClient:
             max_tokens=max_tokens,
             stream=stream,
             repeat_penalty=1.15,
-            repeat_last_n=64,
         )
         if stream:
             full = ""
@@ -167,6 +166,68 @@ class LLMClient:
             out[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
         )
         return response
+
+    # ── 절전 지원 ─────────────────────────────────────────────────────────────
+
+    def unload(self) -> None:
+        """모델을 메모리에서 해제한다. transformers는 tokenizer를 보존해 재로드 속도를 높인다."""
+        import gc
+        self._model = None
+        if self.backend == "transformers":
+            pass  # tokenizer는 보존
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
+    def reload(self) -> None:
+        """언로드된 모델을 다시 로드한다. 이미 로드된 경우 무시한다."""
+        if self._model is not None:
+            return
+        if self.backend == "llama_cpp":
+            self._load_llama_cpp()
+        elif self.backend == "transformers":
+            if self._tokenizer is None:
+                self._load_transformers()
+            else:
+                self._reload_model_only()
+
+    def _reload_model_only(self) -> None:
+        """transformers backend에서 tokenizer를 보존하고 model 가중치만 재로드한다."""
+        import torch
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+        model_name   = self.cfg.get("model_name")
+        quantization = self.cfg.get("quantization", "int4")
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if quantization == "int4" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, quantization_config=bnb_cfg, low_cpu_mem_usage=True)
+        elif quantization == "int8" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, quantization_config=bnb_cfg, low_cpu_mem_usage=True)
+        else:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True).to(self._device)
+
+        adapter_path = self.cfg.get("adapter_path")
+        if adapter_path:
+            from peft import PeftModel  # type: ignore
+            self._model = PeftModel.from_pretrained(
+                self._model, adapter_path, device_map={"": self._device})
+            self._model.eval()
 
     # ── 토큰 카운트 헬퍼 ─────────────────────────────────────────────────────
 
