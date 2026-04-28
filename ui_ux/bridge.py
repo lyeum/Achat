@@ -1839,7 +1839,9 @@ class ChatBridge(QObject):
         try:
             if _PREFS_PATH.exists():
                 saved = json.loads(_PREFS_PATH.read_text(encoding="utf-8")).get("theme", "ocean")
-                return saved if saved in ("ocean", "solar", "forest") else "ocean"
+                _VALID = {"ocean", "amber", "violet"}
+                _MIGRATE = {"solar": "amber", "forest": "violet"}
+                return _MIGRATE.get(saved, saved) if saved in _VALID or saved in _MIGRATE else "ocean"
         except Exception:  # noqa: BLE001
             pass
         return "ocean"

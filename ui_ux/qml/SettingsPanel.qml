@@ -598,12 +598,12 @@ Item {
                                     }
                                 }
 
-                                // 솔라
+                                // 앰버
                                 Rectangle {
                                     width: (parent.width - 12) / 3
                                     height: 64; radius: 8
-                                    color: "#1C1610"
-                                    border.color: settingsRoot.currentTheme === "solar" ? "#FFFFFF" : "transparent"
+                                    color: "#1A1208"
+                                    border.color: settingsRoot.currentTheme === "amber" ? "#FFFFFF" : "transparent"
                                     border.width: 2
                                     Behavior on border.color { ColorAnimation { duration: 150 } }
 
@@ -613,27 +613,27 @@ Item {
                                         Rectangle {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: 18; height: 18; radius: 9
-                                            color: "#A07830"
+                                            color: "#D4880A"
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "솔라"
-                                            color: "#D8C898"; font.pixelSize: 12
+                                            text: "앰버"
+                                            color: "#E8C87A"; font.pixelSize: 12
                                             font.family: settingsRoot.fontFamily
                                         }
                                     }
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: settingsRoot.themeChangeRequested("solar")
+                                        onClicked: settingsRoot.themeChangeRequested("amber")
                                     }
                                 }
 
-                                // 포레스트
+                                // 바이올렛
                                 Rectangle {
                                     width: (parent.width - 12) / 3
                                     height: 64; radius: 8
-                                    color: "#101810"
-                                    border.color: settingsRoot.currentTheme === "forest" ? "#FFFFFF" : "transparent"
+                                    color: "#120E1C"
+                                    border.color: settingsRoot.currentTheme === "violet" ? "#FFFFFF" : "transparent"
                                     border.width: 2
                                     Behavior on border.color { ColorAnimation { duration: 150 } }
 
@@ -643,18 +643,18 @@ Item {
                                         Rectangle {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: 18; height: 18; radius: 9
-                                            color: "#5A8A68"
+                                            color: "#8860D0"
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "포레스트"
-                                            color: "#A8C8B0"; font.pixelSize: 12
+                                            text: "바이올렛"
+                                            color: "#C8B8E8"; font.pixelSize: 12
                                             font.family: settingsRoot.fontFamily
                                         }
                                     }
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: settingsRoot.themeChangeRequested("forest")
+                                        onClicked: settingsRoot.themeChangeRequested("violet")
                                     }
                                 }
                             }
@@ -922,7 +922,7 @@ Item {
             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8; right: parent.right; rightMargin: 8 }
             text: parent.label
             color: "#D0D0D0"
-            font.pixelSize: 15
+            font.pixelSize: 14
             font.family: parent.fontFamily
             elide: Text.ElideRight
         }

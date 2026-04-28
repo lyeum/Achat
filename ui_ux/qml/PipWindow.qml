@@ -260,6 +260,8 @@ Item {
         id: charArea
         width: 160; height: 160
         anchors { bottom: parent.bottom; left: parent.left }
+        opacity: pipRoot.isSleeping ? 0.35 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 400 } }
 
         // 기본 아이콘 (icons/{id}/{id}.png)
         Image {
@@ -330,39 +332,39 @@ Item {
             }
         }
 
-        // ── 절전 오버레이 (isSleeping=true 일 때 표시) ────────────────────
-        Rectangle {
-            visible: pipRoot.isSleeping
-            anchors.fill: parent
-            color: "#CC000000"
-            radius: 8
-            z: 10
+    }
 
-            Column {
-                anchors.centerIn: parent
-                spacing: 4
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "💤"
-                    font.pixelSize: 26
-                    renderType: Text.QtRendering
-                    font.family: "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
-                }
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "절전 중"
-                    color: "#A0A0A0"; font.pixelSize: 11
-                    font.family: pipRoot.fontFamily
-                }
+    // ── 절전 안내 (charArea 위에 겹쳐 표시, charArea opacity 와 분리) ─────────
+    Item {
+        visible: pipRoot.isSleeping
+        width: charArea.width; height: charArea.height
+        anchors { bottom: parent.bottom; left: parent.left }
+        z: 5
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 4
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "💤"
+                font.pixelSize: 26
+                renderType: Text.QtRendering
+                font.family: "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
             }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "절전 중"
+                color: "#D0D0D0"; font.pixelSize: 11
+                font.family: pipRoot.fontFamily
+            }
+        }
 
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    sleepTimer.restart()
-                    pipRoot.wakeRequested()
-                }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                sleepTimer.restart()
+                pipRoot.wakeRequested()
             }
         }
     }
