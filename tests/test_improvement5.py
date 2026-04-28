@@ -132,7 +132,7 @@ class TestRouterModeParameter:
              patch("agent.state.update_mood", return_value="neutral"), \
              patch("agent.state.update_affection"), \
              patch("memory.summarizer.score_importance", return_value=0.9), \
-             patch("memory.summarizer.check_trigger", return_value=True) as mock_trigger, \
+             patch("memory.summarizer.check_trigger", return_value=True), \
              patch.object(router, "_run_summarizer") as mock_summarize:
             router.handle_turn("파일 정리해줘", stream=False, mode="function")
         # check_trigger 자체는 호출될 수 있지만 mode 조건 때문에 _run_summarizer는 호출되지 않아야 함
@@ -169,7 +169,7 @@ class TestSessionManagerWorldId:
 
     def test_create_session_stores_world_id(self, manager):
         """_create_session 후 인덱스에 world_id가 저장되어야 한다."""
-        state = manager._create_session("Haru")
+        manager._create_session("Haru")
         # world_id는 초기에 None
         index = manager._load_index("Haru")
         assert any("world_id" in item for item in index)

@@ -602,8 +602,6 @@ class TestChangeWorldSameWorldDialoguePreservation:
         current_session.dialogue_log = original_dialogue
         bridge._agent.session = current_session
 
-        new_session_holder: list = []
-
         def fake_swap_persona(**kwargs):
             new_char = {"id": "Haru"}
             new_sess = ConversationSession.from_character({"id": "Haru", "state": {}})

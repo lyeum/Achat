@@ -165,7 +165,7 @@ class PromptBuilder:
                 else:
                     base_lines.append(stripped)
             if base_lines:
-                parts.append(" ".join(l for l in base_lines if l))
+                parts.append(" ".join(line for line in base_lines if line))
             if example_lines:
                 parts.append("[발화 패턴] " + " / ".join(
                     ex.removeprefix("예:").strip() for ex in example_lines
