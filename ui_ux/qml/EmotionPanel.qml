@@ -106,7 +106,7 @@ Item {
                 Text {
                     anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
                     text: "표정 / 아이콘 지정"
-                    color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                    color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                     font.family: emotRoot.fontFamily
                 }
                 Rectangle {
@@ -129,6 +129,10 @@ Item {
                 Layout.fillHeight: true
                 clip: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: ScrollBar {
+                    contentItem: Rectangle { color: "transparent" }
+                    background:  Rectangle { color: "transparent" }
+                }
 
                 ColumnLayout {
                     width: epanel.width - 20
@@ -200,7 +204,7 @@ Item {
                         Behavior on color { ColorAnimation { duration: 100 } }
                         Text {
                             anchors.centerIn: parent; text: "닫기"
-                            color: "white"; font.pixelSize: 12; font.family: emotRoot.fontFamily
+                            color: "white"; font.pixelSize: 14; font.family: emotRoot.fontFamily
                         }
                         MouseArea {
                             id: closeBtn; anchors.fill: parent
@@ -220,7 +224,7 @@ Item {
         property string fontFam: ""
         Layout.fillWidth: true
         text: label
-        color: "#4A90D9"; font.pixelSize: 12; font.bold: true
+        color: "#4A90D9"; font.pixelSize: 14; font.bold: true
         font.family: fontFam
         leftPadding: 2
     }
@@ -304,7 +308,7 @@ Item {
             anchors { bottom: parent.bottom; left: parent.left; right: parent.right; bottomMargin: 5 }
             text: emoSlot.label
             color: emoSlot._hasImage ? "#7AC87A" : "#B0B0B0"
-            font.pixelSize: 10; font.bold: emoSlot._hasImage
+            font.pixelSize: 12; font.bold: emoSlot._hasImage
             font.family: emoSlot.fontFam
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight

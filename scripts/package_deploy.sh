@@ -46,7 +46,6 @@ rsync -a --exclude='__pycache__' \
          --exclude='data/' \
          --exclude='dist/' \
          --exclude='*.log' \
-         --exclude='*.png' \
          --exclude='pyproject.toml' \
          --exclude='pyproject-deploy.toml' \
          "$ROOT/" "$DIST/"

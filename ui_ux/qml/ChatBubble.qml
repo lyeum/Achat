@@ -77,7 +77,8 @@ Item {
             }
             text: root.content
             color: role === "narrator" ? "#8AAABB" : "#E0E0E0"
-            font.pixelSize: role === "narrator" ? 12 : 13
+            font.pixelSize: role === "narrator" ? 13 : 14
+            font.weight: role === "narrator" ? Font.Normal : Font.Medium
             font.family: root.fontFamily
             font.italic: role === "narrator"
             horizontalAlignment: role === "narrator" ? Text.AlignHCenter : Text.AlignLeft
@@ -99,7 +100,8 @@ Item {
             }
             text: root._editBuffer
             color: "#E8E8E8"
-            font.pixelSize: role === "narrator" ? 12 : 13
+            font.pixelSize: role === "narrator" ? 13 : 14
+            font.weight: role === "narrator" ? Font.Normal : Font.Medium
             font.family: root.fontFamily
             font.italic: role === "narrator"
             wrapMode: TextEdit.WordWrap

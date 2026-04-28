@@ -71,6 +71,10 @@ Window {
     // 세계관 생성 패널
     property bool   worldCreateOpen:       false
 
+    // 세계관 이미지 관리 패널
+    property bool   worldImageOpen:        false
+    property string worldLocationJson:     "[]"
+
     // 메뉴얼 패널
     property bool   manualOpen:            false
 
@@ -95,39 +99,39 @@ Window {
             statusBtnBg:    "#101C28",
             statusBtnHover: "#183038"
         },
-        "solar": {
-            bgMain:         "#1C1610",
-            bgTitle:        "#261E0C",
-            bgPanel:        "#221A0E",
-            bgInput:        "#2E2412",
-            textPrimary:    "#D8C898",
-            accent:         "#A07830",
-            tabInactive:    "#2A2010",
-            bubbleAssist:   "#261E0C",
-            tagBg:          "#1E1810",
-            tagBorder:      "#382C14",
-            scrollbar:      "#503C18",
-            charBtnBg:      "#281E0C",
-            charBtnHover:   "#3A2C14",
-            statusBtnBg:    "#221A0C",
-            statusBtnHover: "#2E2410"
+        "amber": {
+            bgMain:         "#1A1208",
+            bgTitle:        "#241A08",
+            bgPanel:        "#201608",
+            bgInput:        "#2C1E0A",
+            textPrimary:    "#E8C87A",
+            accent:         "#D4880A",
+            tabInactive:    "#281C0A",
+            bubbleAssist:   "#241A08",
+            tagBg:          "#1C1408",
+            tagBorder:      "#3A2808",
+            scrollbar:      "#A06010",
+            charBtnBg:      "#241800",
+            charBtnHover:   "#382200",
+            statusBtnBg:    "#1E1600",
+            statusBtnHover: "#2C1E00"
         },
-        "forest": {
-            bgMain:         "#101810",
-            bgTitle:        "#141E14",
-            bgPanel:        "#121C12",
-            bgInput:        "#182418",
-            textPrimary:    "#A8C8B0",
-            accent:         "#5A8A68",
-            tabInactive:    "#161E16",
-            bubbleAssist:   "#141E14",
-            tagBg:          "#101810",
-            tagBorder:      "#1E3020",
-            scrollbar:      "#2A4A30",
-            charBtnBg:      "#101C12",
-            charBtnHover:   "#182A1A",
-            statusBtnBg:    "#101A12",
-            statusBtnHover: "#162418"
+        "violet": {
+            bgMain:         "#120E1C",
+            bgTitle:        "#1A1228",
+            bgPanel:        "#161020",
+            bgInput:        "#1E1630",
+            textPrimary:    "#C8B8E8",
+            accent:         "#8860D0",
+            tabInactive:    "#1A1426",
+            bubbleAssist:   "#1A1228",
+            tagBg:          "#120E1A",
+            tagBorder:      "#2A1E42",
+            scrollbar:      "#6040A8",
+            charBtnBg:      "#160E28",
+            charBtnHover:   "#221438",
+            statusBtnBg:    "#120E20",
+            statusBtnHover: "#1C1430"
         }
     })
 
@@ -144,7 +148,7 @@ Window {
     // (풀창↔PIP 전환 시 height 바인딩이 애니메이션에 의해 깨지는 문제 방지)
     width:  isBubble ? (pipBubbleOpen || pipView.inputOpen ? 240 : 160) : _winSizes[windowScaleIndex].w
 
-    flags:  Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+    flags:  Qt.FramelessWindowHint | (root.isBubble ? Qt.WindowStaysOnTopHint | Qt.Tool : Qt.Window)
     color:  "transparent"
     visible: true
     title:  "Achat"
@@ -244,15 +248,15 @@ Window {
         onActiveChanged: if (active) root.startSystemMove()
     }
 
-    // ── hover 투명도 (HoverHandler — 이벤트 가로채지 않음) ────────────────
-    HoverHandler { id: windowHover }
-    opacity: windowHover.hovered || isBubble ? 1.0 : 0.85
-    Behavior on opacity { NumberAnimation { duration: 300 } }
+    // ── 항상 불투명 ──────────────────────────────────────────────────────
+    opacity: 1.0
 
-    // ── 한글 폰트 (Windows 폰트 경로에서 로드) ───────────────────────────
+    // ── 한글 폰트 (플랫폼별 경로) ─────────────────────────────────────────
     FontLoader {
         id: koreanFont
-        source: "file:///mnt/c/Windows/Fonts/malgun.ttf"
+        source: Qt.platform.os === "windows"
+                ? "file:///C:/Windows/Fonts/malgun.ttf"
+                : "file:///mnt/c/Windows/Fonts/malgun.ttf"
     }
 
     // ── 브리지 이벤트 수신 ───────────────────────────────────────────────
@@ -319,6 +323,52 @@ Window {
                 messageModel.append({ "role": history[i].role, "content": history[i].content })
             }
             Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+
+        function onRagIndexRequired() {
+            ragDialog.open()
+        }
+
+        function onFlushDialogRequested(turns) {
+            flushDialog.totalTurns = turns
+            flushDialog.open()
+        }
+    }
+
+    // ── RAG 재인덱싱 안내 대화상자 ───────────────────────────────────────
+    Dialog {
+        id: ragDialog
+        title: "세계관 데이터 초기화 필요"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label {
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            text: "세계관 RAG 데이터베이스가 비어 있습니다.\n\n'확인'을 누르면 재인덱싱을 진행한 뒤 대화를 시작합니다.\n(처음 실행 시 약 10~30초 소요)"
+        }
+        onAccepted: {
+            bridge.reindexWorldKnowledge()
+        }
+    }
+
+    // ── 5일 경과 대화 정리 대화상자 ─────────────────────────────────────
+    Dialog {
+        id: flushDialog
+        property int totalTurns: 0
+        title: "대화기록 자동 정리"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.Yes | Dialog.No
+        Label {
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            text: "5일이 지나 대화기록이 자동으로 정리됩니다.\n최근 10턴만 남기고 이전 기록을 삭제합니다.\n\n진행하시겠습니까?"
+        }
+        onAccepted: {
+            bridge.confirmFlush()
         }
     }
 
@@ -450,6 +500,10 @@ Window {
             onWorldCreateRequested: {
                 root.worldCreateOpen = true
             }
+            onWorldImageRequested: {
+                root.worldLocationJson = bridge.getWorldLocations()
+                root.worldImageOpen    = true
+            }
             onAdminRequested: {
                 root.adminConvJson  = bridge.getConvParams()
                 root.adminPanelOpen = true
@@ -558,6 +612,31 @@ Window {
             }
         }
 
+        // ── bridge.locationImageImported → 세계관 이미지 패널 갱신 ───────
+        Connections {
+            target: bridge
+            function onLocationImageImported(worldId, location) {
+                if (root.worldImageOpen)
+                    root.worldLocationJson = bridge.getWorldLocations()
+            }
+        }
+
+        // ── bridge.sleepStateChanged → PIP 절전 상태 반영 ────────────────
+        Connections {
+            target: bridge
+            function onSleepStateChanged(sleeping) {
+                if (root.isBubble)
+                    pipView.isSleeping = sleeping
+            }
+        }
+
+        // ── PIP 절전/깨우기 연결 ─────────────────────────────────────────
+        Connections {
+            target: pipView
+            function onSleepRequested() { if (bridge) bridge.enterSleep() }
+            function onWakeRequested()  { if (bridge) bridge.wakeUp()     }
+        }
+
         // ── 관리자 패널 오버레이 ──────────────────────────────────────────
         AdminPanel {
             anchors.fill: parent
@@ -614,6 +693,15 @@ Window {
             onCloseRequested: root.worldCreateOpen = false
         }
 
+        WorldImagePanel {
+            anchors.fill: parent
+            visible: root.worldImageOpen && !root.isBubble
+            z: 25
+            fontFamily:    koreanFont.font.family
+            worldsJson:    root.worldLocationJson
+            onCloseRequested: root.worldImageOpen = false
+        }
+
         ManualPanel {
             anchors.fill: parent
             visible: root.manualOpen && !root.isBubble
@@ -632,7 +720,7 @@ Window {
             Rectangle {
                 id: titleBar
                 Layout.fillWidth: true
-                height: 38
+                height: 44
                 color: root._th.bgTitle
                 radius: 16
 
@@ -644,19 +732,19 @@ Window {
                         id: charNameLabel
                         text: bridge ? bridge.characterName : ""
                         color: root._th.textPrimary
-                        font.pixelSize: 13
+                        font.pixelSize: 15
                         font.bold: true
                         font.family: koreanFont.font.family
                     }
 
                     // 캐릭터 변경 버튼
                     Rectangle {
-                        width: 60; height: 20; radius: 4
+                        width: 66; height: 22; radius: 4
                         color: charSelectBtnHov.containsMouse ? root._th.charBtnHover : root._th.charBtnBg
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Text {
                             anchors.centerIn: parent; text: "캐릭터 변경"
-                            color: root._th.accent; font.pixelSize: 10
+                            color: root._th.accent; font.pixelSize: 11
                             font.family: koreanFont.font.family
                         }
                         MouseArea {
@@ -671,12 +759,12 @@ Window {
 
                     // 상태 버튼
                     Rectangle {
-                        width: 34; height: 20; radius: 4
+                        width: 36; height: 22; radius: 4
                         color: charStatusBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Text {
                             anchors.centerIn: parent; text: "상태"
-                            color: root._th.accent; font.pixelSize: 10
+                            color: root._th.accent; font.pixelSize: 11
                             font.family: koreanFont.font.family
                         }
                         MouseArea {
@@ -691,12 +779,12 @@ Window {
 
                     // 관리자 버튼
                     Rectangle {
-                        width: 32; height: 20; radius: 4
+                        width: 34; height: 22; radius: 4
                         color: adminBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Text {
                             anchors.centerIn: parent; text: "관리"
-                            color: root._th.accent; font.pixelSize: 9; font.bold: true
+                            color: root._th.accent; font.pixelSize: 11; font.bold: true
                             font.family: koreanFont.font.family
                         }
                         MouseArea {
@@ -711,12 +799,12 @@ Window {
 
                     // 메뉴얼 버튼
                     Rectangle {
-                        width: 20; height: 20; radius: 10
+                        width: 22; height: 22; radius: 11
                         color: manualBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Text {
                             anchors.centerIn: parent; text: "?"
-                            color: root._th.accent; font.pixelSize: 11; font.bold: true
+                            color: root._th.accent; font.pixelSize: 12; font.bold: true
                             font.family: koreanFont.font.family
                         }
                         MouseArea {
@@ -730,10 +818,10 @@ Window {
 
                     // 설정 버튼
                     Rectangle {
-                        width: 20; height: 20; radius: 4
+                        width: 22; height: 22; radius: 4
                         color: settingsHover.containsMouse ? "#3C3C3C" : "transparent"
                         Behavior on color { ColorAnimation { duration: 150 } }
-                        Text { anchors.centerIn: parent; text: "≡"; color: "#B0B0B0"; font.pixelSize: 13 }
+                        Text { anchors.centerIn: parent; text: "≡"; color: "#B0B0B0"; font.pixelSize: 15 }
                         MouseArea {
                             id: settingsHover
                             anchors.fill: parent
@@ -750,10 +838,10 @@ Window {
 
                     // 버블 축소 버튼
                     Rectangle {
-                        width: 20; height: 20; radius: 10
+                        width: 22; height: 22; radius: 11
                         color: bubbleHover.containsMouse ? "#E09400" : "#F0A500"
                         Behavior on color { ColorAnimation { duration: 150 } }
-                        Text { anchors.centerIn: parent; text: "●"; color: "white"; font.pixelSize: 9 }
+                        Text { anchors.centerIn: parent; text: "●"; color: "white"; font.pixelSize: 10 }
                         MouseArea {
                             id: bubbleHover
                             anchors.fill: parent
@@ -765,10 +853,10 @@ Window {
 
                     // 닫기 버튼
                     Rectangle {
-                        width: 20; height: 20; radius: 10
+                        width: 22; height: 22; radius: 11
                         color: closeHover.containsMouse ? "#C03030" : "#E05050"
                         Behavior on color { ColorAnimation { duration: 150 } }
-                        Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 9 }
+                        Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 10 }
                         MouseArea {
                             id: closeHover
                             anchors.fill: parent
@@ -845,7 +933,7 @@ Window {
                     anchors.top: parent.top
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    height: parent.height - 232  // 캐릭터 아이콘 가시 영역(272-40=232px) 제외
+                    height: parent.height - 314  // 캐릭터 아이콘 가시 영역(354-40=314px) 제외
                     clip: true
                     spacing: 4
                     bottomMargin: 8
@@ -873,11 +961,8 @@ Window {
 
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
-                        contentItem: Rectangle {
-                            implicitWidth: 4
-                            radius: 2
-                            color: root._th.scrollbar
-                        }
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
                     }
                 }
 
@@ -886,7 +971,7 @@ Window {
                 Item {
                     visible: root.currentMode === "function"
                     anchors {
-                        left:   parent.left;  leftMargin:  240  // 캐릭터(218) + 간격(22)
+                        left:   parent.left;  leftMargin:  305  // 캐릭터(283) + 간격(22)
                         right:  parent.right; rightMargin: 8
                         bottom: parent.bottom
                     }
@@ -922,10 +1007,9 @@ Window {
                                     id: tagLabel
                                     anchors.centerIn: parent
                                     text: modelData.label
-                                    color: parent._active ? "white" : root._th.scrollbar
+                                    color: "white"
                                     font.pixelSize: 11
                                     font.family: koreanFont.font.family
-                                    Behavior on color { ColorAnimation { duration: 150 } }
                                 }
 
                                 MouseArea {
@@ -990,10 +1074,10 @@ Window {
                 CharacterDisplay {
                     id: charDisplay
                     z: 2
-                    width: 218; height: 272
+                    width: 283; height: 354
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: -40   // 40px 아래 입력창 영역으로 오버랩
-                    x: 8
+                    x: -40
                     characterId: bridge ? bridge.characterId : ""
                     partsJson:   root.customPartsJson
                     currentMood: root.currentMood
@@ -1004,7 +1088,7 @@ Window {
             // 입력 영역
             Rectangle {
                 Layout.fillWidth: true
-                height: 48
+                height: 56
                 color: root._th.bgPanel
                 radius: 16
 
@@ -1014,7 +1098,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 32
+                        height: 38
                         radius: 8
                         color: root._th.bgInput
                         border.color: inputField.activeFocus
@@ -1027,7 +1111,7 @@ Window {
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: TextInput.AlignVCenter
                             color: "#E0E0E0"
-                            font.pixelSize: 13
+                            font.pixelSize: 14
                             font.family: koreanFont.font.family
                             clip: true
 
@@ -1047,7 +1131,7 @@ Window {
                     }
 
                     Rectangle {
-                        width: 32; height: 32
+                        width: 38; height: 38
                         radius: 8
                         color: root.inputReady
                                ? (sendBtnHover.containsMouse ? "#357ABD" : "#4A90D9")
@@ -1059,7 +1143,7 @@ Window {
                             anchors.centerIn: parent
                             text: root.inputReady ? "▶" : "…"
                             color: root.inputReady ? "white" : "#666"
-                            font.pixelSize: 13
+                            font.pixelSize: 14
                         }
 
                         MouseArea {

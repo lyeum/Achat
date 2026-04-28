@@ -46,7 +46,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 text: "⚠  캐릭터 초기화"
-                color: "#E07070"; font.pixelSize: 13; font.bold: true
+                color: "#E07070"; font.pixelSize: 15; font.bold: true
                 font.family: resetRoot.fontFamily
                 horizontalAlignment: Text.AlignHCenter
             }
@@ -55,7 +55,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 text: "어떤 캐릭터를 지우실건가요?\n선택한 캐릭터의 대화 기록과\n장기 기억이 모두 삭제됩니다."
-                color: "#AAA"; font.pixelSize: 12
+                color: "#AAA"; font.pixelSize: 14
                 font.family: resetRoot.fontFamily
                 horizontalAlignment: Text.AlignHCenter
                 lineHeight: 1.4
@@ -105,7 +105,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: modelData.name || modelData.id
                                 color: charRow._selected ? "#E08080" : "#C0C0C0"
-                                font.pixelSize: 13
+                                font.pixelSize: 15
                                 font.family: resetRoot.fontFamily
                                 elide: Text.ElideRight
                             }
@@ -135,7 +135,7 @@ Item {
                     Behavior on color { ColorAnimation { duration: 100 } }
                     Text {
                         anchors.centerIn: parent; text: "취소"
-                        color: "#AAA"; font.pixelSize: 13
+                        color: "#AAA"; font.pixelSize: 15
                         font.family: resetRoot.fontFamily
                     }
                     MouseArea {
@@ -155,7 +155,7 @@ Item {
                     Text {
                         anchors.centerIn: parent; text: "초기화"
                         color: resetRoot._selectedId === "" ? "#664444" : "#FFAAAA"
-                        font.pixelSize: 13; font.bold: true
+                        font.pixelSize: 15; font.bold: true
                         font.family: resetRoot.fontFamily
                     }
                     MouseArea {

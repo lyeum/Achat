@@ -31,6 +31,8 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# deploy/achat.spec은 빌드 설정 소스 파일이므로 예외
+!deploy/achat.spec
 
 # Installer logs
 pip-log.txt

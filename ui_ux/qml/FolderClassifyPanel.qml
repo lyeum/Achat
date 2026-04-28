@@ -60,7 +60,7 @@ Item {
                 Text {
                     anchors { fill: parent; margins: 6 }
                     text: classifyRoot.folderPath || "(경로 없음)"
-                    font.pixelSize: 11
+                    font.pixelSize: 13
                     font.family: classifyRoot.fontFamily
                     color: "#5A8090"
                     elide: Text.ElideLeft
@@ -71,7 +71,7 @@ Item {
             // 분류 기준 라디오
             Text {
                 text: "분류 기준:"
-                font.pixelSize: 11
+                font.pixelSize: 13
                 font.family: classifyRoot.fontFamily
                 color: "#7090A0"
             }
@@ -114,13 +114,13 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 Text {
                                     text: modelData.label
-                                    font.pixelSize: 12
+                                    font.pixelSize: 14
                                     font.family: classifyRoot.fontFamily
                                     color: classifyRoot._rule === index ? "#A8D0D8" : "#607080"
                                 }
                                 Text {
                                     text: modelData.desc
-                                    font.pixelSize: 10
+                                    font.pixelSize: 12
                                     font.family: classifyRoot.fontFamily
                                     color: "#3A5060"
                                 }
@@ -149,7 +149,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: "분류 시작"
-                        font.pixelSize: 12
+                        font.pixelSize: 14
                         font.family: classifyRoot.fontFamily
                         color: "#FFFFFF"
                     }
@@ -174,7 +174,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: "미리보기"
-                        font.pixelSize: 12
+                        font.pixelSize: 14
                         font.family: classifyRoot.fontFamily
                         color: "#7ABAC8"
                     }
@@ -199,7 +199,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: "취소"
-                        font.pixelSize: 12
+                        font.pixelSize: 14
                         font.family: classifyRoot.fontFamily
                         color: "#8090A0"
                     }

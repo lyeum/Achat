@@ -88,7 +88,7 @@ Item {
                 Text {
                     anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
                     text: "캐릭터 커스터마이징"
-                    color: "#E0E0E0"; font.pixelSize: 13; font.bold: true
+                    color: "#E0E0E0"; font.pixelSize: 15; font.bold: true
                     font.family: customRoot.fontFamily
                 }
                 Rectangle {
@@ -111,6 +111,10 @@ Item {
                 Layout.fillHeight: true
                 clip: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: ScrollBar {
+                    contentItem: Rectangle { color: "transparent" }
+                    background:  Rectangle { color: "transparent" }
+                }
 
                 ColumnLayout {
                     width: panelRect.width - 20
@@ -186,7 +190,7 @@ Item {
                         Behavior on color { ColorAnimation { duration: 100 } }
                         Text {
                             anchors.centerIn: parent; text: "취소"
-                            color: "#AAA"; font.pixelSize: 12; font.family: customRoot.fontFamily
+                            color: "#AAA"; font.pixelSize: 14; font.family: customRoot.fontFamily
                         }
                         MouseArea {
                             id: cancelHov; anchors.fill: parent
@@ -201,7 +205,7 @@ Item {
                         Behavior on color { ColorAnimation { duration: 100 } }
                         Text {
                             anchors.centerIn: parent; text: "저장"
-                            color: "white"; font.pixelSize: 12; font.family: customRoot.fontFamily
+                            color: "white"; font.pixelSize: 14; font.family: customRoot.fontFamily
                         }
                         MouseArea {
                             id: saveHov; anchors.fill: parent
@@ -221,7 +225,7 @@ Item {
         property string fontFam: ""
         Layout.fillWidth: true
         text: label
-        color: "#4A90D9"; font.pixelSize: 12; font.bold: true
+        color: "#4A90D9"; font.pixelSize: 14; font.bold: true
         font.family: fontFam
         leftPadding: 2
     }
@@ -271,7 +275,7 @@ Item {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "클릭 또는 드래그"
-                color: "#444"; font.pixelSize: 10
+                color: "#444"; font.pixelSize: 12
                 font.family: slot.fontFam
             }
             Text {
@@ -290,7 +294,7 @@ Item {
                 bottomMargin: 6
             }
             text: slot.label
-            color: "#666"; font.pixelSize: 10
+            color: "#666"; font.pixelSize: 12
             font.family: slot.fontFam
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight

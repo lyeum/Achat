@@ -85,12 +85,17 @@ class ChatBridge(QObject):
     imageImported        = Signal(str, str)          # slot_type, result (icon→URL, parts→filename)
     memoryChanged        = Signal()                  # DB CRUD 성공 시 emit → QML 자동 갱신
     chatReset            = Signal("QVariantList")    # 캐릭터/세계관 변경 시 채팅창 초기화 + 이전 기록 로드
+    ragIndexRequired        = Signal()                  # world_knowledge 컬렉션 비어있을 때 emit
+    flushDialogRequested    = Signal(int)               # 5일 경과 시 emit — 인자: 현재 총 턴수
+    locationImageImported   = Signal(str, str)          # world_id, location — 배경 이미지 등록 후 emit
+    sleepStateChanged       = Signal(bool)              # True=절전, False=활성
 
     def __init__(self, agent):
         super().__init__()
         self._agent = agent
         self._worker: LLMWorker | None = None
         self._character_name: str = agent.character.get("name", "")
+        self._sleeping: bool = False
 
         # SessionManager 초기화
         cfg = getattr(agent, "cfg", {})
@@ -171,6 +176,10 @@ class ChatBridge(QObject):
             else:
                 state = self._session_manager.activate(char_id)
             self._restore_session_from_state(state)
+        # 시작 시 RAG 인덱스 / 5일 flush 확인 (QML 준비 후 emit되도록 callLater 패턴)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(500, self._check_rag_index)
+        QTimer.singleShot(600, self._check_flush_needed)
 
     def _restore_session_from_state(self, state) -> None:
         """SessionState의 모든 필드를 ConversationSession에 복원한다.
@@ -185,6 +194,8 @@ class ChatBridge(QObject):
         session.mood_hold  = getattr(state, "mood_hold", 0)
         session.affection  = state.affection
         session.turn_count = state.turn_count
+        if getattr(state, "world_id", None):
+            session.world_id = state.world_id
         if state.location:
             session.location = state.location
         if getattr(state, "scenario_id", None):
@@ -315,6 +326,57 @@ class ChatBridge(QObject):
             self._conv_logger.flush_remaining()
             from training.log.conversation_logger import ConversationLogger
             self._conv_logger = ConversationLogger(character_id=state.char_id)
+
+    # ── RAG / Flush 체크 ────────────────────────────────────────────────────
+
+    def _check_rag_index(self) -> None:
+        """world_knowledge 컬렉션이 비어 있으면 ragIndexRequired 신호를 emit."""
+        try:
+            rag = getattr(getattr(self._agent, "router", None), "rag", None)
+            if rag is None:
+                return
+            col = rag._client.get_or_create_collection("world_knowledge")
+            if col.count() == 0:
+                self.ragIndexRequired.emit()
+        except Exception:
+            self.ragIndexRequired.emit()
+
+    def _check_flush_needed(self) -> None:
+        """세션 생성/마지막 flush 후 5일 이상 지났으면 flushDialogRequested 신호를 emit."""
+        from datetime import timedelta
+        state = self._session_manager.get_active()
+        if state is None:
+            return
+        ref_str = state.last_flush_at or state.created_at
+        if not ref_str:
+            return
+        try:
+            from datetime import timezone as _tz
+            ref = __import__("datetime").datetime.fromisoformat(ref_str)
+            if ref.tzinfo is None:
+                ref = ref.replace(tzinfo=_tz.utc)
+            now = __import__("datetime").datetime.now(_tz.utc)
+            if (now - ref).days >= 5:
+                session = self._agent.session
+                total_turns = len(getattr(session, "dialogue_log", []) or []) // 2
+                self.flushDialogRequested.emit(total_turns)
+        except Exception:
+            pass
+
+    @Slot()
+    def confirmFlush(self) -> None:
+        """사용자가 대화 정리를 승인했을 때 — 최근 10턴만 남기고 flush."""
+        from datetime import datetime, timezone as _tz
+        session = self._agent.session
+        if session is None:
+            return
+        dialogue = list(getattr(session, "dialogue_log", []) or [])
+        session.dialogue_log = dialogue[-20:]  # 10턴 = 20 메시지
+        state = self._session_manager.get_active()
+        if state:
+            state.last_flush_at = datetime.now(_tz.utc).isoformat()
+            self._session_manager.save_state(state)
+        self._sync_session_state()
 
     # ── 내부 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -872,6 +934,124 @@ class ChatBridge(QObject):
             if result:
                 self.imageImported.emit(slot_type, result)
 
+    # ── 세계관 배경 이미지 관리 ─────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def getWorldLocations(self) -> str:
+        """모든 세계관의 장소 목록과 이미지 유무를 JSON으로 반환한다."""
+        import json as _json
+        from conversation.loader.world_load import load_world
+        result = []
+        for path in sorted(_WORLD_DIR.glob("W_*.yaml")):
+            try:
+                world = load_world(path)
+                world_id = world.get("world_id", "")
+                locations: dict = {}
+                for sc in world.get("scenarios", []):
+                    for act in sc.get("acts", []):
+                        loc = act.get("location", "")
+                        if loc:
+                            locations[loc] = True
+                loc_list = []
+                for loc in sorted(locations):
+                    img_path = _BG_DIR / world_id / f"{loc}.png"
+                    loc_list.append({
+                        "location":  loc,
+                        "world_id":  world_id,
+                        "has_image": img_path.exists(),
+                        "image_url": QUrl.fromLocalFile(str(img_path)).toString() if img_path.exists() else "",
+                    })
+                result.append({
+                    "world_id":    world_id,
+                    "description": world.get("description", ""),
+                    "locations":   loc_list,
+                })
+            except Exception:  # noqa: BLE001
+                pass
+        return _json.dumps(result, ensure_ascii=False)
+
+    @Slot(str, str)
+    def browseLocationImage(self, world_id: str, location: str) -> None:
+        """파일 다이얼로그로 배경 이미지를 선택해 저장한다."""
+        from PySide6.QtWidgets import QFileDialog
+        img_filter = "이미지 파일 (*.png *.jpg *.jpeg *.webp *.bmp);;모든 파일 (*)"
+        path, _ = QFileDialog.getOpenFileName(None, "배경 이미지 선택", "", img_filter)
+        if path:
+            self._import_location_image(world_id, location, path)
+
+    @Slot(str, str, str)
+    def importLocationImageFromDrop(self, world_id: str, location: str, file_url: str) -> None:
+        """드래그&드롭 URL로 배경 이미지를 저장한다."""
+        local = QUrl(file_url).toLocalFile() if file_url.startswith("file") else file_url
+        if local:
+            self._import_location_image(world_id, location, local)
+
+    def _import_location_image(self, world_id: str, location: str, src_path: str) -> None:
+        """이미지를 background/{world_id}/{location}.png 로 복사하고 신호를 보낸다."""
+        import shutil
+        from loguru import logger as _lg
+        src = Path(src_path)
+        if not src.exists():
+            return
+        dest_dir = _BG_DIR / world_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{location}.png"
+        try:
+            shutil.copy2(str(src), str(dest))
+            # 현재 배경이 이 장소라면 즉시 갱신
+            cur_world = (self._agent.world or {}).get("world_id", "") if self._agent else ""
+            if cur_world == world_id and getattr(self, "_location", "") == location:
+                self.backgroundChanged.emit(QUrl.fromLocalFile(str(dest)).toString())
+            self.locationImageImported.emit(world_id, location)
+            _lg.info(f"[bridge] 배경 이미지 저장: {dest}")
+        except Exception as e:
+            _lg.warning(f"[bridge] 배경 이미지 저장 실패: {e}")
+
+    # ── 절전 모드 ───────────────────────────────────────────────────────────────
+
+    @Slot()
+    def enterSleep(self) -> None:
+        """LLM 모델을 메모리에서 해제한다 (PIP 절전 모드)."""
+        from loguru import logger as _lg
+        if self._sleeping:
+            return
+        self._sleeping = True
+        self.sleepStateChanged.emit(True)
+        _lg.info("[bridge] 절전 모드 진입 — LLM 모델 해제")
+        try:
+            llm = getattr(self._agent, "llm", None)
+            if llm:
+                llm.unload()
+        except Exception as e:
+            _lg.warning(f"[bridge] 모델 언로드 실패: {e}")
+
+    @Slot()
+    def wakeUp(self) -> None:
+        """절전 모드를 해제하고 LLM 모델을 재로드한다."""
+        from loguru import logger as _lg
+        if not self._sleeping:
+            return
+        self._sleeping = False
+        self.sleepStateChanged.emit(False)
+        _lg.info("[bridge] 절전 해제 — LLM 모델 재로드")
+
+        def _reload():
+            try:
+                llm = getattr(self._agent, "llm", None)
+                if llm:
+                    llm.reload()
+            except Exception as e:
+                _lg.warning(f"[bridge] 모델 재로드 실패: {e}")
+
+        class _ReloadTask(QRunnable):
+            def __init__(self, fn):
+                super().__init__()
+                self._fn = fn
+            def run(self):
+                self._fn()
+
+        QThreadPool.globalInstance().start(_ReloadTask(_reload))
+
     @Slot(str, str, str)
     def changeWorld(self, world_id: str, scenario_id: str, act_id: str) -> None:
         """세계관 / 시나리오 / act를 전환한다.
@@ -954,23 +1134,34 @@ class ChatBridge(QObject):
                 self._current_mood = new_mood
                 self.moodChanged.emit(new_mood)
 
-                # 세계관 변경 시 채팅창 초기화 후 해당 세션 기록 복원
+                # 세계관 변경 시 채팅창 초기화 + 나레이션 위치 결정
                 if self._agent.session is not None and world_changed:
-                    self.chatReset.emit(self.getSessionHistory())
+                    # 장소 나레이션 미리 조회
+                    narr_content = None
+                    if self._location and not getattr(self._agent, "_stub", True):
+                        try:
+                            from narration.world_trigger import check_place_trigger
+                            _s = getattr(self._agent, "session", None)
+                            _r = getattr(getattr(self._agent, "router", None), "rag", None)
+                            if _s and _r:
+                                _narr = check_place_trigger(self._location, _s, _r)
+                                if _narr:
+                                    _, narr_content = _narr
+                        except Exception:
+                            pass
 
-                # 초기 장소 나레이션 emit (첫 진입 or 세계관 변경 시)
-                if self._location and not getattr(self._agent, "_stub", True):
-                    try:
-                        from narration.world_trigger import check_place_trigger
-                        session = getattr(self._agent, "session", None)
-                        rag = getattr(getattr(self._agent, "router", None), "rag", None)
-                        if session and rag:
-                            narr = check_place_trigger(self._location, session, rag)
-                            if narr:
-                                _title, document = narr
-                                self.messageAdded.emit("narrator", document)
-                    except Exception:
-                        pass
+                    history = list(self.getSessionHistory())
+                    if narr_content and history:
+                        # 기존 대화 있음 → 나레이션을 최상단에 삽입
+                        self.chatReset.emit(
+                            [{"role": "narrator", "content": narr_content}] + history
+                        )
+                    elif narr_content:
+                        # 새 세션 → chatReset 후 하단에 나레이션
+                        self.chatReset.emit(history)
+                        self.messageAdded.emit("narrator", narr_content)
+                    else:
+                        self.chatReset.emit(history)
             except Exception as e:  # noqa: BLE001
                 self.messageAdded.emit("system", f"[세계관 변경 실패] {e}")
             return
@@ -1648,7 +1839,9 @@ class ChatBridge(QObject):
         try:
             if _PREFS_PATH.exists():
                 saved = json.loads(_PREFS_PATH.read_text(encoding="utf-8")).get("theme", "ocean")
-                return saved if saved in ("ocean", "solar", "forest") else "ocean"
+                _VALID = {"ocean", "amber", "violet"}
+                _MIGRATE = {"solar": "amber", "forest": "violet"}
+                return _MIGRATE.get(saved, saved) if saved in _VALID or saved in _MIGRATE else "ocean"
         except Exception:  # noqa: BLE001
             pass
         return "ocean"
@@ -2190,7 +2383,8 @@ class ChatBridge(QObject):
 
             import re as _re2
             model_key = _re2.sub(r"[\s_]+", "-", model_name.strip().lower())
-            guide_id = f"pg_{_re.sub(r'[^\\w]', '_', model_name)}_{_uuid.uuid4().hex[:6]}"
+            _safe_name = _re.sub(r'[^\w]', '_', model_name)
+            guide_id = f"pg_{_safe_name}_{_uuid.uuid4().hex[:6]}"
             meta = {
                 "model_name":   model_name,
                 "model":        model_key,   # PromptGuideStore.query() 호환 키

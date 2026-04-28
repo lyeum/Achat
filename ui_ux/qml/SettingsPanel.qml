@@ -29,6 +29,7 @@ Item {
     signal adminRequested()
     signal sessionSwitchRequested(string sessionId)
     signal worldCreateRequested()
+    signal worldImageRequested()
     signal windowScaleChangeRequested(int scaleIdx)
 
     // ── 섹션 펼침 상태 ────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ Item {
                 width: 20; height: 20; radius: 10
                 color: closeHover.containsMouse ? "#C03030" : "#444"
                 Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 9 }
+                Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 11 }
                 MouseArea {
                     id: closeHover
                     anchors.fill: parent
@@ -110,6 +111,10 @@ Item {
             }
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: ScrollBar {
+                contentItem: Rectangle { color: "transparent" }
+                background:  Rectangle { color: "transparent" }
+            }
 
             Column {
                 width: panel.width - 16
@@ -192,7 +197,7 @@ Item {
                                     anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
                                     color: charDelHov.containsMouse ? "#802020" : "#3A1818"
                                     Behavior on color { ColorAnimation { duration: 100 } }
-                                    Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                    Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 12; font.family: settingsRoot.fontFamily }
                                     MouseArea {
                                         id: charDelHov; anchors.fill: parent
                                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -238,6 +243,16 @@ Item {
                             }
                         }
 
+                        SettingsButton {
+                            width: worldCol.width
+                            label: "+ 세계관 이미지 추가"
+                            fontFamily: settingsRoot.fontFamily
+                            onActivated: {
+                                settingsRoot.closeRequested()
+                                settingsRoot.worldImageRequested()
+                            }
+                        }
+
                         // 세계관별 드릴다운 (세계관 헤더 클릭 → act 목록 펼침)
                         Repeater {
                             model: {
@@ -262,12 +277,12 @@ Item {
                                         id: wArrow
                                         anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 4 }
                                         text: worldDelegate._expanded ? "▾" : "▸"
-                                        color: "#6060A0"; font.pixelSize: 9
+                                        color: "#6060A0"; font.pixelSize: 11
                                     }
                                     Text {
                                         anchors { verticalCenter: parent.verticalCenter; left: wArrow.right; leftMargin: 4 }
                                         text: modelData.world_id
-                                        color: "#9090C0"; font.pixelSize: 12; font.bold: true
+                                        color: "#9090C0"; font.pixelSize: 14; font.bold: true
                                         font.family: settingsRoot.fontFamily
                                         elide: Text.ElideRight
                                     }
@@ -451,13 +466,13 @@ Item {
                                         Text {
                                             text: modelData.display_name || (modelData.session_id || "").substring(0, 18)
                                             color: modelData.session_id === settingsRoot.activeSessionId ? "#A0A0F0" : "#909090"
-                                            font.pixelSize: 11; font.bold: modelData.session_id === settingsRoot.activeSessionId
+                                            font.pixelSize: 13; font.bold: modelData.session_id === settingsRoot.activeSessionId
                                             font.family: settingsRoot.fontFamily
                                             elide: Text.ElideRight
                                         }
                                         Text {
                                             text: (modelData.last_active || "").substring(0, 10)
-                                            color: "#505070"; font.pixelSize: 9
+                                            color: "#505070"; font.pixelSize: 11
                                             font.family: settingsRoot.fontFamily
                                         }
                                     }
@@ -467,7 +482,7 @@ Item {
                                         visible: modelData.session_id === settingsRoot.activeSessionId
                                         anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
                                         width: curLbl.implicitWidth + 8; height: 16; radius: 8; color: "#252548"
-                                        Text { id: curLbl; anchors.centerIn: parent; text: "현재"; color: "#8080C0"; font.pixelSize: 9; font.family: settingsRoot.fontFamily }
+                                        Text { id: curLbl; anchors.centerIn: parent; text: "현재"; color: "#8080C0"; font.pixelSize: 11; font.family: settingsRoot.fontFamily }
                                     }
                                 }
 
@@ -482,7 +497,7 @@ Item {
                                         width: 34; height: 24; radius: 4
                                         color: sessHov.containsMouse ? "#2A3A5A" : "#1A2A40"
                                         Behavior on color { ColorAnimation { duration: 100 } }
-                                        Text { anchors.centerIn: parent; text: "전환"; color: "#6090C0"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                        Text { anchors.centerIn: parent; text: "전환"; color: "#6090C0"; font.pixelSize: 12; font.family: settingsRoot.fontFamily }
                                         MouseArea {
                                             id: sessHov; anchors.fill: parent; hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor; preventStealing: true
@@ -497,7 +512,7 @@ Item {
                                         width: 30; height: 24; radius: 4
                                         color: sessDelHov.containsMouse ? "#802020" : "#3A1818"
                                         Behavior on color { ColorAnimation { duration: 100 } }
-                                        Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 10; font.family: settingsRoot.fontFamily }
+                                        Text { anchors.centerIn: parent; text: "삭제"; color: "#E08080"; font.pixelSize: 12; font.family: settingsRoot.fontFamily }
                                         MouseArea {
                                             id: sessDelHov; anchors.fill: parent; hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor; preventStealing: true
@@ -573,7 +588,7 @@ Item {
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             text: "오션"
-                                            color: "#A8D0D8"; font.pixelSize: 10
+                                            color: "#A8D0D8"; font.pixelSize: 12
                                             font.family: settingsRoot.fontFamily
                                         }
                                     }
@@ -583,12 +598,12 @@ Item {
                                     }
                                 }
 
-                                // 솔라
+                                // 앰버
                                 Rectangle {
                                     width: (parent.width - 12) / 3
                                     height: 64; radius: 8
-                                    color: "#1C1610"
-                                    border.color: settingsRoot.currentTheme === "solar" ? "#FFFFFF" : "transparent"
+                                    color: "#1A1208"
+                                    border.color: settingsRoot.currentTheme === "amber" ? "#FFFFFF" : "transparent"
                                     border.width: 2
                                     Behavior on border.color { ColorAnimation { duration: 150 } }
 
@@ -598,27 +613,27 @@ Item {
                                         Rectangle {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: 18; height: 18; radius: 9
-                                            color: "#A07830"
+                                            color: "#D4880A"
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "솔라"
-                                            color: "#D8C898"; font.pixelSize: 10
+                                            text: "앰버"
+                                            color: "#E8C87A"; font.pixelSize: 12
                                             font.family: settingsRoot.fontFamily
                                         }
                                     }
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: settingsRoot.themeChangeRequested("solar")
+                                        onClicked: settingsRoot.themeChangeRequested("amber")
                                     }
                                 }
 
-                                // 포레스트
+                                // 바이올렛
                                 Rectangle {
                                     width: (parent.width - 12) / 3
                                     height: 64; radius: 8
-                                    color: "#101810"
-                                    border.color: settingsRoot.currentTheme === "forest" ? "#FFFFFF" : "transparent"
+                                    color: "#120E1C"
+                                    border.color: settingsRoot.currentTheme === "violet" ? "#FFFFFF" : "transparent"
                                     border.width: 2
                                     Behavior on border.color { ColorAnimation { duration: 150 } }
 
@@ -628,18 +643,18 @@ Item {
                                         Rectangle {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: 18; height: 18; radius: 9
-                                            color: "#5A8A68"
+                                            color: "#8860D0"
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "포레스트"
-                                            color: "#A8C8B0"; font.pixelSize: 10
+                                            text: "바이올렛"
+                                            color: "#C8B8E8"; font.pixelSize: 12
                                             font.family: settingsRoot.fontFamily
                                         }
                                     }
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: settingsRoot.themeChangeRequested("forest")
+                                        onClicked: settingsRoot.themeChangeRequested("violet")
                                     }
                                 }
                             }
@@ -737,7 +752,7 @@ Item {
                                                 text: modelData.label
                                                 color: settingsRoot.currentWindowScale === modelData.idx
                                                        ? "white" : "#AAA"
-                                                font.pixelSize: 11; font.bold: settingsRoot.currentWindowScale === modelData.idx
+                                                font.pixelSize: 13; font.bold: settingsRoot.currentWindowScale === modelData.idx
                                                 font.family: settingsRoot.fontFamily
                                             }
                                             Text {
@@ -745,7 +760,7 @@ Item {
                                                 text: modelData.desc
                                                 color: settingsRoot.currentWindowScale === modelData.idx
                                                        ? "#A8D0FF" : "#555"
-                                                font.pixelSize: 9
+                                                font.pixelSize: 11
                                                 font.family: settingsRoot.fontFamily
                                             }
                                         }
@@ -794,7 +809,7 @@ Item {
                         Text {
                             x: 8
                             text: "말풍선 방향"
-                            color: "#888"; font.pixelSize: 11
+                            color: "#888"; font.pixelSize: 13
                             font.family: settingsRoot.fontFamily
                         }
 
@@ -830,7 +845,7 @@ Item {
                                             anchors.centerIn: parent
                                             text: modelData.label
                                             color: settingsRoot.pipBubbleDir === modelData.dir ? "white" : "#AAA"
-                                            font.pixelSize: 11
+                                            font.pixelSize: 13
                                             font.bold: settingsRoot.pipBubbleDir === modelData.dir
                                             font.family: settingsRoot.fontFamily
                                         }
@@ -866,7 +881,7 @@ Item {
         signal toggled()
 
         width: parent ? parent.width : 0
-        height: 30
+        height: 34
         color: secHov.containsMouse ? "#242424" : "transparent"
         Behavior on color { ColorAnimation { duration: 100 } }
 
@@ -875,13 +890,13 @@ Item {
             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 4 }
             text: parent.expanded ? "▾" : "▸"
             color: "#4A90D9"
-            font.pixelSize: 10
+            font.pixelSize: 13
         }
         Text {
             anchors { verticalCenter: parent.verticalCenter; left: secArrow.right; leftMargin: 4 }
             text: parent.label
             color: "#4A90D9"
-            font.pixelSize: 13
+            font.pixelSize: 15
             font.bold: true
             font.family: parent.fontFamily
         }
@@ -898,7 +913,7 @@ Item {
         property string label: ""
         property string fontFamily: ""
         signal activated()
-        height: 32
+        height: 36
         radius: 6
         color: btnHover.containsMouse ? "#2E2E2E" : "transparent"
         Behavior on color { ColorAnimation { duration: 100 } }
@@ -907,7 +922,7 @@ Item {
             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8; right: parent.right; rightMargin: 8 }
             text: parent.label
             color: "#D0D0D0"
-            font.pixelSize: 13
+            font.pixelSize: 14
             font.family: parent.fontFamily
             elide: Text.ElideRight
         }

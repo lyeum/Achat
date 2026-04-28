@@ -81,7 +81,7 @@ Item {
                                     ? "... 외 " + (fileOptRoot._paths.length - 2) + "개"
                                     : name
                             }
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             font.family: fileOptRoot.fontFamily
                             color: "#7090A0"
                             elide: Text.ElideLeft
@@ -118,7 +118,7 @@ Item {
                         }
                         Text {
                             text: modelData
-                            font.pixelSize: 12
+                            font.pixelSize: 14
                             font.family: fileOptRoot.fontFamily
                             color: fileOptRoot._mode === index ? "#A8D0D8" : "#607080"
                             MouseArea {
@@ -141,7 +141,7 @@ Item {
                     text: fileOptRoot._paths.length === 1
                         ? "새 파일 이름 (확장자 제외):"
                         : "공통 접두어 (예: photo → photo_001, photo_002...):"
-                    font.pixelSize: 11
+                    font.pixelSize: 13
                     font.family: fileOptRoot.fontFamily
                     color: "#7090A0"
                 }
@@ -155,7 +155,7 @@ Item {
                     TextInput {
                         id: renameInput
                         anchors { fill: parent; margins: 8 }
-                        font.pixelSize: 13
+                        font.pixelSize: 15
                         font.family: fileOptRoot.fontFamily
                         color: "#C8E0E8"
                         onTextChanged: fileOptRoot._renameTo = text
@@ -178,7 +178,7 @@ Item {
 
                 Text {
                     text: "변환할 확장자 선택:"
-                    font.pixelSize: 11
+                    font.pixelSize: 13
                     font.family: fileOptRoot.fontFamily
                     color: "#7090A0"
                 }
@@ -192,7 +192,11 @@ Item {
                     ScrollView {
                         anchors.fill: parent
                         contentWidth: availableWidth
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            contentItem: Rectangle { color: "transparent" }
+                            background: Rectangle { color: "transparent" }
+                        }
                         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                         Column {
@@ -216,7 +220,7 @@ Item {
                                         }
                                         Text {
                                             text: "." + modelData
-                                            font.pixelSize: 12
+                                            font.pixelSize: 14
                                             font.family: fileOptRoot.fontFamily
                                             color: fileOptRoot._newExt === modelData ? "#A8D0D8" : "#607080"
                                         }
@@ -250,7 +254,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: "적용"
-                        font.pixelSize: 12
+                        font.pixelSize: 14
                         font.family: fileOptRoot.fontFamily
                         color: "#FFFFFF"
                     }
@@ -285,7 +289,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: "취소"
-                        font.pixelSize: 12
+                        font.pixelSize: 14
                         font.family: fileOptRoot.fontFamily
                         color: "#8090A0"
                     }

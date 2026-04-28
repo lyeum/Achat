@@ -81,7 +81,7 @@ Item {
             Text {
                 anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
                 text: "관리자"
-                color: "#C0C0E0"; font.pixelSize: 12; font.bold: true
+                color: "#C0C0E0"; font.pixelSize: 14; font.bold: true
                 font.family: adminRoot.fontFamily
             }
             Rectangle {
@@ -89,7 +89,7 @@ Item {
                 width: 20; height: 20; radius: 10
                 color: closeHov.containsMouse ? "#C03030" : "#333348"
                 Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "X"; color: "#CCC"; font.pixelSize: 10; font.bold: true }
+                Text { anchors.centerIn: parent; text: "X"; color: "#CCC"; font.pixelSize: 12; font.bold: true }
                 MouseArea {
                     id: closeHov; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
@@ -123,6 +123,10 @@ Item {
             }
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: ScrollBar {
+                contentItem: Rectangle { color: "transparent" }
+                background:  Rectangle { color: "transparent" }
+            }
             contentWidth: availableWidth
 
             Column {
@@ -136,7 +140,7 @@ Item {
 
                 Text {
                     text: "친밀도"
-                    color: "#7070A8"; font.pixelSize: 10; font.bold: true
+                    color: "#7070A8"; font.pixelSize: 12; font.bold: true
                     font.family: adminRoot.fontFamily; leftPadding: 2
                 }
                 Item { width: 1; height: 6 }
@@ -188,7 +192,7 @@ Item {
 
                     Text {
                         text: Math.round(affTrack.trackVal * 100)
-                        color: "#A0A0D0"; font.pixelSize: 12; font.bold: true
+                        color: "#A0A0D0"; font.pixelSize: 14; font.bold: true
                         font.family: adminRoot.fontFamily
                         Layout.preferredWidth: 28; horizontalAlignment: Text.AlignRight
                     }
@@ -201,7 +205,7 @@ Item {
                 // ── 감정 상태 ─────────────────────────────────────────────────
                 Text {
                     text: "감정 상태"
-                    color: "#7070A8"; font.pixelSize: 10; font.bold: true
+                    color: "#7070A8"; font.pixelSize: 12; font.bold: true
                     font.family: adminRoot.fontFamily; leftPadding: 2
                 }
                 Item { width: 1; height: 6 }
@@ -223,7 +227,7 @@ Item {
                             Text {
                                 anchors.centerIn: parent; text: modelData.label
                                 color: parent.sel ? "#8AAAF8" : "#505078"
-                                font.pixelSize: 10; font.family: adminRoot.fontFamily
+                                font.pixelSize: 12; font.family: adminRoot.fontFamily
                             }
                             MouseArea {
                                 id: moodHov; anchors.fill: parent
@@ -241,7 +245,7 @@ Item {
                 // ── 직접성 ────────────────────────────────────────────────────
                 Text {
                     text: "직접성"
-                    color: "#7070A8"; font.pixelSize: 10; font.bold: true
+                    color: "#7070A8"; font.pixelSize: 12; font.bold: true
                     font.family: adminRoot.fontFamily; leftPadding: 2
                 }
                 Item { width: 1; height: 6 }
@@ -251,7 +255,7 @@ Item {
 
                     Text {
                         text: "돌려말함"
-                        color: "#606080"; font.pixelSize: 10; font.family: adminRoot.fontFamily
+                        color: "#606080"; font.pixelSize: 12; font.family: adminRoot.fontFamily
                     }
 
                     Item {
@@ -298,12 +302,12 @@ Item {
 
                     Text {
                         text: "직접적"
-                        color: "#606080"; font.pixelSize: 10; font.family: adminRoot.fontFamily
+                        color: "#606080"; font.pixelSize: 12; font.family: adminRoot.fontFamily
                     }
 
                     Text {
                         text: drTrack.drVal.toFixed(2)
-                        color: "#9A8060"; font.pixelSize: 10; font.family: adminRoot.fontFamily
+                        color: "#9A8060"; font.pixelSize: 12; font.family: adminRoot.fontFamily
                         Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight
                     }
                 }
@@ -336,7 +340,7 @@ Item {
                         anchors.centerIn: parent
                         text: adminRoot.affLocked ? "잠금 해제" : "친밀도 잠금"
                         color: adminRoot.affLocked ? "#E06060" : "#60C080"
-                        font.pixelSize: 11; font.family: adminRoot.fontFamily
+                        font.pixelSize: 13; font.family: adminRoot.fontFamily
                     }
                     MouseArea {
                         id: lockHov; anchors.fill: parent; hoverEnabled: true
@@ -354,7 +358,7 @@ Item {
                     Behavior on color { ColorAnimation { duration: 100 } }
                     Text {
                         anchors.centerIn: parent; text: "닫기"
-                        color: "#8080B0"; font.pixelSize: 11; font.family: adminRoot.fontFamily
+                        color: "#8080B0"; font.pixelSize: 13; font.family: adminRoot.fontFamily
                     }
                     MouseArea {
                         id: closeBtnHov; anchors.fill: parent; hoverEnabled: true

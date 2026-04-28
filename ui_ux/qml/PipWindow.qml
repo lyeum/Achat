@@ -21,7 +21,11 @@ Item {
     property string bubbleDirection:  "random"   // "random" | "left" | "right"
 
     // 입력창 표시 여부 (외부에서도 읽을 수 있도록 public)
-    property bool inputOpen: false
+    property bool inputOpen:   false
+    property bool isSleeping:  false   // bridge.sleepStateChanged 로 갱신
+
+    signal sleepRequested()
+    signal wakeRequested()
 
     // ── 내부 상태 ────────────────────────────────────────────────────────────
     property bool _tailLeft: true    // 꼬리 위치: true=왼쪽, false=오른쪽
@@ -137,7 +141,10 @@ Item {
             ScrollBar.vertical: ScrollBar {
                 policy: msgFlick.contentHeight > msgFlick.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
                 width: 4
-            }
+            
+    contentItem: Rectangle { color: "transparent" }
+    background: Rectangle { color: "transparent" }
+}
 
             Text {
                 id: msgText
@@ -253,6 +260,8 @@ Item {
         id: charArea
         width: 160; height: 160
         anchors { bottom: parent.bottom; left: parent.left }
+        opacity: pipRoot.isSleeping ? 0.35 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 400 } }
 
         // 기본 아이콘 (icons/{id}/{id}.png)
         Image {
@@ -304,17 +313,58 @@ Item {
             visible: !pipIcon.visible && !pipRoot._hasAnyPart
         }
 
-        // 클릭: 입력창 토글
+        // 클릭: 입력창 토글 (절전 중이면 깨우기)
         MouseArea {
             id: iconHover
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
+                sleepTimer.restart()
+                if (pipRoot.isSleeping) {
+                    pipRoot.wakeRequested()
+                    return
+                }
                 pipRoot.inputOpen = !pipRoot.inputOpen
                 if (pipRoot.inputOpen) {
                     Qt.callLater(() => pipInput.forceActiveFocus())
                 }
+            }
+        }
+
+    }
+
+    // ── 절전 안내 (charArea 위에 겹쳐 표시, charArea opacity 와 분리) ─────────
+    Item {
+        visible: pipRoot.isSleeping
+        width: charArea.width; height: charArea.height
+        anchors { bottom: parent.bottom; left: parent.left }
+        z: 5
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 4
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "💤"
+                font.pixelSize: 26
+                renderType: Text.QtRendering
+                font.family: "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji"
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "절전 중"
+                color: "#D0D0D0"; font.pixelSize: 11
+                font.family: pipRoot.fontFamily
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                sleepTimer.restart()
+                pipRoot.wakeRequested()
             }
         }
     }
@@ -326,8 +376,19 @@ Item {
         repeat: false
         onTriggered: {
             pipRoot.bubbleOpen = false
-            // 입력창도 닫기
             pipRoot.inputOpen = false
+        }
+    }
+
+    // ── 절전 타이머 (5분 비활동 시 절전 요청) ─────────────────────────────────
+    Timer {
+        id: sleepTimer
+        interval: 300000   // 5분
+        repeat: false
+        running: pipRoot.visible && !pipRoot.isSleeping
+        onTriggered: {
+            if (!pipRoot.inputOpen)
+                pipRoot.sleepRequested()
         }
     }
 
@@ -343,6 +404,7 @@ Item {
         if (text === "") return
         pipInput.text = ""
         autoClose.restart()
+        sleepTimer.restart()
         pipRoot.messageSent(text)
     }
 }

@@ -167,7 +167,7 @@ Item {
                     anchors { fill: parent; leftMargin: 14; rightMargin: 10 }
                     Text {
                         text: "새 캐릭터 만들기"
-                        color: createRoot._textPri; font.pixelSize: 13; font.bold: true
+                        color: createRoot._textPri; font.pixelSize: 15; font.bold: true
                         font.family: createRoot.fontFamily
                     }
                     Item { Layout.fillWidth: true }
@@ -190,6 +190,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: ScrollBar {
+                    contentItem: Rectangle { color: "transparent" }
+                    background:  Rectangle { color: "transparent" }
+                }
                 contentWidth: availableWidth   // Flickable 수평 스크롤 비활성화 → 슬라이더 보호
                 clip: true
 
@@ -220,7 +224,7 @@ Item {
                     Item { height: 8; width: 1 }
 
                     // 설명 (텍스트에어리어)
-                    Text { text: "설명"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                    Text { text: "설명"; color: createRoot._textSec; font.pixelSize: 12; font.family: createRoot.fontFamily }
                     Item { height: 4; width: 1 }
                     Rectangle {
                         width: parent.width; height: 58
@@ -230,11 +234,15 @@ Item {
                         ScrollView {
                             anchors { fill: parent; margins: 6 }
                             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                            ScrollBar.vertical: ScrollBar {
+                                contentItem: Rectangle { color: "transparent" }
+                                background:  Rectangle { color: "transparent" }
+                            }
                             TextArea {
                                 id: descArea
                                 placeholderText: "캐릭터를 간단히 소개해주세요.\nex) 말수가 적고 냉정해 보이지만, 신뢰하는 사람에게는 의외로 솔직한 편이다."
                                 placeholderTextColor: "#686890"
-                                color: createRoot._textPri; font.pixelSize: 11
+                                color: createRoot._textPri; font.pixelSize: 13
                                 font.family: createRoot.fontFamily
                                 background: null; wrapMode: TextArea.Wrap
                                 onTextChanged: createRoot.f_description = text
@@ -250,7 +258,7 @@ Item {
                     SectionLabel { text: "말투"; fontFam: createRoot.fontFamily }
                     Item { height: 6; width: 1 }
 
-                    Text { text: "경어체"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                    Text { text: "경어체"; color: createRoot._textSec; font.pixelSize: 12; font.family: createRoot.fontFamily }
                     Item { height: 4; width: 1 }
                     ToggleRow {
                         options: ["반말", "존댓말"]
@@ -260,7 +268,7 @@ Item {
                     }
                     Item { height: 8; width: 1 }
 
-                    Text { text: "말투 스타일"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                    Text { text: "말투 스타일"; color: createRoot._textSec; font.pixelSize: 12; font.family: createRoot.fontFamily }
                     Item { height: 4; width: 1 }
                     ToggleRow {
                         options: ["blunt", "soft"]
@@ -273,7 +281,7 @@ Item {
 
                     RowLayout {
                         width: parent.width
-                        Text { text: "페르소나"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                        Text { text: "페르소나"; color: createRoot._textSec; font.pixelSize: 12; font.family: createRoot.fontFamily }
                         Text { text: "— 말투의 분위기·커뮤니케이션 방식"; color: "#404060"; font.pixelSize: 9; font.family: createRoot.fontFamily }
                     }
                     Item { height: 4; width: 1 }
@@ -343,7 +351,7 @@ Item {
                                         anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
                                         verticalAlignment: TextInput.AlignVCenter
                                         text: modelData
-                                        color: createRoot._textPri; font.pixelSize: 11
+                                        color: createRoot._textPri; font.pixelSize: 13
                                         font.family: createRoot.fontFamily; clip: true
                                         // onTextChanged 대신 editingFinished 사용:
                                         // onTextChanged에서 f_rules 재할당 시 Repeater 전체 재생성 → 커서 리셋 버그
@@ -383,7 +391,7 @@ Item {
                             anchors { fill: parent; leftMargin: 8 }
                             spacing: 4
                             Text { text: "+"; color: "#5A90CA"; font.pixelSize: 14; font.family: createRoot.fontFamily }
-                            Text { text: "규칙 추가"; color: "#5A90CA"; font.pixelSize: 11; font.family: createRoot.fontFamily }
+                            Text { text: "규칙 추가"; color: "#5A90CA"; font.pixelSize: 13; font.family: createRoot.fontFamily }
                         }
                         MouseArea {
                             id: addRuleH; anchors.fill: parent; hoverEnabled: true
@@ -420,7 +428,7 @@ Item {
                                 anchors.fill: parent; spacing: 4
                                 Text {
                                     text: createRoot._tierKo[rlRowC.tierIndex]
-                                    color: createRoot._textSec; font.pixelSize: 10
+                                    color: createRoot._textSec; font.pixelSize: 12
                                     font.family: createRoot.fontFamily
                                     Layout.preferredWidth: 76
                                 }
@@ -435,7 +443,7 @@ Item {
                                         Text {
                                             anchors.centerIn: parent; text: modelData
                                             color: parent.sel ? "#8AC0F8" : createRoot._textSec
-                                            font.pixelSize: 10; font.family: createRoot.fontFamily
+                                            font.pixelSize: 12; font.family: createRoot.fontFamily
                                         }
                                         MouseArea {
                                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -477,7 +485,7 @@ Item {
                                 anchors.fill: parent; spacing: 4
                                 Text {
                                     text: createRoot._tierKo[opRowC.tierIndex]
-                                    color: createRoot._textSec; font.pixelSize: 10
+                                    color: createRoot._textSec; font.pixelSize: 12
                                     font.family: createRoot.fontFamily
                                     Layout.preferredWidth: 76
                                 }
@@ -492,7 +500,7 @@ Item {
                                         Text {
                                             anchors.centerIn: parent; text: modelData
                                             color: parent.sel ? "#C08AF8" : createRoot._textSec
-                                            font.pixelSize: 10; font.family: createRoot.fontFamily
+                                            font.pixelSize: 12; font.family: createRoot.fontFamily
                                         }
                                         MouseArea {
                                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -519,7 +527,7 @@ Item {
                     Item { height: 6; width: 1 }
                     RowLayout {
                         width: parent.width; spacing: 6
-                        Text { text: "돌려말함"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
+                        Text { text: "돌려말함"; color: createRoot._textSec; font.pixelSize: 12; font.family: createRoot.fontFamily }
                         Item {
                             id: drTrackC
                             Layout.fillWidth: true; height: 20
@@ -558,8 +566,8 @@ Item {
                                 }
                             }
                         }
-                        Text { text: "직접"; color: createRoot._textSec; font.pixelSize: 10; font.family: createRoot.fontFamily }
-                        Text { text: drTrackC.drVal.toFixed(2); color: "#906840"; font.pixelSize: 10; font.family: createRoot.fontFamily; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight }
+                        Text { text: "직접"; color: createRoot._textSec; font.pixelSize: 12; font.family: createRoot.fontFamily }
+                        Text { text: drTrackC.drVal.toFixed(2); color: "#906840"; font.pixelSize: 12; font.family: createRoot.fontFamily; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight }
                     }
 
                     Item { height: 18; width: 1 }
@@ -568,7 +576,7 @@ Item {
                     Text {
                         visible: createRoot._saveError !== ""
                         text: createRoot._saveError
-                        color: "#E06060"; font.pixelSize: 11
+                        color: "#E06060"; font.pixelSize: 13
                         font.family: createRoot.fontFamily
                         wrapMode: Text.Wrap
                         width: parent.width
@@ -583,7 +591,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: "저장"
-                            color: "#D0D0FF"; font.pixelSize: 13; font.bold: true
+                            color: "#D0D0FF"; font.pixelSize: 15; font.bold: true
                             font.family: createRoot.fontFamily
                         }
                         MouseArea {
@@ -616,7 +624,7 @@ Item {
 
     component SectionLabel: Text {
         property string fontFam: ""
-        color: "#9090C8"; font.pixelSize: 11; font.bold: true
+        color: "#9090C8"; font.pixelSize: 13; font.bold: true
         font.family: fontFam
         width: parent ? parent.width : 0
     }
@@ -634,7 +642,7 @@ Item {
 
             Text {
                 text: label
-                color: createRoot._textSec; font.pixelSize: 10
+                color: createRoot._textSec; font.pixelSize: 12
                 font.family: fontFam
                 Layout.preferredWidth: 28
             }
@@ -647,11 +655,11 @@ Item {
                     id: fi
                     anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
                     verticalAlignment: TextInput.AlignVCenter
-                    color: createRoot._textPri; font.pixelSize: 12
+                    color: createRoot._textPri; font.pixelSize: 14
                     font.family: fontFam; clip: true
                     Text {
                         anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                        text: hint; color: createRoot._textSec; font.pixelSize: 12
+                        text: hint; color: createRoot._textSec; font.pixelSize: 14
                         font.family: fontFam
                         visible: !fi.text && !fi.activeFocus
                     }
@@ -692,7 +700,7 @@ Item {
                         text: (parent.parent.parent.labels && parent.parent.parent.labels.length > index)
                               ? parent.parent.parent.labels[index] : modelData
                         color: parent.parent.parent.selected === modelData ? "#FFFFFF" : createRoot._textSec
-                        font.pixelSize: 11; font.family: parent.parent.parent.fontFam
+                        font.pixelSize: 13; font.family: parent.parent.parent.fontFam
                     }
                     MouseArea {
                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
