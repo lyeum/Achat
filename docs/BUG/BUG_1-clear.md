@@ -140,7 +140,7 @@ gsettings set org.freedesktop.ibus.engine.hangul switch-keys 'Hangul,Shift+space
 | 항목 | 값 |
 |---|---|
 | ibus portal 서비스명 | `org.freedesktop.portal.IBus` (등록됨) |
-| ibus private bus | `/home/trusia/.cache/ibus/dbus-XXXXX` |
+| ibus private bus | `/home/<user>/.cache/ibus/dbus-XXXXX` |
 | DBUS_SESSION_BUS_ADDRESS | `unix:path=/run/user/1000/bus` (systemd) |
 | PySide6 작동 버전 | **6.9.3** (6.10.2는 `invalid portal bus` 오류로 연결 실패) |
 | WAYLAND_DISPLAY 처리 | `os.environ.pop("WAYLAND_DISPLAY")` — portal 강제 방지 |
