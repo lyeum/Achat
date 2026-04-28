@@ -256,6 +256,7 @@ Achat/
 │   │   ├─ CharacterBuildPanel.qml  # 캐릭터 빌드 패널
 │   │   ├─ EmotionPanel.qml       # 감정 오버레이 편집 패널
 │   │   ├─ WorldCreatePanel.qml   # 세계관 생성 패널 (culture/place/story 섹션 입력)
+│   │   ├─ WorldImagePanel.qml    # 세계관 장소별 배경 이미지 관리 (드래그&드롭 + 파일 선택)
 │   │   ├─ CharacterDisplay.qml   # 레이어 합성 캐릭터 표시
 │   │   ├─ CharacterSelectPanel.qml # 캐릭터 변경 모달
 │   │   ├─ CharacterStatusPanel.qml # 캐릭터 상태 모달
@@ -310,8 +311,14 @@ Achat/
 │
 ├─ scripts/                        # 변환 스크립트
 │   ├─ merge_lora.py              # LoRA 병합
-│   └─ convert_to_gguf.sh         # GGUF 변환 + 양자화
+│   ├─ convert_to_gguf.sh         # GGUF 변환 + 양자화
+│   └─ package_deploy.sh          # 소스 zip 패키지 생성 (GitHub Release용)
 │
+├─ deploy/                         # Windows exe 인스톨러 패키징
+│   ├─ launcher.py                # PyInstaller 진입점 (Achat.exe 더블클릭 실행)
+│   ├─ achat.spec                 # PyInstaller 빌드 스펙 (단일 exe)
+│   ├─ achat_setup.iss            # Inno Setup 6 설치 마법사 스크립트
+│   └─ build_installer.bat        # 로컬 빌드 실행 (uv다운로드→PyInstaller→Inno)
 │
 ├─ main.py                         # 진입점
 ├─ config.py                       # 환경 설정 (dev / deploy 분기)
@@ -435,15 +442,21 @@ Achat/
 ---
 
 ### Phase 6 — GGUF 변환 및 배포 패키징
-> 목표: Windows CPU 배포 가능한 단일 패키지 구성
+> 목표: Windows CPU 배포 가능한 단일 패키지 + exe 인스톨러 구성
 > 상세 구현: [학습후보.md](학습후보.md) — merge_lora, convert_to_gguf 스크립트 계획
 
 - [x] `scripts/merge_lora.py` — LoRA 병합 (`low_cpu_mem_usage=True`)
 - [x] `scripts/convert_to_gguf.sh` — GGUF 변환 + Q4_K_M 양자화
 - [x] `run.bat` — Windows 배포 실행 스크립트
-- [ ] GPU 파인튜닝 실행 — RTX 5060 Ti 3 epoch 완료 및 평가 결과 기록
-- [ ] (실행 검증) merge → GGUF 변환 → Windows `run.bat` 전체 배포 파이프라인 작동 확인
-- [ ] (실행 검증) `pyproject-deploy.toml` Windows 클린 설치 확인
+- [x] `scripts/package_deploy.sh` — 소스 zip 패키지 생성 (GitHub Release용)
+- [x] `.github/workflows/cd.yml` — 태그 push 시 자동 Release 생성
+- [x] LoRA v11 GPU 파인튜닝 완료, v12 비교 평가 후 v11 복귀
+- [x] (실행 검증) `C:\Achat` 소스 배포 v0.0 — Windows 실환경 UI 검증 완료 ([BUG_06.md](docs/BUG/BUG_06.md))
+- [x] `deploy/launcher.py` — PyInstaller 기반 더블클릭 실행 exe 진입점
+- [x] `deploy/achat.spec` — PyInstaller spec (단일 exe)
+- [x] `deploy/achat_setup.iss` — Inno Setup 설치 마법사 스크립트
+- [x] `deploy/build_installer.bat` — Windows exe 인스톨러 빌드 스크립트
+- [ ] (실행 검증) `AchatSetup.exe` Windows 클린 설치 → 실행 → 제어판 삭제 전 과정 확인
 - [ ] (실행 검증) CPU 추론 속도 8+ tok/s 달성 확인
 
 ---
@@ -595,44 +608,129 @@ ACHAT_ENV=dev uv run python main.py
 
 ### 배포 환경 — Windows + CPU
 
-#### 1. 모델 파일 준비
-```
-Achat/
-└─ models/
-   └─ model_q4km.gguf     ← Phase 6 변환 결과물 배치
-```
+#### 시스템 요구사항
 
-#### 2. uv 설치 (최초 1회)
+| 항목 | 최소 | 권장 |
+|---|---|---|
+| OS | Windows 10 (x64) | Windows 11 |
+| CPU | AVX2 지원 | AVX2 이상 |
+| RAM | 4 GB | 8 GB |
+| 저장공간 | 3 GB (앱) + 2 GB (모델) | 8 GB 이상 |
+| Python | 3.10+ (방법 B만) | 3.11 |
+
+---
+
+#### 방법 A — 인스톨러 (일반 사용자 권장)
+
+**설치**
+
+1. GitHub Releases에서 `AchatSetup.exe` 다운로드
+2. `AchatSetup.exe` 실행 → 설치 마법사 진행
+   - 설치 경로 선택 (기본: `C:\Achat`, 변경 가능)
+   - 마법사 완료 시 자동으로 의존성(`.venv`) 설치 진행 (최초 1회, 수 분 소요)
+3. 설치 완료 후 `<설치경로>\models\` 폴더에 `model_q4km.gguf` 복사 (약 2 GB, 별도 배포)
+4. 바탕화면 바로가기 또는 시작 메뉴 → **Achat** 실행
+
+**첫 실행 시 초기화 (자동)**
+- `bge-m3` 임베딩 모델 다운로드 (~500 MB, 인터넷 연결 필요, 최초 1회만)
+- ChromaDB 세계관 RAG 인덱싱 — 수십 초 소요
+
+**제거**
+
+> 제어판 → 앱 → **Achat** → 제거
+> `.venv`, `chroma_deploy`, 세션 데이터, 모델 파일 포함 설치 경로 전체 삭제됨.
+
+---
+
+#### 방법 B — zip 수동 설치 (개발자 / 고급 사용자)
+
+**설치**
+
+1. GitHub Releases에서 `achat.zip` 다운로드 후 원하는 경로에 압축 해제
+2. `models\model_q4km.gguf` 복사 (약 2 GB)
+3. PowerShell(관리자 불필요)에서:
+
 ```powershell
-# PowerShell
+# uv 패키지 관리자 설치 (최초 1회)
 winget install --id=astral-sh.uv -e
-```
 
-#### 3. 의존성 설치
-```powershell
+# 배포용 의존성으로 전환 후 가상환경 생성
+cd <압축 해제 경로>
 copy pyproject-deploy.toml pyproject.toml
 uv sync
 ```
 
-#### 4. 실행
-```powershell
+**실행**
+
+```bat
+# 방법 1 — 배치 파일 (uv run 자동 호출)
 run.bat
-# 또는
+
+# 방법 2 — exe 더블클릭 (uv.exe가 같은 폴더에 있는 경우)
+Achat.exe
+```
+
+**환경변수 (선택)**
+
+```bat
+:: 인스톨러 없이 배포 모드를 강제 지정할 때
+set ACHAT_ENV=deploy
 uv run python main.py
 ```
 
 ---
 
-## CI
+#### 공통 — 모델 파일 준비 (직접 생성)
 
-GitHub Actions로 `main`, `dev` 브랜치 push/PR 시 자동 실행.
+`model_q4km.gguf` (~2 GB) 는 GitHub Release에 포함되지 않습니다.
+Linux 개발 환경에서 직접 생성하는 경우:
+
+```bash
+# 1. LoRA 병합 (RAM ~6GB 소요, 다른 프로세스 종료 권장)
+uv run python scripts/merge_lora.py \
+    --adapter output/LoRA_v11/adapter \
+    --output_dir output/merged_v11
+
+# 2. GGUF 변환 + Q4_K_M 양자화
+bash scripts/convert_to_gguf.sh \
+    --merged output/merged_v11 \
+    --out_dir output/gguf \
+    --llama_cpp ~/llama.cpp
+# → output/gguf/model_q4km.gguf (~2GB) 생성
+```
+
+---
+
+## CI / CD
+
+### CI — 코드 품질 (`.github/workflows/ci.yml`)
+
+`main`, `dev` 브랜치 push/PR 시 자동 실행.
 
 | Job | 내용 |
 |---|---|
 | lint | `ruff check` — 코드 품질 검사 |
 | data-validate | `build_dataset.py --dry_run` + `dataset.py` 구조 검증 (torch 없이 경량 실행) |
 
-파이프라인 smoke test (GPU 학습)는 모델 다운로드 비용 문제로 로컬에서만 실행.
+### CD — Release 빌드 (`.github/workflows/cd.yml`)
+
+`v*` 태그 push 또는 `workflow_dispatch` 시 자동 실행. 세 job이 병렬로 동작한 뒤 하나의 Release로 합쳐진다.
+
+| Job | 러너 | 내용 |
+|---|---|---|
+| package-zip | ubuntu-latest | `package_deploy.sh` 실행 → `achat.zip` 생성 |
+| package-installer | windows-latest | uv.exe 다운로드 → PyInstaller `Achat.exe` 빌드 → Inno Setup `AchatSetup.exe` 생성 |
+| release | ubuntu-latest | 두 아티팩트를 GitHub Release에 업로드 |
+
+**로컬 인스톨러 빌드 (Windows에서 직접):**
+
+```bat
+deploy\build_installer.bat
+:: → deploy\dist\AchatSetup.exe
+```
+
+> 사전 조건: [Inno Setup 6](https://jrsoftware.org/isdl.php) 설치 필요.
+> Python 3.10+, PyInstaller는 배치 파일이 자동 설치.
 
 ---
 
