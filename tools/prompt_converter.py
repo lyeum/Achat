@@ -133,7 +133,7 @@ class PromptConverterTool(BaseTool):
     def __init__(self, llm=None, config: dict | None = None) -> None:
         self._llm    = llm
         self._config = config or {}
-        self._store: "PromptGuideStore | None" = None  # lazy init
+        self._store: "PromptGuideStore | None" = None  # lazy init  # noqa: F821
 
     def _get_store(self):
         """PromptGuideStore lazy 초기화 (chroma_path가 없는 stub 환경에서는 None)."""

@@ -207,7 +207,7 @@ class TestTriggerStateRoundtrip:
 
             with patch("agent.core.get_config", return_value={"model_backend": "stub"}):
                 from agent.core import Agent
-                agent = Agent.from_session(state)
+                Agent.from_session(state)
 
         # stub 모드에서도 트리거 복원 검증
         # (stub이면 session=None이므로 from_session 분기 타지 않음 — 비stub mock으로 확인)

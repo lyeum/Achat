@@ -516,10 +516,15 @@ python training/eval/speed_bench.py --backend transformers
 - [x] `scripts/merge_lora.py` 작성 완료
 - [x] `scripts/convert_to_gguf.sh` 작성 완료
 - [x] `run.bat` 작성 완료
+- [x] `deploy/launcher.py` — PyInstaller 단일 exe 런처 (uv sync → python main.py 실행)
+- [x] `deploy/achat.spec` — PyInstaller spec (onefile, 아이콘, 런타임 훅)
+- [x] `deploy/achat_setup.iss` — Inno Setup 6 설치 스크립트 (uv sync 포스트 인스톨 포함)
+- [x] `deploy/build_installer.bat` — uv.exe 다운로드 + PyInstaller + ISCC 순차 빌드 자동화
+- [x] CD `.github/workflows/cd.yml` — `package-installer` 잡 (tag push → `AchatSetup.exe` 빌드 → Release 업로드)
 - [ ] **GPU 파인튜닝 실행** — RTX 5060 Ti에서 3 epoch 완료, 평가 결과 기록 (ai_tell_checker / memory_test / speed_bench)
 - [ ] (실행 검증) `merge_lora.py` OOM 없이 완료, HF 포맷 병합 모델 저장 ← GPU 학습 완료 후 진행
 - [ ] (실행 검증) `model_q4km.gguf` 생성 (~2GB) ← llama.cpp 빌드 필요
-- [ ] (실행 검증) **배포 파이프라인 전체 작동 확인** — merge → GGUF 변환 → Windows run.bat 실행 → 위젯 정상 구동
+- [ ] (실행 검증) **배포 파이프라인 전체 작동 확인** — merge → GGUF 변환 → Windows run.bat 또는 AchatSetup.exe 실행 → 위젯 정상 구동
 - [ ] (실행 검증) CPU 추론 속도 8+ tok/s 달성 확인
 
 ---

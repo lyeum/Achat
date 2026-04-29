@@ -1,18 +1,43 @@
-# Achat — 플로팅 PIP 캐릭터 챗봇 + 기능 도우미
+# Achat — 개발자 문서
 
-다양한 가상 캐릭터와 자연스러운 대화를 나눌 수 있는 플로팅 PIP형 챗봇.
-한국어 주 사용 / Qwen2.5-3B 기반 / LoRA 파인튜닝 → GGUF 배포 파이프라인.
-
-**두 가지 상위 모드:**
-- **대화 모드** — 캐릭터 챗봇 (기존 설계)
-- **기능 모드** — 선택한 작업에 특화된 챗봇 UI. 실행은 rule-based Python, LLM은 자연어 → 파라미터 추출만 담당.
-
-> 대화 품질 설계 상세: [대화품질.md](대화품질.md)
-> 학습 모델 후보 및 실험 설계: [학습후보.md](학습후보.md)
+> 플로팅 PIP 캐릭터 챗봇 + 기능 도우미  
+> 한국어 특화 / Qwen2.5-3B 기반 / LoRA 파인튜닝 → GGUF 배포 파이프라인
 
 ---
 
-## 개발 환경 (실제 스펙)
+## 목차
+
+1. [프로젝트 개요](#1-프로젝트-개요)
+2. [개발 환경 & 모델 선택](#2-개발-환경--모델-선택)
+3. [시스템 아키텍처](#3-시스템-아키텍처)
+4. [데이터 구조 (ERD)](#4-데이터-구조-erd)
+5. [파이프라인](#5-파이프라인)
+6. [기능 모드 도구](#6-기능-모드-도구)
+7. [디렉토리 구조](#7-디렉토리-구조)
+8. [로드맵](#8-로드맵)
+9. [실현 가능성 검토](#9-실현-가능성-검토)
+10. [환경 요구사항 & 설치](#10-환경-요구사항--설치)
+11. [CI / CD](#11-ci--cd)
+12. [알려진 제약 및 주의사항](#12-알려진-제약-및-주의사항)
+
+---
+
+## 1. 프로젝트 개요
+
+다양한 가상 캐릭터와 자연스러운 대화를 나눌 수 있는 플로팅 PIP형 챗봇.
+
+**두 가지 상위 모드:**
+- **대화 모드** — 캐릭터 챗봇. 말투·감정(mood/affection) 상태 유지, 장기 기억.
+- **기능 모드** — 파일 분류·변환·이름변경·검색·프롬프트 변환 도구. LLM은 자연어 → JSON 파라미터 추출만 담당, 실행은 rule-based Python.
+
+> 대화 품질 설계 상세: [대화품질.md](참조/대화품질.md)  
+> 학습 모델 후보 및 실험 설계: [학습후보.md](참조/학습후보.md)
+
+---
+
+## 2. 개발 환경 & 모델 선택
+
+### 개발 환경 스펙
 
 | 항목 | 사양 |
 |---|---|
@@ -22,11 +47,9 @@
 | OS | Linux |
 | CUDA | 12.8+ 필요 (Blackwell 대응) |
 
----
+### 모델 선택 근거
 
-## 모델 선택 근거
-
-> **목표 모델: Qwen2.5-3B-Instruct** (1.5B는 폴백)
+> **채택 모델: Qwen2.5-3B-Instruct** (1.5B는 폴백)
 
 | 모델 | VRAM 추론 | QLoRA 학습 VRAM | LoRA 병합 CPU RAM | 판정 |
 |---|---|---|---|---|
@@ -49,7 +72,100 @@
 
 ---
 
-## 전체 파이프라인
+## 3. 시스템 아키텍처
+
+### 대화 엔진 아키텍처
+
+> 상세 설계는 [대화품질.md](참조/대화품질.md) 참조
+
+```
+User Input
+    │
+    ▼
+[모드 분기]
+    ├── 대화 모드 ──────────────────────────────────────────────┐
+    │                                                            │
+    │   [Pre-processing]  — 의도 분류, 엔티티 추출              │
+    │       │                                                    │
+    │       ├──────────────────────┐                            │
+    │       ▼                      ▼                            │
+    │   [단기 메모리]         [장기 메모리 VDB]                 │
+    │    최근 5턴 + session_context  시맨틱 유사도 검색         │
+    │    (검색 없이)            (bge-m3, 임계값 0.52)           │
+    │       │                      │                            │
+    │       └──────────┬───────────┘                            │
+    │                  ▼                                         │
+    │   [Context Assembly]  — 토큰 예산 관리                    │
+    │     Layer A: 캐릭터 시스템 프롬프트 (고정, ~300 tok)      │
+    │     Layer B: 세계관 + 현재 Act 상황  (고정, ~200 tok)     │
+    │     Layer C: VDB 검색 결과           (동적, ~150 tok)     │
+    │     Layer D: 단기 버퍼 최근 N턴      (동적, ~450 tok)     │
+    │     Layer E: session_context + character_notes             │
+    │     Layer F: 최근 기능 작업 요약 (있을 때만, ~50 tok)      │
+    │                  │                                         │
+    │                  ▼                                         │
+    │            LLM (llama-cpp)                                 │
+    │                  │                                         │
+    │                  ▼                                         │
+    │   [Post-processing]                                        │
+    │     - mood / affection 상태 업데이트                      │
+    │     - Act 전환 조건 체크                                   │
+    │     - 메모리 쓰기 트리거 체크 (N턴 도달 또는 즉시 flush)  │
+    │                  │                                         │
+    │           N턴 조건 충족 시                                 │
+    │                  ▼                                         │
+    │   [Memory Write Pipeline]                                  │
+    │     요약 → 중요도 scoring → 임베딩 → ChromaDB 저장        │
+    │                                                            │
+    └── 기능 모드 ──────────────────────────────────────────────┘
+
+        [선택한 기능 전용 시스템 프롬프트로 LLM 교체]
+        [대화 히스토리 / 장기 메모리 격리 — 기능 세션은 미기록]
+            │
+            ▼
+        LLM (llama-cpp) — 자연어 → JSON 파라미터 추출
+            │
+            ▼
+        [Rule-based 실행기] — 실제 작업 처리 (Python)
+            │
+            ▼
+        결과 요약 → 사용자에게 응답
+```
+
+### 메모리 3계층 구조
+
+| 계층 | 구현 | 지속 범위 | 용량 제한 |
+|---|---|---|---|
+| 단기 (short_term) | `session.dialogue_log` 슬라이딩 윈도우 | 최근 5턴 | ~450 tok |
+| 중기 (session_context) | `evict_to_context()` 누적 텍스트 | 세션 내 전체 (최대 600자) | ~200 tok |
+| 장기 (long_term) | ChromaDB VDB (bge-m3, cosine, dedup/quota/TTL) | 세션 간 영속 | 캐릭터당 최대 200개 항목 |
+
+---
+
+## 4. 데이터 구조 (ERD)
+
+> 상세 필드 정의 및 관계: [ERD.md](참조/ERD.md)
+
+![Achat ERD](./Achat_ERD.png)
+
+**주요 엔티티:**
+
+| 엔티티 | 설명 |
+|---|---|
+| **Character** | 캐릭터 YAML 스키마 — speech / affection / emotion / rules 슬롯 |
+| **World / Scenario / Act** | 세계관 3계층 구조 (World → Scenario → Act) |
+| **SessionState** | 런타임 대화 상태 (mood, affection, turn_count, dialogue_log) |
+| **SessionMeta** | 세션 식별 정보 (character_id, world_id, session_id) |
+| **ActiveSession** | 현재 활성 세션 포인터 |
+| **MemoryEntry** | ChromaDB 장기 메모리 항목 (content, importance, tags, TTL) |
+| **RAGChunk** | 세계관 문서 섹션 기반 청킹 + 임베딩 (world_knowledge 컬렉션) |
+| **Preferences** | UI 환경설정 (테마, PIP 방향, shown_tag_intro 등) |
+
+---
+
+## 5. 파이프라인
+
+### 학습 → 배포 전체 파이프라인
 
 ```
 [개발 환경: Linux + RTX 5060 Ti (VRAM 8GB / RAM 8GB)]
@@ -59,7 +175,8 @@
         │
         ▼
   LoRA 파인튜닝 (peft, bfloat16 풀 파라미터)
-  - bfloat16 base + LoRA adapter (rank 16) ← BitsAndBytes 미사용 (Blackwell SM 10.x 미지원)
+  - bfloat16 base + LoRA adapter (rank 32 / alpha 64)
+  - BitsAndBytes 미사용 (Blackwell SM 10.x 미지원)
   - gradient_checkpointing=True, batch_size=1, grad_accum=8
   - max_seq_length=512 (한국어 토큰 밀도 고려)
   - assistant 토큰 마스킹 — system/user 구간은 loss 제외 (v7~)
@@ -94,72 +211,13 @@
 
 ---
 
-## 대화 엔진 아키텍처 (개요)
+## 6. 기능 모드 도구
 
-> 상세 설계는 [대화품질.md](대화품질.md) 참조
-
-```
-User Input
-    │
-    ▼
-[모드 분기]
-    ├── 대화 모드 ──────────────────────────────────────────────┐
-    │                                                            │
-    │   [Pre-processing]  — 의도 분류, 엔티티 추출              │
-    │       │                                                    │
-    │       ├──────────────────────┐                            │
-    │       ▼                      ▼                            │
-    │   [단기 메모리]         [장기 메모리 VDB]                 │
-    │    최근 3~5턴 직접 삽입   시맨틱 유사도 검색              │
-    │    (검색 없이)            (bge-m3, 임계값 0.60)           │
-    │       │                      │                            │
-    │       └──────────┬───────────┘                            │
-    │                  ▼                                         │
-    │   [Context Assembly]  — 토큰 예산 관리                    │
-    │     Layer A: 캐릭터 시스템 프롬프트 (고정, ~300 tok)      │
-    │     Layer B: 세계관 + 현재 Act 상황  (고정, ~200 tok)     │
-    │     Layer C: VDB 검색 결과           (동적, ~150 tok)     │
-    │     Layer D: 단기 버퍼 최근 N턴      (동적, ~300 tok)     │
-    │     Layer E: 현재 사용자 입력                              │
-    │     Layer F: 최근 기능 작업 요약 (있을 때만, ~50 tok)      │
-    │                  │                                         │
-    │                  ▼                                         │
-    │            LLM (llama-cpp)                                 │
-    │                  │                                         │
-    │                  ▼                                         │
-    │   [Post-processing]                                        │
-    │     - mood / affection 상태 업데이트                      │
-    │     - Act 전환 조건 체크                                   │
-    │     - 메모리 쓰기 트리거 체크 (N턴 도달 시)               │
-    │                  │                                         │
-    │           N턴 조건 충족 시                                 │
-    │                  ▼                                         │
-    │   [Memory Write Pipeline]                                  │
-    │     요약 → 중요도 scoring → 임베딩 → ChromaDB 저장        │
-    │                                                            │
-    └── 기능 모드 ──────────────────────────────────────────────┘
-
-        [선택한 기능 전용 시스템 프롬프트로 LLM 교체]
-        [대화 히스토리 / 장기 메모리 격리 — 기능 세션은 미기록]
-            │
-            ▼
-        LLM (llama-cpp) — 자연어 → JSON 파라미터 추출
-            │
-            ▼
-        [Rule-based 실행기] — 실제 작업 처리 (Python)
-            │
-            ▼
-        결과 요약 → 사용자에게 응답
-```
-
----
-
-## 기능 모드 — 도구 목록
-
-각 도구는 대화 엔진에만 종속된 독립 마이크로서비스 형태.
+각 도구는 대화 엔진에만 종속된 독립 마이크로서비스 형태.  
 LLM은 자연어 해석 및 파라미터 추출만 담당, 실행은 rule-based Python.
 
 ### 폴더 정리
+
 | 세부 기능 | 방식 |
 |---|---|
 | 파일 분류 | 확장자 / MIME 타입 기반 자동 분류, 분류 기준은 자연어로 지정 |
@@ -167,29 +225,32 @@ LLM은 자연어 해석 및 파라미터 추출만 담당, 실행은 rule-based 
 | 이름 일괄 변환 | 패턴/규칙 자연어 지정 → LLM이 rename 규칙 파싱 → `pathlib` 실행 |
 
 ### 프롬프트 변환
-- 사용자가 작성한 텍스트를 LLM 프롬프트 형태로 재구성
-- 기능 전용 시스템 프롬프트로 교체하여 대화 모드와 완전 분리
 
-### 검색엔진
+사용자가 작성한 텍스트를 LLM 프롬프트 형태로 재구성 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형 5종).  
+기능 전용 시스템 프롬프트로 교체하여 대화 모드와 완전 분리.
+
+### 로컬 파일 검색
+
 | 종류 | 방식 |
 |---|---|
 | 로컬 검색 | SQLite FTS5 파일 인덱싱 (서브폴더 포함 os.walk, 권한 오류 자동 건너뜀) |
 
 ---
 
-## 디렉토리 구조
+## 7. 디렉토리 구조
 
 ```
 Achat/
 │
 ├─ docs/                           # 프로젝트 문서
-│   ├─ README.md                  # 총괄 문서 (이 파일)
-│   ├─ DIR.md                     # 파일시스템 현황 참조
-│   ├─ 대화품질.md                # Phase 1~3 상세 설계
-│   ├─ 학습후보.md                # Phase 5~6 학습 실험 설계
-│   └─ plan/
-│       ├─ phases.md              # Phase 0~7 실행 계획서
-│       └─ training_개선.md       # EWC / 카테고리 가중치 / assistant 마스킹 구현 계획
+│   ├─ introduce.md               # 개발자 문서 (이 파일)
+│   ├─ Achat_ERD.png              # ERD 이미지
+│   ├─ ERD.md                     # ERD 상세 필드 정의 (→ docs/참조/ERD.md로 통합)
+│   ├─ 로드맵.md                   # 개선 로드맵 (1~7단계)
+│   ├─ VDB.md                     # ChromaDB 구조 및 운용 가이드
+│   ├─ BUG/                       # 버그 추적 문서
+│   ├─ plan/                      # 구현 계획서 (phases, deploy_checklist 등)
+│   └─ 참조/                      # 기술 참조 (DIR, ERD, 포폴, 학습후보, 대화품질 등)
 │
 ├─ conversation/                   # 대화 엔진 (핵심)
 │   ├─ core/
@@ -202,9 +263,6 @@ Achat/
 │   │   ├─ memory_load.py         # 메모리 로더
 │   │   └─ world_load.py          # 세계관 로더
 │   ├─ memory_act/                # 메모리 스키마 및 초기 데이터
-│   │   ├─ M_schema.json          # VDB 저장 단위 스키마
-│   │   ├─ M_default.json
-│   │   └─ M_instance.json
 │   ├─ character/                  # 캐릭터 설정 파일
 │   │   ├─ character_schema.yaml   # 캐릭터 계약 (슬롯 = 학습 카테고리 어휘)
 │   │   ├─ CH_Haru.yaml
@@ -216,8 +274,8 @@ Achat/
 │   └─ main.py
 │
 ├─ memory/                         # 메모리 관리 레이어
-│   ├─ short_term.py              # 슬라이딩 윈도우 (최근 N턴)
-│   ├─ long_term.py               # ChromaDB VDB 저장 / 검색
+│   ├─ short_term.py              # 슬라이딩 윈도우 (최근 5턴) + evict_to_context()
+│   ├─ long_term.py               # ChromaDB VDB 저장 / 검색 (dedup / quota / TTL)
 │   └─ summarizer.py              # 요약 + 중요도 scoring + 쓰기 트리거
 │
 ├─ narration/                      # 세계관 트리거 패키지
@@ -226,11 +284,9 @@ Achat/
 │
 ├─ rag/                            # RAG 파이프라인
 │   ├─ index.py                   # 세계관 문서 섹션 기반 청킹 + ChromaDB 인덱싱
-│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, threshold 0.55)
+│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, threshold 0.52)
 │   ├─ world_nav.py               # 이동 의도 감지 + 동적 장소 생성
-│   └─ sources/                   # 세계관 원본 문서
-│       └─ world/
-│           └─ Seaside.md         # 통합 세계관 소스 (## culture / ## place / ## story)
+│   └─ sources/world/Seaside.md   # 통합 세계관 소스 (## culture / ## place / ## story)
 │
 ├─ agent/                          # Agent 오케스트레이터
 │   ├─ core.py                    # 전체 흐름 조율 + 모드 분기
@@ -238,32 +294,27 @@ Achat/
 │   ├─ state.py                   # mood / affection 상태 정의
 │   └─ router.py                  # 시동어 / 명령어 분기
 │
-├─ ui_ux/                          # QML + PySide6 플로팅 UI/UX (배포 환경)
+├─ ui_ux/                          # QML + PySide6 플로팅 UI/UX
 │   ├─ bridge.py                  # ChatBridge(QObject) — QML↔Python 시그널/슬롯
 │   ├─ chat_panel.py              # LLMWorker(QThread) — 백그라운드 LLM 추론
 │   ├─ widget.py                  # UIEngine — QML 엔진 래퍼
 │   ├─ tray.py                    # 시스템 트레이
 │   ├─ qml/
 │   │   ├─ Style.qml              # 디자인 토큰 singleton (색상/폰트/애니메이션)
-│   │   ├─ main.qml               # 플로팅 윈도우 (버블 축소/확장, 드래그, 스냅, 기능 태그 즉시 다이얼로그, #? 도움말 태그)
-│   │   ├─ ChatBubble.qml         # 재사용 말풍선 컴포넌트 (HTML 하이퍼링크 렌더링 지원)
+│   │   ├─ main.qml               # 플로팅 윈도우 (버블 축소/확장, 드래그, 스냅)
+│   │   ├─ ChatBubble.qml         # 재사용 말풍선 컴포넌트
 │   │   ├─ PipWindow.qml          # PIP 마스코트 모드 (bubbleDirection: random/left/right)
-│   │   ├─ SettingsPanel.qml      # 설정 패널 (테마/캐릭터/세계관/PIP방향 섹션)
+│   │   ├─ SettingsPanel.qml      # 설정 패널 (테마/캐릭터/세계관/PIP 방향)
 │   │   ├─ SideMenuPanel.qml      # 사이드 내비게이션 패널 (DB/설정/관리 아코디언)
 │   │   ├─ MemoryDBPanel.qml      # ChromaDB 장기 메모리 + 세계관 CRUD 패널
 │   │   ├─ AdminPanel.qml         # 관리자 패널 (affection 직접 조작)
-│   │   ├─ CharacterCreatePanel.qml # 캐릭터 생성 패널
-│   │   ├─ CharacterBuildPanel.qml  # 캐릭터 빌드 패널
+│   │   ├─ CharacterCreatePanel.qml / CharacterBuildPanel.qml
 │   │   ├─ EmotionPanel.qml       # 감정 오버레이 편집 패널
-│   │   ├─ WorldCreatePanel.qml   # 세계관 생성 패널 (culture/place/story 섹션 입력)
-│   │   ├─ WorldImagePanel.qml    # 세계관 장소별 배경 이미지 관리 (드래그&드롭 + 파일 선택)
-│   │   ├─ CharacterDisplay.qml   # 레이어 합성 캐릭터 표시
-│   │   ├─ CharacterSelectPanel.qml # 캐릭터 변경 모달
-│   │   ├─ CharacterStatusPanel.qml # 캐릭터 상태 모달
-│   │   ├─ ResetConfirmPanel.qml  # 캐릭터 초기화 확인 모달
-│   │   ├─ FileOptionsPanel.qml   # 파일 변환 오버레이 패널 (이름변경/확장자변환)
-│   │   ├─ FolderClassifyPanel.qml # 폴더 분류 오버레이 패널
-│   │   └─ FileSearchPanel.qml    # 파일 검색 결과 오버레이 패널
+│   │   ├─ WorldCreatePanel.qml / WorldImagePanel.qml
+│   │   ├─ CharacterDisplay.qml / CharacterSelectPanel.qml / CharacterStatusPanel.qml
+│   │   ├─ ResetConfirmPanel.qml
+│   │   ├─ FileOptionsPanel.qml / FolderClassifyPanel.qml / FileSearchPanel.qml
+│   │   └─ ManualPanel.qml        # 기능 설명 패널
 │   └─ assets/
 │       ├─ icons/                 # 앱 아이콘 PNG
 │       └─ characters/            # 캐릭터 PNG/GIF
@@ -274,35 +325,39 @@ Achat/
 │   │   ├─ classifier.py          # 파일 분류 (확장자 / MIME)
 │   │   ├─ converter.py           # 확장자 일괄 변환
 │   │   └─ renamer.py             # 이름 일괄 변환
-│   ├─ prompt_converter.py        # 프롬프트 변환
-│   └─ search/
-│       └─ local_search.py        # 로컬 파일 인덱싱 + FTS 검색 (web_search.py 삭제됨)
+│   ├─ prompt_converter.py        # 프롬프트 변환 (5종 스타일)
+│   └─ search/local_search.py     # 로컬 파일 FTS5 검색
 │
 ├─ training/                       # LoRA 파인튜닝
-│   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, EWCTrainer, GPU/CPU 자동 전환)
+│   ├─ lora_train.py              # 학습 스크립트 (bfloat16, assistant 마스킹, EWCTrainer)
 │   ├─ ewc.py                     # EWC Fisher 계산 CLI + EWCPenalty 클래스
-│   ├─ train_monitor.py           # 학습 모니터링 래퍼 — 과적합 감지 시 조기 종료 + VRAM 해제
+│   ├─ train_monitor.py           # 학습 모니터링 래퍼 (과적합 감지 → 조기 종료 + VRAM 해제)
 │   ├─ dataset.py                 # 데이터셋 로더 (ChatML, stratified sampling, category_weights)
-│   ├─ 학습.md                    # 학습 가이드 (구조 분석, 실행법, 개선안)
-│   ├─ eval/                      # 학습 결과 검증 스크립트
+│   ├─ eval/                      # 평가 스크립트
 │   │   ├─ ai_tell_checker.py     # AI투 표현 패턴 측정 (학습 후 자동 실행)
-│   │   ├─ memory_test.py         # 기억 유지 정확도 (5케이스, 자동 실행)
+│   │   ├─ memory_test.py         # 기억 유지 정확도 (5케이스)
+│   │   ├─ scenario_eval.py       # 고정 18개 시나리오 자동 평가 (합격 15/18)
+│   │   ├─ klue_regression.py     # KLUE 회귀 평가 (lm-eval 필요, 선택적)
 │   │   ├─ speed_bench.py         # 추론 속도 벤치마크 (수동)
-│   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 12턴 (수동)
-│   ├─ data/                      # 학습 데이터 (3,170건, 57파일, v11 기준)
-│   │   ├─ affection/             # 친밀도 단계별 반말 (6단계: stranger~intimate) + formal/ 존댓말 6단계
-│   │   ├─ common/                # memory_ref / ai_tell_removal / persona_follow / initiative / world_trigger_response
-│   │   ├─ emotion/               # 감정 상태별 (10종: neutral/happy/affectionate/touched/curious/sad/embarrassed/annoyed/angry + transition)
-│   │   ├─ long_dialogue/         # 장대화 (8-15턴: daily_chat(51건) / emotional_support / casual_deep / topic_continuity 등 9종)
-│   │   ├─ personality/           # 6종 성격별 (calm/cynical/tsundere/energetic/melancholic/warm)
-│   │   └─ speech_style/          # 말투 조합 (formal/ 6종 + informal/ 2종 + persona/ 4종)
-│   └─ log/                       # MVP 대화 로그 수집 (카테고리별 JSONL)
+│   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 (12턴)
+│   ├─ data/                      # 학습 데이터 (3,632건, 66파일, v12 기준)
+│   │   ├─ affection/             # 친밀도 6단계 (stranger~intimate) + formal/ 6단계
+│   │   ├─ common/                # memory_ref / ai_tell_removal / world_context_use 등
+│   │   ├─ emotion/               # 감정 상태별 (12종)
+│   │   ├─ long_dialogue/         # 장대화 (9종)
+│   │   ├─ memory/                # VDB 기억 활용 / 세션 참조 / 약속 패턴 / 요약 (4종)
+│   │   ├─ personality/           # 6종 성격별
+│   │   └─ speech_style/          # 말투 조합 (formal / informal / persona)
+│   ├─ scripts/
+│   │   ├─ build_sft_from_feedback.py  # feedback_pos → ChatML SFT 변환
+│   │   └─ rewrite_system_prompts.py   # 학습 데이터 시스템 프롬프트 재작성
+│   └─ log/                       # 대화 로그 수집 (.gitignore — daily/emotion/feedback 등)
 │
-├─ output/                        # LoRA 어댑터 출력 (.gitignore 처리)
-│   ├─ LoRA_v8/                   # v8 (eval best 1.353, 5 epoch 과적합)
-│   ├─ LoRA_v9/adapter/           # v9 (eval best 1.511, 3 epoch, EWC λ=500, memory_test 4/5)
-│   ├─ LoRA_v10/adapter/          # v10 (eval best 1.512, 3 epoch, character_schema 기반, EWC 미적용)
-│   └─ LoRA_v11/adapter/          # ← 현재 사용 중 (eval best 1.5387, step 700, r=32/alpha=64, 3,170건)
+├─ output/                         # LoRA 어댑터 출력 (.gitignore 처리)
+│   ├─ LoRA_v9/adapter/           # EWC λ=500, eval best 1.511
+│   ├─ LoRA_v10/adapter/          # character_schema 기반, eval best 1.512
+│   ├─ LoRA_v11/adapter/          # ✅ 현재 채택 (eval best 1.5387 @ step 700, r=32/alpha=64, 3,170건)
+│   └─ LoRA_v12/adapter/          # 비교 완료 → v11 복귀 (RAG 활성 시 중국어 전환 치명 결함)
 │
 ├─ data/
 │   └─ lora/
@@ -318,7 +373,7 @@ Achat/
 │   ├─ launcher.py                # PyInstaller 진입점 (Achat.exe 더블클릭 실행)
 │   ├─ achat.spec                 # PyInstaller 빌드 스펙 (단일 exe)
 │   ├─ achat_setup.iss            # Inno Setup 6 설치 마법사 스크립트
-│   └─ build_installer.bat        # 로컬 빌드 실행 (uv다운로드→PyInstaller→Inno)
+│   └─ build_installer.bat        # 로컬 빌드 실행 (uv 다운로드 → PyInstaller → Inno)
 │
 ├─ main.py                         # 진입점
 ├─ config.py                       # 환경 설정 (dev / deploy 분기)
@@ -329,45 +384,27 @@ Achat/
 
 ---
 
-## 실현 가능성 검토 (현재 환경 기준)
+## 8. 로드맵
 
-| 단계 | 실현 가능성 | 비고 |
-|---|---|---|
-| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v11 사용 중 (r=32/alpha=64, 3,170건, eval best 1.5387) |
-| LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
-| GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
-| Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
-| CPU 추론 (Windows) | ✅ 가능 | 3B Q4_K_M ~2.5GB RAM. 캐릭터 전환 OOM 수정 완료 ([BUG_02](docs/BUG/BUG_02.md)) |
-| PySide6 PIP 플로팅 UI | ✅ 가능 | Frameless + Always-on-top + 모서리 스냅, WSL2/Windows 플랫폼 분기 완료 |
-| 시맨틱 메모리 검색 | ✅ 가능 | ChromaDB + bge-m3, 로컬 동작 |
-| 폴더 정리 도구 | ✅ 가능 | pathlib / shutil 기반 rule-based, 이미지 확장자 변환은 Pillow |
-| 프롬프트 변환 도구 | ✅ 가능 | ChromaDB 가이드 캐싱 + 크롤링 폴백 |
-| 로컬 검색 도구 | ✅ 가능 | SQLite FTS5, os.walk 서브폴더 재귀 탐색 |
-| 인터넷 검색 도구 | ❌ 제거됨 | RAM/VRAM 절감 및 외부 의존성 제거 목적 (2026-04-06) |
-| JSON 파라미터 추출 (3B) | ⚠️ 주의 | prompt_convert만 LLM 추출 사용. 나머지 도구는 직접 다이얼로그로 LLM 없이 동작 |
-| RTX 5060 Ti BnB | ✅ 미사용 | Blackwell SM 10.x 호환 이슈로 BitsAndBytes 대신 bfloat16 풀 파라미터 채택 |
-
----
-
-## 로드맵
+> 전체 개선 로드맵 (1~7단계): [로드맵.md](로드맵.md)
 
 ### Phase 0 — 환경 구성 및 기반 설계
 > 목표: 개발/배포 환경 분리, 설정 파일 구조 확정
 
 - [x] `pyproject.toml` / `pyproject-deploy.toml` 구성 (uv 기반, Linux+GPU / Windows+CPU 분리)
 - [x] `config.py` — dev / deploy 환경 분기 설정
-- [x] 캐릭터 YAML 스키마 확정 (`speech_style`, `memory_voice`, `state` 필드 추가) — `CH_haru.yaml` 반영 완료
-- [x] 메모리 VDB 스키마 확정 (`M_schema.json` 확장) — 중요도 규칙, 검색 설정 반영 완료
+- [x] 캐릭터 YAML 스키마 확정 (`speech_style`, `memory_voice`, `state` 필드 추가)
+- [x] 메모리 VDB 스키마 확정 (`M_schema.json` 확장)
 
 ---
 
 ### Phase 1 — LLM 인터페이스 구현
-> 목표: llama-cpp-python 기반 로컬 추론 인터페이스 구현
-> 상세 구현: [대화품질.md](대화품질.md) — Context Assembly, 토큰 예산 설계
+> 목표: llama-cpp-python 기반 로컬 추론 인터페이스 구현  
+> 상세 구현: [대화품질.md](참조/대화품질.md) — Context Assembly, 토큰 예산 설계
 
 - [x] `conversation/core/llm_client.py` — llama_cpp + transformers 듀얼 백엔드 (스트리밍 포함)
 - [x] `conversation/core/prompt_build.py` — Context Assembly + 토큰 예산 관리
-  - 레이어별 예산: system(300) + world(200) + VDB(150) + history(300) + input(가변)
+  - 레이어별 예산: system(300) + world(200) + VDB(150) + history(450) + session_context
   - 한국어 토큰 밀도 반영 (영어 대비 2~3배)
 - [x] `conversation/core/session.py` — mood, affection, turn_count, dialogue_log
 - [x] `conversation/loader/` — character_load, world_load, memory_load
@@ -376,29 +413,28 @@ Achat/
 ---
 
 ### Phase 2 — 대화 엔진 구현
-> 목표: 페르소나, 상태, 메모리, Post-processing 전 레이어 완성
-> 상세 구현: [대화품질.md](대화품질.md) — 7계층 아키텍처, session/state/memory 구현 계획
+> 목표: 페르소나, 상태, 메모리, Post-processing 전 레이어 완성  
+> 상세 구현: [대화품질.md](참조/대화품질.md) — 7계층 아키텍처, session/state/memory 구현 계획
 
 - [x] `agent/persona.py` — 캐릭터 YAML 로딩 및 핫스왑 (`load_persona`, `swap_persona`)
-- [x] `agent/state.py` — mood_triggers 키워드 매칭 (8종), affection 증감 (캐릭터 YAML affection_delta 우선)
+- [x] `agent/state.py` — mood_triggers 키워드 매칭 (8종), affection 증감
 - [x] `agent/core.py` — 전체 컴포넌트 초기화 + 대화 모드 진입점 `chat()`
-- [x] `memory/short_term.py` — `get_recent()` 슬라이딩 윈도우
-- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.60, importance ≥ 0.5 필터)
+- [x] `memory/short_term.py` — `get_recent()` + `evict_to_context()` (5턴 초과 시 eviction)
+- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.52, dedup/quota/TTL)
 - [x] `memory/summarizer.py` — N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 - [x] `conversation/core/router.py` — `handle_turn()` 전체 턴 파이프라인
-  - VDB 검색 → PromptBuilder → LLM → mood/affection 업데이트 → 세션 기록 → 요약 트리거
-- [x] `conversation/main.py` — Router 연동으로 업데이트
+- [x] `conversation/core/prompt_build.py` — `_layer_e()` 추가 (session_context + character_notes)
 
 ---
 
 ### Phase 3 — RAG 구현
 > 목표: 세계관 문서 시맨틱 검색 연동
-> 상세 구현: [대화품질.md](대화품질.md) — 시맨틱 검색 전략, 캐릭터 관점 재서술
 
-- [x] `rag/index.py` — 세계관 문서 청킹(400자/overlap 50) + ChromaDB 인덱싱 (bge-m3, cosine space)
-- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, threshold 0.55 미만 빈 리스트 반환
+- [x] `rag/index.py` — 세계관 문서 섹션 기반 청킹 + ChromaDB 인덱싱 (bge-m3, cosine space)
+- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, threshold 0.52 미만 빈 리스트 반환
+- [x] `rag/sources/world/Seaside.md` — 통합 세계관 소스 (`## culture / ## place / ## story`)
 - [x] `conversation/core/prompt_build.py` — `assemble(rag_results=)` 추가, Layer B에 RAG 결과 병합
-- [x] `conversation/core/router.py` — RAG 검색 연동 (장기 메모리 > 세계관 RAG 우선순위)
+- [x] `conversation/core/router.py` — RAG 검색 연동
 
 ---
 
@@ -409,7 +445,7 @@ Achat/
 - [x] `ui_ux/chat_panel.py` — `LLMWorker(QThread)` 비동기 LLM 호출
 - [x] `ui_ux/widget.py` — `UIEngine` QML 엔진 초기화 + bridge 등록
 - [x] `ui_ux/tray.py` — `AppTrayIcon` 열기/숨기기, 캐릭터 변경, 종료
-- [x] `ui_ux/qml/main.qml` — 플로팅 윈도우 (전체 창 드래그, 모서리 스냅, hover 투명도, 버블 축소/확장, 모드 전환, 한글 폰트 로드)
+- [x] `ui_ux/qml/main.qml` — 플로팅 윈도우 (드래그, 스냅, hover 투명도, 버블 축소/확장)
 - [x] `ui_ux/qml/ChatBubble.qml` — 재사용 가능한 말풍선 컴포넌트
 - [x] `ui_ux/qml/Style.qml` — 디자인 토큰 singleton
 - [x] `main.py` — torch 선로드 → Qt 초기화 순서 보장, PID 파일 기반 이전 프로세스 정리, VRAM 체크
@@ -419,66 +455,44 @@ Achat/
 ### Phase 5 — LoRA 파인튜닝 파이프라인
 > 목표: 캐릭터 말투 / 감정 반응 / 한국어 일관성 강화 + 기능 모드 파라미터 추출 능력 확보
 
-- [x] `data/lora/conversation/` — 빌드 대상 디렉토리 생성
-- [x] `data/lora/function/` — folder_organize / prompt_convert / search 예시 데이터
-- [x] `scripts/build_dataset.py` — training/log → data/lora/conversation 빌드 (시스템 프롬프트 자동 삽입)
-- [x] `training/dataset.py` — 데이터셋 로더 (apply_chat_template, stratified sampling)
-- [x] `training/lora_train.py` — GPU/CPU 자동 전환, --no_save/--max_steps, BitsAndBytes 미사용 (Blackwell 호환), v7~: assistant 토큰 마스킹, EWCTrainer / --ewc_* / --category_weights 추가
-- [x] `training/ewc.py` — Fisher 대각 계산 CLI + `EWCPenalty` 클래스 (7-2 EWC 구현 완료)
-- [x] `training/dataset.py` — `category_weights` 파라미터 추가 — 카테고리별 오버/언더샘플링 (7-3 구현 완료)
-- [x] `training/학습.md` — 학습 구조 리뷰, 실행 가이드, 개선안 (EWC/카테고리 가중치 구현 완료)
-- [x] `training/eval/ai_tell_checker.py` / `training/eval/memory_test.py` / `training/eval/speed_bench.py` / `training/eval/verify_phases.py` 구현 (구 `eval/` 폴더에서 `training/eval/`로 이동)
-- [x] `training/train_monitor.py` — 과적합 모니터링 + 조기 종료 + VRAM 해제 래퍼 구현
-- [x] 학습 데이터 확장: `emotion/` (9종 × 20건 = 180건) + `long_dialogue/` (54건) 추가 → 총 2,150건 (38파일, v10 — _excluded 비활성 데이터 제외)
-- [x] CPU smoke test 완료 (`--max_steps 1 --no_save`, loss=3.798)
-- [x] (실행 검증) LoRA_v7 GPU 학습 완료 (4 epoch, 2,167건, assistant masking, eval best 1.687)
-- [x] (실행 검증) LoRA_v8 GPU 학습 완료 (5 epoch, 2,401건, category_weights, eval best 1.353 / 과적합 발생)
-- [x] 훈련 데이터 system prompt 정제 — emotion/long_dialogue 234건에서 "너는 하루다." 제거
-- [x] `training/lora_train.py` `--data_dir` 기본값 `data/lora` → `training/data` 수정
-- [x] (실행 검증) LoRA_v9 GPU 학습 완료 (3 epoch, EWC λ=500, eval best 1.511, memory_test 4/5)
-- [x] (실행 검증) LoRA_v10 GPU 학습 완료 (3 epoch, character_schema 기반, eval best 1.512, EWC 미적용)
-- [x] (실행 검증) LoRA_v11 GPU 학습 완료 (r=32/alpha=64, 3,170건, eval best 1.5387 at step 700, epoch 1.97)
+- [x] `training/dataset.py` — ChatML 포맷, stratified sampling, category_weights
+- [x] `training/lora_train.py` — GPU/CPU 자동 전환, assistant 토큰 마스킹, EWCTrainer
+- [x] `training/ewc.py` — Fisher 대각 계산 CLI + `EWCPenalty` 클래스
+- [x] `training/train_monitor.py` — 과적합 모니터링 + 조기 종료 + VRAM 해제 래퍼
+- [x] `training/eval/` — ai_tell_checker / memory_test / scenario_eval / klue_regression / speed_bench / verify_phases
+- [x] 학습 데이터 총 3,632건 (v12 기준): affection / emotion / memory / long_dialogue / personality / speech_style 등
+- [x] (실행 검증) LoRA_v7~v11 GPU 학습 완료
+- [x] (실행 검증) LoRA_v12 학습 완료, v11과 비교 평가 → **v11 채택** (v12: RAG 활성 시 중국어 전환 치명 결함)
 
 ---
 
 ### Phase 6 — GGUF 변환 및 배포 패키징
 > 목표: Windows CPU 배포 가능한 단일 패키지 + exe 인스톨러 구성
-> 상세 구현: [학습후보.md](학습후보.md) — merge_lora, convert_to_gguf 스크립트 계획
 
 - [x] `scripts/merge_lora.py` — LoRA 병합 (`low_cpu_mem_usage=True`)
 - [x] `scripts/convert_to_gguf.sh` — GGUF 변환 + Q4_K_M 양자화
-- [x] `run.bat` — Windows 배포 실행 스크립트
 - [x] `scripts/package_deploy.sh` — 소스 zip 패키지 생성 (GitHub Release용)
-- [x] `.github/workflows/cd.yml` — 태그 push 시 자동 Release 생성
-- [x] LoRA v11 GPU 파인튜닝 완료, v12 비교 평가 후 v11 복귀
-- [x] (실행 검증) `C:\Achat` 소스 배포 v0.0 — Windows 실환경 UI 검증 완료 ([BUG_06.md](docs/BUG/BUG_06.md))
+- [x] `.github/workflows/cd.yml` — 태그 push 시 자동 Release 생성 (zip + AchatSetup.exe)
 - [x] `deploy/launcher.py` — PyInstaller 기반 더블클릭 실행 exe 진입점
-- [x] `deploy/achat.spec` — PyInstaller spec (단일 exe)
-- [x] `deploy/achat_setup.iss` — Inno Setup 설치 마법사 스크립트
-- [x] `deploy/build_installer.bat` — Windows exe 인스톨러 빌드 스크립트
-- [ ] (실행 검증) `AchatSetup.exe` Windows 클린 설치 → 실행 → 제어판 삭제 전 과정 확인
-- [ ] (실행 검증) CPU 추론 속도 8+ tok/s 달성 확인
+- [x] `deploy/achat.spec` — PyInstaller spec (단일 exe, 불필요 패키지 제외)
+- [x] `deploy/achat_setup.iss` — Inno Setup 6 설치 마법사 스크립트 (기본 경로 `C:\Achat`, uv sync 자동 실행)
+- [x] `deploy/build_installer.bat` — 로컬 인스톨러 빌드 스크립트
+- [x] (실행 검증) `C:\Achat` 소스 배포 v0.0 — Windows 실환경 UI 검증 완료 ([BUG_06.md](BUG/BUG_06.md))
+- [ ] (실환경 검증) `AchatSetup.exe` Windows 클린 설치 → 실행 → 제어판 삭제 전 과정 확인
+- [ ] (실환경 검증) CPU 추론 속도 8+ tok/s 달성 확인
 
 ---
 
 ### Phase 7 — 기능 모드 도구 구현
 > 목표: 폴더 정리 / 프롬프트 변환 / 검색엔진 마이크로서비스 구현
 
-- [x] `tools/base.py` — `BaseTool` 인터페이스 (JSON 파라미터 파싱 + execute 추상 메서드)
-- [x] `tools/folder/classifier.py` — 확장자별 / 종류별 파일 분류 (shutil.move, dry_run)
-- [x] `tools/folder/converter.py` — 이미지 포맷 변환 (Pillow: jpg/png/webp/bmp/tiff)
-- [x] `tools/folder/renamer.py` — 이름 일괄 변환 (7가지 규칙, glob 패턴, dry_run)
-- [x] `tools/prompt_converter.py` — 프롬프트 변환 (명확하게 / 간결하게 / 상세하게 / 질문형 / 지시형) + ChromaDB 가이드 캐싱
-- [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, mtime 추적, **os.walk 서브폴더 재귀**)
+- [x] `tools/base.py` — `BaseTool` 인터페이스
+- [x] `tools/folder/classifier.py` — 확장자별 / 종류별 파일 분류
+- [x] `tools/folder/converter.py` — 이미지 포맷 변환 (Pillow)
+- [x] `tools/folder/renamer.py` — 이름 일괄 변환 (7가지 규칙, glob 패턴)
+- [x] `tools/prompt_converter.py` — 프롬프트 변환 (5종) + ChromaDB 가이드 캐싱
+- [x] `tools/search/local_search.py` — SQLite FTS5 로컬 검색 (증분 인덱싱, 서브폴더 os.walk)
 - [x] ~~`tools/search/web_search.py`~~ — 삭제됨 (2026-04-06, RAM/VRAM 절감)
-- [x] `agent/core.py` — `handle_input(mode)` 기능 모드 분기 + `_recent_ops` 기록 → Layer F 대화 연속성
-- [x] `ui_ux/bridge.py` — 플랫폼 분기 (`_is_wsl`, `_is_windows`), `openFile(WSL2 powershell)`, `openUrl()`, `getHelpText()`, `_unload_llm()` OOM 수정, `memoryChanged` Signal + CRUD 슬롯 3개
-- [x] `ui_ux/qml/SideMenuPanel.qml` — ≡ 버튼 → 220px 아코디언 사이드 메뉴 (DB/설정/관리)
-- [x] `ui_ux/qml/MemoryDBPanel.qml` — ChromaDB CRUD 패널 (카드 목록 + 인라인 수정 + 추가 폼)
-- [x] `ui_ux/qml/AdminPanel.qml` / `CharacterCreatePanel.qml` — 관리자 패널 신규
-- [x] `ui_ux/qml/main.qml` — `sideMenuOpen` 프로퍼티, CRUD Signal 연결, `memoryChanged` Connections
-- [x] `memory/long_term.py` — `delete_entry` / `add_entry` / `update_entry` CRUD 메서드
-- [x] `conversation/narration_hardcoded.py` / `narration_monitor.py` — LLM 없는 키워드 트리거 나레이션
 
 ---
 
@@ -486,19 +500,41 @@ Achat/
 > 목표: 감정 지속성 / 나레이션 트리거 정밀도 / RAG 응답 품질 개선
 
 - [x] **개선1** `agent/core.py` — `_inject_function_feedback()` 기능 모드 피드백 주입 (Layer F 연속성)
-- [x] **개선2** `memory/long_term.py` — `search()` `n_results` 매개변수 추가, ChromaDB PersistentClient 마이그레이션
-- [x] **개선3** `narration/world_trigger.py` — 절대 점수(≥0.9) + 토큰 부분 매칭(0.5 가중치) 이중 판정, `world_nav.py` 배치 조회
-- [x] **개선4** `conversation/core/router.py` — `world_context` RAG 삽입 로직 안정화, `narration_content` 프롬프트 블록 추가
-- [x] **개선5** `ui_ux/qml/PipWindow.qml` — `bubbleDirection` 프로퍼티 (왼/오른쪽 말풍선), `resizeRequested` Signal, PIP 창 드래그 크기 조절
-- [x] **개선6** `ui_ux/bridge.py` — `getPipBubbleDir()` / `savePipBubbleDir()` 슬롯 추가, `reindexWorldKnowledge()` 슬롯 (VDB 재인덱스), `_rebuild_world_md()` ChromaDB → .md 단방향 동기화
-- [x] **개선7** `conversation/character/CH_MookHyeon.yaml` 신규 캐릭터 추가, `character_schema.yaml` 스키마 분리
-- [x] **개선8** `agent/core.py` `mood_decay` + `mood_hold` 감정 지속 메커니즘, `memory/summarizer.py` 요약 구조화, RAG 지시문 삽입, `model_version` 메타데이터
+- [x] **개선2** `memory/long_term.py` — `search()` `n_results` 매개변수, ChromaDB PersistentClient 마이그레이션
+- [x] **개선3** `narration/world_trigger.py` — 절대 점수(≥0.9) + 토큰 부분 매칭(0.5 가중치) 이중 판정
+- [x] **개선4** `conversation/core/router.py` — `world_context` RAG 삽입 로직 안정화
+- [x] **개선5** `ui_ux/qml/PipWindow.qml` — `bubbleDirection` 프로퍼티, `resizeRequested` Signal
+- [x] **개선6** `ui_ux/bridge.py` — `getPipBubbleDir()` / `reindexWorldKnowledge()` 슬롯, WorldCreatePanel
+- [x] **개선7** `conversation/character/CH_MookHyeon.yaml` 신규 캐릭터, `character_schema.yaml` 스키마 분리
+- [x] **개선8** `agent/core.py` `mood_decay` + `mood_hold`, `memory/summarizer.py` 요약 산문화
 
 ---
 
-## 환경 요구사항
+## 9. 실현 가능성 검토
+
+| 단계 | 실현 가능성 | 비고 |
+|---|---|---|
+| LoRA 파인튜닝 (3B) | ✅ 완료 | bfloat16 풀 파라미터 + LoRA, BitsAndBytes 미사용, LoRA_v11 채택 (r=32/alpha=64, 3,170건, eval best 1.5387) |
+| LoRA 병합 | ⚠️ 타이트 | RAM ~6GB 소모, 병합 시 다른 프로세스 최소화 필요 |
+| GGUF 변환 | ✅ 가능 | Qwen2.5는 llama.cpp 공식 지원 |
+| Q4_K_M 양자화 | ✅ 가능 | 3B 기준 최종 파일 ~2GB |
+| CPU 추론 (Windows) | ✅ 가능 | 3B Q4_K_M ~2.5GB RAM. 캐릭터 전환 OOM 수정 완료 ([BUG_02.md](BUG/BUG_02.md)) |
+| PySide6 PIP 플로팅 UI | ✅ 가능 | Frameless + Always-on-top + 모서리 스냅, WSL2/Windows 플랫폼 분기 완료 |
+| 시맨틱 메모리 검색 | ✅ 가능 | ChromaDB + bge-m3, 로컬 동작 |
+| 폴더 정리 도구 | ✅ 가능 | pathlib / shutil 기반 rule-based, 이미지 확장자 변환은 Pillow |
+| 프롬프트 변환 도구 | ✅ 가능 | ChromaDB 가이드 캐싱 + 크롤링 폴백 |
+| 로컬 검색 도구 | ✅ 가능 | SQLite FTS5, os.walk 서브폴더 재귀 탐색 |
+| 인터넷 검색 도구 | ❌ 제거됨 | RAM/VRAM 절감 및 외부 의존성 제거 목적 (2026-04-06) |
+| JSON 파라미터 추출 (3B) | ⚠️ 주의 | prompt_convert만 LLM 추출 사용. 나머지 도구는 직접 다이얼로그로 LLM 없이 동작 |
+| RTX 5060 Ti BnB | ✅ 미사용 | Blackwell SM 10.x 호환 이슈로 BitsAndBytes 대신 bfloat16 풀 파라미터 채택 |
+| exe 인스톨러 | 🔄 검증 대기 | `AchatSetup.exe` 빌드 스크립트 완성, 클린 설치 실환경 검증 예정 |
+
+---
+
+## 10. 환경 요구사항 & 설치
 
 ### 개발 환경 (학습) — 현재 구성
+
 | 항목 | 현재 스펙 | 비고 |
 |---|---|---|
 | GPU | RTX 5060 Ti | Blackwell(GB206), CUDA 12.8+ 필수 |
@@ -510,17 +546,16 @@ Achat/
 | bitsandbytes | 미사용 | Blackwell SM 10.x 미지원 — bfloat16 풀 파라미터로 대체 |
 
 ### 배포 환경 (추론)
+
 | 항목 | 최소 | 권장 |
 |---|---|---|
 | CPU | AVX2 지원 | AVX-512 지원 |
 | 시스템 RAM | 4GB | 8GB |
 | OS | Windows 10+ | Windows 11 |
 | 저장 공간 | 3GB | 5GB |
-| Python | 3.10+ | 3.11 |
+| Python | 3.10+ (방법 B만) | 3.11 |
 
----
-
-## 패키지 관리 (uv)
+### 패키지 관리 (uv)
 
 의존성은 uv로 관리합니다. 환경별로 별도 toml 파일을 사용합니다.
 
@@ -529,31 +564,10 @@ Achat/
 | `pyproject.toml` | Linux + GPU | QLoRA 학습 / 대화 엔진 개발 |
 | `pyproject-deploy.toml` | Windows + CPU | GGUF 추론 + PySide6 위젯 실행 |
 
-### 개발 환경 설치 (Linux)
-```bash
-# uv 설치 (최초 1회)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 의존성 설치 (pyproject.toml 기준)
-uv sync
-
-# PyTorch CUDA 12.8 빌드는 [tool.uv.sources] 설정으로 자동 처리됨
-```
-
-### 배포 환경 설치 (Windows)
-```bash
-# pyproject-deploy.toml → pyproject.toml 로 복사 후 sync
-copy pyproject-deploy.toml pyproject.toml
-uv sync
-```
-
----
-
-## 환경 구축 매뉴얼
-
-### 개발 환경 — Ubuntu 24.04 WSL2 (Linux + GPU)
+### 개발 환경 구축 가이드 (Ubuntu 24.04 WSL2)
 
 #### 1. 시스템 패키지 설치
+
 ```bash
 sudo apt-get update && sudo apt-get install -y \
   # Qt6 / PySide6 런타임
@@ -564,26 +578,29 @@ sudo apt-get update && sudo apt-get install -y \
   dbus-x11 ibus ibus-hangul
 ```
 
-> **왜 ibus?** PySide6 번들 Qt6에는 ibus 플러그인이 내장되어 있음.
+> **왜 ibus?** PySide6 번들 Qt6에는 ibus 플러그인이 내장되어 있음.  
 > `fcitx5-frontend-qt6`는 시스템 Qt6 기준 빌드라 ABI 불일치로 로드 실패함.
 
 #### 2. uv 설치 (최초 1회)
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 ```
 
 #### 3. 리포지토리 클론 및 의존성 설치
+
 ```bash
 git clone <repo-url> ~/projects/Achat
 cd ~/projects/Achat
 uv sync
 ```
 
-> `pyproject.toml`에 `pyside6<6.10`이 고정되어 있음.
+> `pyproject.toml`에 `pyside6<6.10`이 고정되어 있음.  
 > PySide6 6.10.x는 WSL2 ibus 연결 실패(invalid portal bus) 버그가 있으므로 6.9.x 이하 사용.
 
 #### 4. 실행
+
 ```bash
 # UI 테스트 (LLM 없이 UI만 기동)
 ACHAT_ENV=ui_test uv run python main.py
@@ -592,63 +609,38 @@ ACHAT_ENV=ui_test uv run python main.py
 ACHAT_ENV=dev uv run python main.py
 ```
 
-> **ibus 설정은 자동 처리됨**: `main.py`가 시작 시 ibus-daemon 기동, hangul 엔진 설정,
+> **ibus 설정은 자동 처리됨**: `main.py`가 시작 시 ibus-daemon 기동, hangul 엔진 설정,  
 > `Ctrl+Space` 한/영 토글 키 등록을 자동으로 수행함. 별도 환경변수 설정 불필요.
 
-> ⚠️ **Ubuntu 24.04 주의**: `eval $(dbus-launch --sh-syntax)` 사용 금지.
+> ⚠️ **Ubuntu 24.04 주의**: `eval $(dbus-launch --sh-syntax)` 사용 금지.  
 > systemd user session이 D-Bus를 관리하므로 dbus-launch를 실행하면 ibus 연결이 끊김.
 
-#### 한글 입력
+**한글 입력:**
 - 앱 실행 후 TextInput 클릭 → **Ctrl+Space** 로 한/영 전환
 - 우측 Alt 키는 WSLg 구조적 한계(modifier state 하드코딩)로 사용 불가
 - 한글 입력이 안 될 경우 `~/.bashrc`에 `QT_IM_MODULE=fcitx` 잔재가 있는지 확인
-  (main.py가 강제 override하므로 앱 재실행으로 해결됨 — docs/BUG/BUG_1.md 참조)
 
 ---
 
-### 배포 환경 — Windows + CPU
-
-#### 시스템 요구사항
-
-| 항목 | 최소 | 권장 |
-|---|---|---|
-| OS | Windows 10 (x64) | Windows 11 |
-| CPU | AVX2 지원 | AVX2 이상 |
-| RAM | 4 GB | 8 GB |
-| 저장공간 | 3 GB (앱) + 2 GB (모델) | 8 GB 이상 |
-| Python | 3.10+ (방법 B만) | 3.11 |
-
----
+### 배포 환경 구축 가이드 (Windows + CPU)
 
 #### 방법 A — 인스톨러 (일반 사용자 권장)
-
-**설치**
 
 1. GitHub Releases에서 `AchatSetup.exe` 다운로드
 2. `AchatSetup.exe` 실행 → 설치 마법사 진행
    - 설치 경로 선택 (기본: `C:\Achat`, 변경 가능)
    - 마법사 완료 시 자동으로 의존성(`.venv`) 설치 진행 (최초 1회, 수 분 소요)
-3. 설치 완료 후 `<설치경로>\models\` 폴더에 `model_q4km.gguf` 복사 (약 2 GB, 별도 배포)
+3. `<설치경로>\models\` 폴더에 `model_q4km.gguf` 복사 (약 2GB, 별도 배포)
 4. 바탕화면 바로가기 또는 시작 메뉴 → **Achat** 실행
 
-**첫 실행 시 초기화 (자동)**
-- `bge-m3` 임베딩 모델 다운로드 (~500 MB, 인터넷 연결 필요, 최초 1회만)
-- ChromaDB 세계관 RAG 인덱싱 — 수십 초 소요
-
-**제거**
-
-> 제어판 → 앱 → **Achat** → 제거
-> `.venv`, `chroma_deploy`, 세션 데이터, 모델 파일 포함 설치 경로 전체 삭제됨.
-
----
+**제거:** 제어판 → 앱 → **Achat** → 제거  
+→ `.venv`, `chroma_deploy`, 세션 데이터, 모델 파일 포함 설치 경로 전체 삭제됨.
 
 #### 방법 B — zip 수동 설치 (개발자 / 고급 사용자)
 
-**설치**
-
 1. GitHub Releases에서 `achat.zip` 다운로드 후 원하는 경로에 압축 해제
-2. `models\model_q4km.gguf` 복사 (약 2 GB)
-3. PowerShell(관리자 불필요)에서:
+2. `models\model_q4km.gguf` 복사 (약 2GB)
+3. PowerShell에서:
 
 ```powershell
 # uv 패키지 관리자 설치 (최초 1회)
@@ -660,30 +652,17 @@ copy pyproject-deploy.toml pyproject.toml
 uv sync
 ```
 
-**실행**
+4. 실행:
 
 ```bat
-# 방법 1 — 배치 파일 (uv run 자동 호출)
+# 방법 1 — 배치 파일
 run.bat
 
 # 방법 2 — exe 더블클릭 (uv.exe가 같은 폴더에 있는 경우)
 Achat.exe
 ```
 
-**환경변수 (선택)**
-
-```bat
-:: 인스톨러 없이 배포 모드를 강제 지정할 때
-set ACHAT_ENV=deploy
-uv run python main.py
-```
-
----
-
-#### 공통 — 모델 파일 준비 (직접 생성)
-
-`model_q4km.gguf` (~2 GB) 는 GitHub Release에 포함되지 않습니다.
-Linux 개발 환경에서 직접 생성하는 경우:
+#### 모델 파일 직접 생성 (개발 환경 → 배포용)
 
 ```bash
 # 1. LoRA 병합 (RAM ~6GB 소요, 다른 프로세스 종료 권장)
@@ -701,7 +680,7 @@ bash scripts/convert_to_gguf.sh \
 
 ---
 
-## CI / CD
+## 11. CI / CD
 
 ### CI — 코드 품질 (`.github/workflows/ci.yml`)
 
@@ -714,13 +693,15 @@ bash scripts/convert_to_gguf.sh \
 
 ### CD — Release 빌드 (`.github/workflows/cd.yml`)
 
-`v*` 태그 push 또는 `workflow_dispatch` 시 자동 실행. 세 job이 병렬로 동작한 뒤 하나의 Release로 합쳐진다.
+`v*` 태그 push 또는 `workflow_dispatch` 시 자동 실행.  
+`tag-name` job이 태그를 추출한 뒤, `package-zip`(ubuntu)과 `package-installer`(windows)가 병렬 실행된다. 두 job이 완료되면 `release` job이 아티팩트를 GitHub Release에 업로드한다.
 
 | Job | 러너 | 내용 |
 |---|---|---|
-| package-zip | ubuntu-latest | `package_deploy.sh` 실행 → `achat.zip` 생성 |
-| package-installer | windows-latest | uv.exe 다운로드 → PyInstaller `Achat.exe` 빌드 → Inno Setup `AchatSetup.exe` 생성 |
-| release | ubuntu-latest | 두 아티팩트를 GitHub Release에 업로드 |
+| `tag-name` | ubuntu-latest | 태그 이름 추출 (공유 output) |
+| `package-zip` | ubuntu-latest | `package_deploy.sh` 실행 → `achat.zip` 생성 |
+| `package-installer` | windows-latest | uv.exe 다운로드 → PyInstaller `Achat.exe` 빌드 → Inno Setup `AchatSetup.exe` 생성 |
+| `release` | ubuntu-latest | 두 아티팩트를 GitHub Release에 업로드 |
 
 **로컬 인스톨러 빌드 (Windows에서 직접):**
 
@@ -729,28 +710,30 @@ deploy\build_installer.bat
 :: → deploy\dist\AchatSetup.exe
 ```
 
-> 사전 조건: [Inno Setup 6](https://jrsoftware.org/isdl.php) 설치 필요.
+> 사전 조건: [Inno Setup 6](https://jrsoftware.org/isdl.php) 설치 필요.  
 > Python 3.10+, PyInstaller는 배치 파일이 자동 설치.
 
 ---
 
-## 알려진 제약 및 주의사항
+## 12. 알려진 제약 및 주의사항
 
-- **LoRA 병합 RAM**: 3B FP16 병합에 ~6GB 소모. 실행 전 브라우저/기타 프로세스 종료 필수.
+- **LoRA 병합 RAM**: 3B FP16 병합에 ~6GB 소모. 실행 전 브라우저/기타 프로세스 종료 필수.  
   OOM 발생 시 `low_cpu_mem_usage=True`, `device_map="cpu"` 옵션 사용.
-- **RTX 5060 Ti BitsAndBytes**: Blackwell SM 10.x 4-bit 양자화 미지원 → **bfloat16 풀 파라미터 + LoRA 방식** 채택.
+- **RTX 5060 Ti BitsAndBytes**: Blackwell SM 10.x 4-bit 양자화 미지원 → **bfloat16 풀 파라미터 + LoRA 방식** 채택.  
   학습 중 VRAM ~7.7GB(≈96%) 사용. OOM 시 `--max_length 256` 또는 `--grad_accum 16`.
 - **한국어 토큰 비용**: 영어 대비 2~3배 소모. 컨텍스트 패킹 시 반드시 반영.
 - **CPU 추론 속도**: 3B Q4_K_M 기준 8~15 tok/s. 스트리밍 출력으로 체감 속도 보완.
-- **fcitx 잔재 주의**: 이전에 fcitx를 사용했던 환경이라면 `~/.bashrc`에 `QT_IM_MODULE=fcitx`가 남아 있을 수 있음.
-  fcitx가 설치되지 않은 상태에서 이 값이 남으면 한글 입력이 완전히 차단됨.
+- **fcitx 잔재 주의**: 이전에 fcitx를 사용했던 환경이라면 `~/.bashrc`에 `QT_IM_MODULE=fcitx`가 남아 있을 수 있음.  
+  fcitx가 설치되지 않은 상태에서 이 값이 남으면 한글 입력이 완전히 차단됨.  
   main.py가 강제 override하므로 앱 내에서는 동작하나, 근본 원인 제거 권장:
   ```bash
   grep -n "fcitx\|IM_MODULE" ~/.bashrc ~/.profile 2>/dev/null
   ```
-- **ChromaDB 로컬 저장 경로**: 개발/배포 환경 각각 경로 분리 필요.
+- **ChromaDB 로컬 저장 경로**: 개발/배포 환경 각각 경로 분리 필요 (`chroma_dev/` vs `chroma_deploy/`).
 - **1.5B 폴백 기준**: 병합 OOM, BnB 호환 이슈, 학습 VRAM 부족 중 하나라도 발생 시 전환.
-- **JSON 파라미터 추출 안정성**: 3B 기반 모델은 파인튜닝 없이 JSON 출력이 불안정할 수 있음.
-  기능 모드용 자연어 → JSON 예시 데이터를 Phase 5 학습 데이터에 반드시 포함할 것.
-- **확장자 변환 범위**: 이미지(jpg/png/webp/bmp), 문서(txt/md)는 외부 의존 없음.
+- **JSON 파라미터 추출 안정성**: 3B 기반 모델은 파인튜닝 없이 JSON 출력이 불안정할 수 있음.  
+  기능 모드용 자연어 → JSON 예시 데이터를 Phase 5 학습 데이터에 반드시 포함.
+- **확장자 변환 범위**: 이미지(jpg/png/webp/bmp), 문서(txt/md)는 외부 의존 없음.  
   영상/음성 변환은 ffmpeg 바이너리 필요 — 선택적 기능으로 분리 권장.
+- **LoRA v12 중국어 전환 결함**: RAG 문서 주입 시 Qwen 베이스 모델의 중국어 bias가 폭발적으로 발현됨.  
+  v11으로 복귀. v13 학습 시 세계관 문서 주입 상황 한국어 유지 데이터 별도 보강 예정. ([포폴.md](참조/포폴.md) 5단계 참조)

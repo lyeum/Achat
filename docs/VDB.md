@@ -186,29 +186,28 @@ VDB 안에 두 개의 독립 컬렉션이 존재한다.
 |---|---|---|---|
 | high | 0.85 | ✅ | 이름, 약속, 비밀, 미안, 기억해줘, 고마워 |
 | mid  | 0.60 | ✅ | 취미, 감정, 슬퍼, 저번에, 다음에, 피드백 |
-| low  | 0.50 | ✅ (기본값) | 키워드 없음 — 기본 0.5로 저장 |
-| 미달 | < 0.50 | ❌ | (현재 로직상 0.5 미만 도달 경로 없음) |
+| low  | 0.0 | ❌ (기본값) | 키워드 없음 — 기본 0.0으로 저장 안 됨 |
 
-> 현재 `score_importance()`는 키워드 없으면 기본 0.5를 반환하므로 사실상 모든 요약이 저장됨.
-> 의도적 저장 억제가 필요하면 기본값을 0.5 미만으로 낮춰야 한다.
+> `score_importance()`는 키워드 없으면 기본 0.0을 반환한다.
+> VDB 쓰기 임계값이 **0.65** 이므로 키워드에 매칭되지 않는 요약은 저장되지 않는다 (VDB 오염 차단).
 
 ### 4-3. 저장 흐름
 
 ```
 매 턴 종료 후 (conversation/core/router.py handle_turn)
     │
-    └─ summarizer.check_trigger(session, trigger_n=10)
-           session.turn_count % 10 == 0 이면 True
+    └─ summarizer.check_trigger(session, trigger_n=5)
+           session.turn_count % 5 == 0 이면 True (백그라운드 스레드로 비동기 실행)
                │
                ├─ summarizer.summarize()
                │      최근 20개 메시지 → LLM (max_tokens=250)
                │      "사용자에 대해 알게 된 정보 중심, 객관적으로 1~3문장"
                │
                ├─ summarizer.score_importance(summary)
-               │      키워드 매칭 → 0.5 / 0.60 / 0.85
+               │      키워드 매칭 → 0.0 / 0.60 / 0.85
                │
                └─ summarizer.write_to_vdb()
-                      score ≥ 0.5 → long_term.store() → ChromaDB upsert
+                      score ≥ 0.65 → long_term.store() → ChromaDB upsert
 ```
 
 ### 4-4. 검색 흐름
@@ -217,7 +216,7 @@ VDB 안에 두 개의 독립 컬렉션이 존재한다.
 매 턴 시작 (handle_turn 2번)
     │
     └─ long_term.query(user_input, character_id)
-           ChromaDB query(n_results=2, where={importance: {$gte: 0.5}})
+           ChromaDB query(n_results=2, where={importance: {$gte: 0.65}})
            distance ≤ 1.0 - 0.52 = 0.48 필터
                │
                └─ Layer C (장기 기억 150토큰) 로 PromptBuilder에 전달
@@ -259,9 +258,10 @@ conversation/main.py 시작 시 자동 실행 (force=False)
 
 | 파일 | 내용 |
 |---|---|
-| `place.md` | 주요 장소 (beach/breakwater/lighthouse/항구시장/카페) |
-| `culture.md` | 마을 문화 및 풍습 |
-| `story.md` | 배경 스토리 (마을 역사, 등대지기 전설) |
+| `Seaside.md` | 장소·문화·스토리 통합 단일 파일. `## 장소`, `## 문화`, `## 스토리` 섹션으로 구분. 청킹 시 섹션 경계를 존중하는 분할 방식 적용. |
+
+> **구조 변경 이력**: 기존 `place.md` / `culture.md` / `story.md` 분리 파일을 `Seaside.md` 단일 파일로 통합.
+> 재인덱싱 시 `force=True`로 기존 컬렉션을 삭제 후 재빌드.
 
 ### 5-2. 검색 흐름
 

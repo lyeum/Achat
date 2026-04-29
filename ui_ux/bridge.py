@@ -6,6 +6,7 @@ import re
 import subprocess as _subprocess
 from pathlib import Path
 
+from loguru import logger
 from PySide6.QtCore import Property, QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
@@ -212,33 +213,6 @@ class ChatBridge(QObject):
         dialogue = self._session_manager.load_dialogue(char_id, state.session_id)
         if dialogue:
             session.dialogue_log = dialogue
-
-    _HISTORY_DISPLAY_TURNS = 10  # 재시작/캐릭터 전환 시 표시할 최근 턴 수
-
-    @Slot(result="QVariantList")
-    def getSessionHistory(self) -> list:
-        """현재 세션의 최근 대화 기록을 QML에 반환한다.
-
-        최대 _HISTORY_DISPLAY_TURNS 턴(= 턴수 × 2 메시지)을 반환한다.
-        assistant 응답 안의 **...**/*...* 는 narrator 버블로 분리한다.
-        """
-        session = getattr(self._agent, "session", None)
-        if session is None or not getattr(session, "dialogue_log", None):
-            return []
-        max_msgs = self._HISTORY_DISPLAY_TURNS * 2
-        recent_log = session.dialogue_log[-max_msgs:]
-        result: list[dict] = []
-        for msg in recent_log:
-            role    = msg.get("role", "user")
-            content = msg.get("content", "")
-            if not content:
-                continue
-            if role == "assistant":
-                for r, c in _split_narration(content, "assistant"):
-                    result.append({"role": r, "content": c})
-            else:
-                result.append({"role": role, "content": content})
-        return result
 
     def _sync_session_state(self) -> None:
         """ConversationSession의 현재 상태를 SessionState에 동기화해 저장한다."""
@@ -2039,7 +2013,7 @@ class ChatBridge(QObject):
             return json.dumps([], ensure_ascii=False)
         try:
             return json.dumps(long_term.query_preview(query, char_id), ensure_ascii=False)
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             return json.dumps([], ensure_ascii=False)
 
     # ── ChromaDB CRUD ─────────────────────────────────────────────────────────
