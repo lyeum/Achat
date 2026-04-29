@@ -38,7 +38,9 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; 출력
 OutputDir=dist
 OutputBaseFilename=AchatSetup
+#if FileExists(AddBackslash(SourcePath) + "..\ui_ux\assets\icons\app.ico")
 SetupIconFile={#SrcRoot}\ui_ux\assets\icons\app.ico
+#endif
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
