@@ -66,7 +66,7 @@ Q4KM_GGUF="$OUT_DIR/model_q4km.gguf"
 
 # ── Step 1. HF → GGUF (fp16) ──────────────────────────────────────────────
 echo "[1/2] HuggingFace → GGUF (fp16) 변환 중..."
-python "$LLAMA_CPP/convert_hf_to_gguf.py" \
+uv run --with sentencepiece python "$LLAMA_CPP/convert_hf_to_gguf.py" \
     "$MERGED_MODEL" \
     --outfile "$FP16_GGUF" \
     --outtype f16

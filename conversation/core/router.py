@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import re
+import threading
+
 from loguru import logger
 
 from agent import state as state_mod
 from conversation.core.llm_client import LLMClient
 from conversation.core.prompt_build import PromptBuilder
 from conversation.core.session import ConversationSession
+from conversation.narration_monitor import NarrationMonitor
 from memory import short_term, summarizer
 from memory.long_term import LongTermMemory
 from rag.retrieve import WorldRetriever
+
+# 약속 패턴: 어시스턴트 응답에서 감지해 character_notes에 추가
+_PROMISE_RE = re.compile(
+    r"[가-힣a-zA-Z0-9]+(?:할게|해줄게|기억할게|기억해줄게|약속할게|해볼게|알아볼게|확인해볼게)"
+)
 
 
 class ConversationRouter:
@@ -45,12 +54,31 @@ class ConversationRouter:
             character, world, session, count_tokens_fn=llm.count_tokens
         )
         self.rag     = WorldRetriever(config)
-        self._trigger_n: int = config.get("memory_trigger_n", 10)
+        self._trigger_n: int    = config.get("memory_trigger_n", 10)
+        self._aff_gate: float   = config.get("aff_gate_threshold", 0.6)
+        self._pending_narration: tuple[str, str] | None = None  # (title, document) — bridge가 turn 후 읽어 UI emit
+        self._narration_monitor = NarrationMonitor()  # 키워드 기반 하드코딩 나레이션 (세션 내 1회)
 
-    def handle_turn(self, user_input: str, stream: bool = True) -> str:
-        """user_input을 받아 캐릭터 응답 문자열을 반환한다."""
+    def handle_turn(
+        self,
+        user_input: str,
+        stream: bool = True,
+        recent_ops: list[str] | None = None,
+        mode: str = "chat",
+    ) -> str:
+        """user_input을 받아 캐릭터 응답 문자열을 반환한다.
+
+        Parameters
+        ----------
+        recent_ops:
+            최근 기능 모드에서 수행한 작업 요약 목록.
+            제공되면 시스템 프롬프트에 주입되어 캐릭터가 수행 내용을 인지한다.
+        mode:
+            "chat" | "function". 장기기억 수집은 mode=="chat" 턴에서만 수행한다.
+            기능 모드 발화는 장기기억 수집 대상에서 제외된다.
+        """
         # 0. 장소 이동 감지 → session.location_context / act_id 업데이트
-        self._handle_location(user_input)
+        place_narration = self._handle_location(user_input)
 
         # 1. 단기 버퍼
         short_buf = short_term.get_recent(self.session)
@@ -66,15 +94,55 @@ class ConversationRouter:
             short_buf=short_buf,
             vdb_results=vdb_results,
             rag_results=rag_results,
+            recent_ops=recent_ops,
+            user_input=user_input,
         )
         messages.append({"role": "user", "content": user_input})
 
+        # 4-1. 나레이션 트리거 체크 (우선순위: 장소 > story/culture > 키워드 하드코딩)
+        #      나레이션은 UI bubble로 표시(bridge._pending_narration)
+        #      LLM에는 item_title 힌트만 주입 — 풀텍스트 주입 시 LLM이 "..."만 출력하는 문제 방지
+        narration_data = place_narration or self._check_world_triggers(user_input)
+        if narration_data is None:
+            kw_narration = self._narration_monitor.check_keyword(user_input)
+            if kw_narration:
+                narration_data = ("keyword", kw_narration)
+        self._pending_narration = narration_data
+
         # 5. LLM 생성
+        if narration_data:
+            _item_title, _doc = narration_data
+            hint = (
+                f"[세계관 배경 — 나레이션으로 별도 표시됨]\n{_doc}\n"
+                "위 내용을 참고해 캐릭터 말투로 1~2문장 이내로 자연스럽게 언급한다. "
+                "직접 인용하거나 항목을 목록으로 나열하지 않는다. "
+                "위 정보 범위 밖의 내용을 만들어내지 않는다."
+            )
+            messages.insert(len(messages) - 1, {"role": "system", "content": hint})
         response = self.llm.generate(messages, stream=stream)
 
         # 6. mood / affection 업데이트 (사용자 입력 기준)
-        new_mood = state_mod.update_mood(self.session, user_input, self.character)
-        state_mod.update_affection(self.session, new_mood, self.character)
+        # trigger_events 우선 적용 — 발동 시 일반 mood/aff 업데이트 건너뜀
+        aff_before = self.session.affection
+        triggered = state_mod.check_trigger_events(self.session, user_input, self.character)
+        if not triggered:
+            new_mood = state_mod.update_mood(self.session, user_input, self.character)
+            # semantic 중요도 게이팅: 잡담(0.0) 발화는 affection 변화 억제
+            importance = summarizer.score_importance(user_input)
+            if importance >= self._aff_gate:
+                state_mod.update_affection(self.session, new_mood, self.character)
+            else:
+                logger.debug(
+                    f"[router] aff 게이팅 — importance={importance:.2f} < {self._aff_gate} → 변화 억제"
+                )
+        aff_delta = abs(self.session.affection - aff_before)
+
+        # 6-6: 어시스턴트 응답에서 약속 패턴 감지 → character_notes 추가
+        for promise in _PROMISE_RE.findall(response):
+            note = promise.strip()
+            if note and note not in self.session.character_notes:
+                self.session.character_notes.append(note)
+                logger.debug(f"[router] 약속 감지: {note!r}")
 
         # 7. 세션 기록
         self.session.add_turn(user_input, response)
@@ -83,41 +151,121 @@ class ConversationRouter:
             f"mood={self.session.mood} aff={self.session.affection}"
         )
 
-        # 8. 요약 트리거
-        if summarizer.check_trigger(self.session, self._trigger_n):
-            self._run_summarizer()
+        # Q: SHORT_TERM_N 초과 시 eviction → session_context 누적
+        short_term.evict_to_context(self.session)
+
+        # 8. 요약 트리거 — chat 모드에서만
+        #    Y: aff_delta >= 5 또는 trigger_event 발동 시 즉시 flush
+        if mode == "chat":
+            immediate = triggered or aff_delta >= 5
+            if immediate and summarizer.should_summarize(self.session.dialogue_log, self._trigger_n):
+                logger.debug(f"[router] 즉시 flush (triggered={triggered}, aff_delta={aff_delta})")
+                threading.Thread(target=self._run_summarizer, daemon=True).start()
+            elif (
+                summarizer.check_trigger(self.session, self._trigger_n)
+                and summarizer.should_summarize(self.session.dialogue_log, self._trigger_n)
+            ):
+                threading.Thread(target=self._run_summarizer, daemon=True).start()
+        # 9. play_log 기록은 호출자(bridge.py or conversation/main.py)가 담당
+        #    training/log/conversation_logger.py ConversationLogger.on_turn() 참조
 
         return response
 
     # ── 내부 헬퍼 ──────────────────────────────────────────────────────────────
 
-    def _handle_location(self, user_input: str) -> None:
+    def _handle_location(self, user_input: str) -> str | None:
         """이동 의도 감지 → YAML act 매칭 or 동적 장소 생성.
 
         session.act_id / session.location_context를 업데이트한다.
-        나레이터는 비활성화 상태 — 대화 안정화 후 conversation/narrator.py 재연결.
+        장소 이동 시 check_place_trigger를 실행해 나레이션을 반환한다.
+        이동이 없으면 None 반환.
         """
         from rag.world_nav import detect_move_intent, find_or_create_location
 
         location_name = detect_move_intent(user_input, self.llm)
         if not location_name:
-            return
+            return None
 
-        # YAML 기존 acts 매칭 (location 필드 부분 일치)
+        # YAML 기존 acts 매칭 (location 또는 display_name 부분 일치)
+        location_lower = location_name.lower()
         for scenario in self.world.get("scenarios", []):
             for act in scenario.get("acts", []):
-                if location_name in act.get("location", ""):
+                act_location     = act.get("location", "")
+                act_display_name = act.get("display_name", "")
+                matched = (
+                    location_lower in act_location.lower()
+                    or location_lower in act_display_name
+                    or act_display_name in location_name
+                )
+                if matched:
                     self.session.scenario_id      = scenario["scenario_id"]
                     self.session.act_id           = act["act_id"]
+                    self.session.location         = act_location
                     self.session.location_context = None
-                    logger.info(f"[router] 장소 이동 (YAML): {act['location']}")
-                    return
+                    logger.info(f"[router] 장소 이동 (YAML): {act_location} ({act_display_name})")
+                    # ChromaDB 우선, 없으면 YAML context로 폴백
+                    narr = self._run_place_trigger(act_location)
+                    if narr is None:
+                        act_context = act.get("context", "").strip()
+                        if act_context:
+                            narr = self._first_visit_narration(
+                                act_location, act_display_name or act_location, act_context
+                            )
+                    return narr
 
         # RAG 검색 or LLM 생성
         world_desc = self.world.get("description", "")
         desc = find_or_create_location(location_name, world_desc, self.rag, self.llm)
+        self.session.location         = location_name
         self.session.location_context = f"{location_name}\n{desc}"
         logger.info(f"[router] 동적 장소 설정: '{location_name}'")
+        # 동적 장소: 직접 나레이션 반환 (ChromaDB 메타 불일치 우회)
+        if desc:
+            return self._first_visit_narration(location_name, location_name, desc)
+        return None
+
+    def _run_place_trigger(self, location: str) -> tuple[str, str] | None:
+        """check_place_trigger를 실행하고 나레이션을 반환한다."""
+        try:
+            from narration.world_trigger import check_place_trigger
+            return check_place_trigger(location, self.session, self.rag)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _first_visit_narration(
+        self, location_key: str, title: str, text: str
+    ) -> tuple[str, str] | None:
+        """첫 방문 시 나레이션을 반환한다. 이미 방문했으면 None.
+
+        visited_places 기록도 함께 관리한다.
+        """
+        visited = set(getattr(self.session, "visited_places", []) or [])
+        if location_key in visited:
+            return None
+        if not hasattr(self.session, "visited_places") or self.session.visited_places is None:
+            self.session.visited_places = []
+        self.session.visited_places.append(location_key)
+        logger.info(f"[router] 장소 나레이션 (YAML/생성): '{title}'")
+        return (title, text)
+
+    def _check_world_triggers(self, user_input: str) -> str | None:
+        """story / culture 트리거를 확인하고 나레이션 텍스트를 반환한다.
+
+        세계관 정보가 없거나 stub 모드이면 None 반환.
+        """
+        try:
+            from narration.world_trigger import (
+                check_story_trigger,
+                check_culture_trigger,
+            )
+            story = check_story_trigger(user_input, self.session, self.rag)
+            if story:
+                return story
+            culture = check_culture_trigger(user_input, self.session, self.rag)
+            return culture
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[router] world_trigger 예외 (world_id={getattr(self.session, 'world_id', None)}): {e}")
+            return None
 
     def _run_summarizer(self) -> None:
         logger.info(

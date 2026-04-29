@@ -26,6 +26,7 @@ lora_train.py — PeFT LoRA 파인튜닝 스크립트
 """
 
 import argparse
+import signal
 import sys
 from pathlib import Path
 
@@ -41,6 +42,22 @@ from transformers import (
     TrainingArguments,
 )
 
+# ── SIGTERM 핸들러 ─────────────────────────────────────────────────────────────
+# train_monitor가 과적합 감지 시 SIGTERM을 전송한다.
+# 기본 핸들러는 finally 블록 없이 즉시 종료하므로 어댑터 저장이 누락된다.
+# SystemExit을 발생시켜 finally 블록이 실행되도록 한다.
+
+_sigterm_received = False
+
+
+def _handle_sigterm(signum, frame):
+    global _sigterm_received
+    _sigterm_received = True
+    raise SystemExit(0)
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -50,7 +67,7 @@ from training.dataset import load_training_data
 def parse_args():
     parser = argparse.ArgumentParser(description="LoRA 파인튜닝")
     parser.add_argument("--model",       default="Qwen/Qwen2.5-3B-Instruct", help="HuggingFace 모델명")
-    parser.add_argument("--data_dir",    default="data/lora",                 help="학습 데이터 루트")
+    parser.add_argument("--data_dir",    default="training/data",             help="학습 데이터 루트")
     parser.add_argument("--output_dir",  default="output/LoRA_v7",              help="어댑터 저장 디렉토리 (output/ 하위 경로)")
     parser.add_argument("--subset",      default=None,                        help="conversation | function | None(전체)")
     parser.add_argument("--epochs",      type=int,   default=3)
@@ -62,13 +79,21 @@ def parse_args():
     parser.add_argument("--lora_alpha",  type=int,   default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--weight_decay", type=float, default=0.0,            help="L2 정규화 (0.01 권장)")
-    parser.add_argument("--save_steps",  type=int,   default=100)
+    parser.add_argument("--save_steps",  type=int,   default=50)
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--eval_split",  type=float, default=0.1,             help="validation 비율 (0이면 eval 비활성)")
     parser.add_argument("--max_samples", type=int,   default=-1,              help="학습에 사용할 최대 샘플 수 (-1=전체)")
     # 저장 및 테스트 옵션
     parser.add_argument("--no_save",     action="store_true", help="학습 후 어댑터 저장 건너뜀 (테스트용)")
     parser.add_argument("--max_steps",   type=int,   default=-1, help="최대 학습 스텝 수 (-1=에폭 기준)")
+    parser.add_argument("--skip_eval",   action="store_true", help="학습 후 자동 평가 건너뜀")
+    # EWC
+    parser.add_argument("--ewc_fisher",     default=None,  help="fisher.pt 경로 (EWC 활성화 시 필수)")
+    parser.add_argument("--ewc_ref_params", default=None,  help="ref_params.pt 경로 (EWC 활성화 시 필수)")
+    parser.add_argument("--ewc_lambda",     type=float, default=0.0, help="EWC 강도 (0이면 비활성)")
+    # 카테고리 가중치
+    parser.add_argument("--category_weights", default=None,
+                        help='카테고리별 가중치 JSON 문자열 (예: \'{"emotion": 2.0, "long_dialogue": 1.5}\')')
     return parser.parse_args()
 
 
@@ -152,6 +177,21 @@ class LossPlotCallback(TrainerCallback):
         plot_loss(state.log_history, self._output_dir, tag="final")
 
 
+class EWCTrainer(Trainer):
+    """EWC 패널티를 compute_loss에 추가하는 Trainer 서브클래스."""
+
+    def __init__(self, ewc_penalty=None, **kwargs):
+        super().__init__(**kwargs)
+        self.ewc_penalty = ewc_penalty
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        result = super().compute_loss(model, inputs, return_outputs=True, **kwargs)
+        loss, outputs = result
+        if self.ewc_penalty is not None:
+            loss = loss + self.ewc_penalty.penalty(model)
+        return (loss, outputs) if return_outputs else loss
+
+
 def apply_lora(model, args) -> object:
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -225,9 +265,32 @@ def main():
     model, tokenizer = load_model_and_tokenizer(args.model, use_gpu)
     model = apply_lora(model, args)
 
+    # ── EWC 패널티 ────────────────────────────────────────────────────────────
+    ewc_penalty = None
+    if args.ewc_lambda > 0:
+        assert args.ewc_fisher and args.ewc_ref_params, \
+            "--ewc_lambda > 0 이면 --ewc_fisher, --ewc_ref_params 필수"
+        from training.ewc import EWCPenalty
+        ewc_penalty = EWCPenalty(
+            fisher_path=ROOT / args.ewc_fisher,
+            ref_params_path=ROOT / args.ewc_ref_params,
+            lambda_=args.ewc_lambda,
+            device="cuda" if use_gpu else "cpu",
+        )
+        logger.info(f"EWC 활성화: lambda={args.ewc_lambda}")
+
+    # ── 카테고리 가중치 ────────────────────────────────────────────────────────
+    import json as _json
+    category_weights = _json.loads(args.category_weights) if args.category_weights else None
+    if category_weights:
+        logger.info(f"카테고리 가중치: {category_weights}")
+
     # ── 데이터셋 ───────────────────────────────────────────────────────────────
     logger.info(f"데이터 로드: {args.data_dir} (subset={args.subset})")
-    raw_ds = load_training_data(args.data_dir, tokenizer, args.max_length, args.subset, args.max_samples)
+    raw_ds = load_training_data(
+        args.data_dir, tokenizer, args.max_length, args.subset,
+        args.max_samples, category_weights=category_weights,
+    )
     tokenized_ds = tokenize_dataset(raw_ds, tokenizer, args.max_length)
     logger.info(f"최종 학습 샘플 수: {len(tokenized_ds)}")
 
@@ -297,7 +360,8 @@ def main():
     )
 
     # ── Trainer ────────────────────────────────────────────────────────────────
-    trainer = Trainer(
+    trainer = EWCTrainer(
+        ewc_penalty=ewc_penalty,
         model=model,
         args=training_args,
         train_dataset=train_ds,
@@ -308,7 +372,18 @@ def main():
     )
 
     logger.info("학습 시작")
-    trainer.train()
+    early_stopped = False
+    try:
+        trainer.train()
+    except SystemExit:
+        if _sigterm_received:
+            logger.warning("SIGTERM 수신 — 조기 종료. 어댑터 저장 후 종료합니다.")
+            early_stopped = True
+        else:
+            raise
+    except KeyboardInterrupt:
+        logger.warning("KeyboardInterrupt — 조기 종료. 어댑터 저장 후 종료합니다.")
+        early_stopped = True
 
     # 학습 결과 요약
     log = trainer.state.log_history
@@ -316,20 +391,70 @@ def main():
     if train_losses:
         logger.info(f"최종 학습 loss: {train_losses[-1]:.4f}")
 
-    # ── 어댑터 저장 ────────────────────────────────────────────────────────────
+    # ── 어댑터 저장 (정상 완료 + 조기 종료 모두) ──────────────────────────────
+    adapter_path = None
     if args.no_save:
         logger.info("--no_save: 어댑터 저장 건너뜀")
     else:
         adapter_path = output_dir / "adapter"
-        model.save_pretrained(str(adapter_path))
-        tokenizer.save_pretrained(str(adapter_path))
-        logger.info(f"어댑터 저장 완료: {adapter_path}")
+        try:
+            # best checkpoint가 load_best_model_at_end=True로 이미 로드됐거나,
+            # 조기 종료 시 현재 상태를 저장한다.
+            trainer.save_state()
+            model.save_pretrained(str(adapter_path))
+            tokenizer.save_pretrained(str(adapter_path))
+            logger.info(f"어댑터 저장 완료: {adapter_path}")
+        except Exception as e:
+            logger.error(f"어댑터 저장 실패: {e}")
+            adapter_path = None
 
-        # ── 체크포인트 정리 (가중치·그래프·로그 제외 삭제) ────────────────────
+        # ── 체크포인트 정리 ────────────────────────────────────────────────────
         import shutil
         for ckpt in sorted(output_dir.glob("checkpoint-*")):
             shutil.rmtree(ckpt)
             logger.info(f"체크포인트 삭제: {ckpt.name}")
+
+    # ── 조기 종료 시: 어댑터만 저장하고 즉시 종료 ────────────────────────────
+    # eval은 train_monitor.py가 프로세스 종료 후 실행한다.
+    if early_stopped:
+        logger.info("조기 종료 완료. train_monitor가 eval을 실행합니다.")
+        sys.exit(0)
+
+    # ── 정상 완료 시: eval 실행 (train_monitor 없이 단독 실행한 경우) ──────────
+    if args.skip_eval or adapter_path is None:
+        if args.skip_eval:
+            logger.info("--skip_eval: 자동 평가 건너뜀")
+        return
+
+    import gc
+    import subprocess
+
+    logger.info("VRAM 해제 중 — 학습 모델 언로드")
+    trainer.model = None
+    del trainer
+    del model
+    del tokenizer
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        free_gb = torch.cuda.mem_get_info()[0] / 1024**3
+        logger.info(f"VRAM 해제 완료 — 여유 VRAM: {free_gb:.1f} GB")
+
+    eval_dir = ROOT / "training" / "eval"
+    eval_scripts = [
+        (eval_dir / "ai_tell_checker.py", ["--adapter", str(adapter_path)]),
+        (eval_dir / "memory_test.py",     ["--adapter", str(adapter_path)]),
+        (eval_dir / "scenario_eval.py",   ["--adapter", str(adapter_path)]),
+    ]
+    for script, extra_args in eval_scripts:
+        if not script.exists():
+            logger.warning(f"평가 스크립트 없음 — 건너뜀: {script}")
+            continue
+        logger.info(f"자동 평가 실행: {script.name}")
+        result = subprocess.run([sys.executable, str(script)] + extra_args)
+        if result.returncode != 0:
+            logger.warning(f"평가 종료 코드 {result.returncode}: {script.name}")
 
 
 if __name__ == "__main__":

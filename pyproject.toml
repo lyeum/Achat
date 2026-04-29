@@ -47,6 +47,7 @@ dependencies = [
     "tqdm",
     "rich",
     "matplotlib>=3.8.0",
+    "ddgs>=9.12.0",
 ]
 
 # PyTorch CUDA 12.8 빌드 인덱스 (RTX 5060 Ti / Blackwell 대응)
@@ -71,4 +72,9 @@ ignore = [
     "F401",   # 미사용 import (모듈 __init__.py에서 허용)
     "E402",   # sys.path.insert 이후 로컬 모듈 import — 프로젝트 루트 설정 패턴
 ]
-exclude = ["training/data/**", "data/**"]
+exclude = ["training/data/**", "data/**", "**/*.qml"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

@@ -8,6 +8,7 @@ class ConversationSession:
 
     mood / affection 초기값은 CH_*.yaml의 state 필드에서 가져온다.
     dialogue_log는 단기 버퍼로 사용되며 memory/short_term.py가 이를 참조한다.
+    session_id는 SessionManager가 부여하는 영속 식별자다 (None이면 비관리 세션).
     """
 
     character_id: str
@@ -15,13 +16,30 @@ class ConversationSession:
     scenario_id: Optional[str] = None
     act_id: Optional[str] = None
 
+    location: str = ""                      # 현재 장소명 (YAML act.location 값)
     location_context: Optional[str] = None  # 동적 장소 묘사 (YAML act 덮어쓰기)
 
-    mood: str = "neutral"   # neutral / happy / annoyed / sad
+    mood: str = "neutral"   # neutral / happy / affectionate / touched / curious / sad / embarrassed / annoyed / angry
     affection: int = 30     # 0~100
+    affection_locked: bool = False           # True이면 update_affection() 무시
+    affection_lock_value: int | None = None  # 잠금 시 고정할 수치 (None이면 현재값 유지)
 
     turn_count: int = 0
+    mood_hold: int = 0                       # 현재 mood 유지 남은 턴 수 (0 = neutral로 복귀 가능)
     dialogue_log: list[dict] = field(default_factory=list)
+
+    # 중기 컨텍스트 — SHORT_TERM_N 초과 턴이 evict 될 때 누적되는 요약 텍스트
+    session_context: str = ""
+    # 세션 내 캐릭터 약속 목록 (~할게, ~기억할게 등 감지)
+    character_notes: list[str] = field(default_factory=list)
+
+    # SessionManager가 부여하는 영속 세션 ID (None = 비관리 세션, 하위 호환 유지)
+    session_id: Optional[str] = None
+
+    # 세계관 트리거 상태 (세션 변경 시 초기화)
+    fired_stories: list = field(default_factory=list)        # 발동된 story item_title 목록
+    visited_places: list = field(default_factory=list)       # 방문한 장소 목록
+    explained_cultures: list = field(default_factory=list)   # 세션 내 설명된 culture 항목
 
     @classmethod
     def from_character(

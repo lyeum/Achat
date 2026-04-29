@@ -1,11 +1,11 @@
 [project]
 name = "achat-deploy"
 version = "0.1.0"
-description = "플로팅 PIP 캐릭터 챗봇 + 기능 도우미 — 배포 환경 (Windows + CPU)"
+description = "플로팅 AI 캐릭터 챗봇 + 기능 도우미 — 배포 환경 (Windows + CPU)"
 requires-python = ">=3.10"
 dependencies = [
     # ── LLM 추론 (CPU) ──────────────────────────────────────
-    "llama-cpp-python>=0.3.0",        # AVX2 이상 CPU 필수, AVX-512 권장
+    "llama-cpp-python>=0.3.0",        # AVX2 이상 CPU 필수 — pre-built wheel: tool.uv.index 참조
 
     # ── UI ──────────────────────────────────────────────────
     "PySide6>=6.7.0",
@@ -20,8 +20,18 @@ dependencies = [
 
     # ── 기능 모드 도구 ──────────────────────────────────────
     "Pillow>=10.0.0",                 # 이미지 확장자 변환 (jpg/png/webp/bmp)
-    "whoosh>=2.7.4",                  # 로컬 파일 FTS 검색
+    # 로컬 파일 검색: SQLite FTS5 (Python 표준 라이브러리 sqlite3에 내장, 추가 패키지 불필요)
 
     # ── 유틸리티 ────────────────────────────────────────────
     "loguru>=0.7.0",
 ]
+
+# llama-cpp-python Windows pre-built wheel (C++ 컴파일러 없이 설치 가능)
+# Windows에서 소스 빌드 시 MSVC 필요 → pre-built wheel 인덱스 사용
+[[tool.uv.index]]
+name = "llama-cpp-python-cpu"
+url = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+llama-cpp-python = { index = "llama-cpp-python-cpu" }

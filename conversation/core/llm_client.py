@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from loguru import logger
@@ -11,6 +12,10 @@ class LLMClient:
     config.py의 model_backend 값에 따라 자동으로 로딩 방식을 선택한다.
     - "llama_cpp"   : GGUF 모델 + llama-cpp-python (배포 환경)
     - "transformers": HuggingFace 모델 + 4-bit BnB (개발 환경 추론 테스트용)
+
+    generate()는 내부 락으로 직렬화된다.
+    대화/function 호출이 동시에 실행되면 VRAM 이중 점유로 OOM이 발생하므로
+    동시 호출 시 먼저 온 요청이 끝날 때까지 대기한다.
     """
 
     def __init__(self, config: Optional[dict] = None):
@@ -20,6 +25,7 @@ class LLMClient:
         self.backend: str = self.cfg["model_backend"]
         self._model = None
         self._tokenizer = None
+        self._generate_lock = threading.Lock()
         self._load()
 
     # ── 로딩 ─────────────────────────────────────────────────────────────────
@@ -39,28 +45,53 @@ class LLMClient:
         if not model_path:
             raise ValueError("deploy 환경에서 model_path가 설정되지 않았습니다.")
         logger.info(f"[llm_client] llama_cpp 로딩: {model_path}")
-        self._model = Llama(model_path=model_path, n_ctx=4096, verbose=False)
+        import multiprocessing
+        n_threads = self.cfg.get("n_threads", multiprocessing.cpu_count())
+        self._model = Llama(model_path=model_path, n_ctx=4096, n_threads=n_threads, verbose=False)
+        logger.info(f"[llm_client] llama_cpp 스레드: {n_threads}")
 
     def _load_transformers(self) -> None:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         model_name = self.cfg.get("model_name")
         if not model_name:
             raise ValueError("dev 환경에서 model_name이 설정되지 않았습니다.")
 
         adapter_path = self.cfg.get("adapter_path")
-        logger.info(f"[llm_client] transformers 로딩: {model_name}")
+        quantization = self.cfg.get("quantization", "int4")  # "int4" | "int8" | "none"
+        logger.info(f"[llm_client] transformers 로딩: {model_name} (quantization={quantization})")
         if adapter_path:
             logger.info(f"[llm_client] LoRA 어댑터: {adapter_path}")
 
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-        ).to(self._device)
+
+        if quantization == "int4" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,  # 이중 양자화 — 추가 ~0.4 bpw 절감
+                bnb_4bit_quant_type="nf4",       # NormalFloat4 — 학습 분포 기반 최적 양자화
+            )
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=bnb_cfg,
+                low_cpu_mem_usage=True,
+            )
+        elif quantization == "int8" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=bnb_cfg,
+                low_cpu_mem_usage=True,
+            )
+        else:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+            ).to(self._device)
 
         if adapter_path:
             from peft import PeftModel  # type: ignore
@@ -78,11 +109,17 @@ class LLMClient:
         messages: list[dict],
         stream: bool = False,
         max_tokens: int = 512,
+        mode: str = "chat",
     ) -> str:
-        """messages 리스트(ChatML 형식)를 받아 어시스턴트 응답 문자열을 반환한다."""
-        if self.backend == "llama_cpp":
-            return self._generate_llama(messages, stream, max_tokens)
-        return self._generate_transformers(messages, max_tokens)
+        """messages 리스트(ChatML 형식)를 받아 어시스턴트 응답 문자열을 반환한다.
+
+        mode='function': JSON 파라미터 추출용 — greedy decoding, 강한 repetition_penalty.
+        mode='chat'    : 대화용 — sampling, 기본 repetition_penalty (기본값).
+        """
+        with self._generate_lock:
+            if self.backend == "llama_cpp":
+                return self._generate_llama(messages, stream, max_tokens)
+            return self._generate_transformers(messages, max_tokens, mode=mode)
 
     def _generate_llama(
         self, messages: list[dict], stream: bool, max_tokens: int
@@ -91,6 +128,7 @@ class LLMClient:
             messages=messages,
             max_tokens=max_tokens,
             stream=stream,
+            repeat_penalty=1.15,
         )
         if stream:
             full = ""
@@ -102,26 +140,94 @@ class LLMClient:
             return full
         return output["choices"][0]["message"]["content"]
 
-    def _generate_transformers(self, messages: list[dict], max_tokens: int) -> str:
+    def _generate_transformers(self, messages: list[dict], max_tokens: int, mode: str = "chat") -> str:
         import torch
 
         text = self._tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
         inputs = self._tokenizer(text, return_tensors="pt").to(self._model.device)
+
+        if mode == "function":
+            # JSON 추출: greedy decoding + 강한 반복 억제 → LoRA 할루시네이션 방지
+            gen_kwargs: dict = dict(do_sample=False, repetition_penalty=1.3)
+        else:
+            # 대화: sampling 유지
+            gen_kwargs = dict(do_sample=True, temperature=0.8, repetition_penalty=1.15)
+
         with torch.no_grad():
             out = self._model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
-                do_sample=True,
-                temperature=0.8,
-                repetition_penalty=1.1,
                 pad_token_id=self._tokenizer.eos_token_id,
+                **gen_kwargs,
             )
         response: str = self._tokenizer.decode(
             out[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
         )
         return response
+
+    # ── 절전 지원 ─────────────────────────────────────────────────────────────
+
+    def unload(self) -> None:
+        """모델을 메모리에서 해제한다. transformers는 tokenizer를 보존해 재로드 속도를 높인다."""
+        import gc
+        self._model = None
+        if self.backend == "transformers":
+            pass  # tokenizer는 보존
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
+    def reload(self) -> None:
+        """언로드된 모델을 다시 로드한다. 이미 로드된 경우 무시한다."""
+        if self._model is not None:
+            return
+        if self.backend == "llama_cpp":
+            self._load_llama_cpp()
+        elif self.backend == "transformers":
+            if self._tokenizer is None:
+                self._load_transformers()
+            else:
+                self._reload_model_only()
+
+    def _reload_model_only(self) -> None:
+        """transformers backend에서 tokenizer를 보존하고 model 가중치만 재로드한다."""
+        import torch
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+        model_name   = self.cfg.get("model_name")
+        quantization = self.cfg.get("quantization", "int4")
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if quantization == "int4" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, quantization_config=bnb_cfg, low_cpu_mem_usage=True)
+        elif quantization == "int8" and self._device == "cuda":
+            bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, quantization_config=bnb_cfg, low_cpu_mem_usage=True)
+        else:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True).to(self._device)
+
+        adapter_path = self.cfg.get("adapter_path")
+        if adapter_path:
+            from peft import PeftModel  # type: ignore
+            self._model = PeftModel.from_pretrained(
+                self._model, adapter_path, device_map={"": self._device})
+            self._model.eval()
 
     # ── 토큰 카운트 헬퍼 ─────────────────────────────────────────────────────
 

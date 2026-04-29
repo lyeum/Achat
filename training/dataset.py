@@ -31,13 +31,18 @@ def load_jsonl_files(
     data_dir: Path,
     max_samples: int = -1,
     seed: int = 42,
+    category_weights: dict[str, float] | None = None,
 ) -> list[dict]:
     """data_dir 하위 모든 .jsonl 파일을 재귀적으로 읽어 리스트 반환.
 
     max_samples > 0 이면 파일별 비율을 유지하는 stratified sampling 적용.
+    category_weights 지정 시 카테고리별 과샘플/부샘플 적용 (max_samples 이후).
     """
     per_file: list[tuple[Path, list[dict]]] = []
-    files = sorted(data_dir.rglob("*.jsonl"))
+    files = sorted(
+        p for p in data_dir.rglob("*.jsonl")
+        if "_excluded" not in p.parts
+    )
     if not files:
         logger.warning(f"JSONL 파일 없음: {data_dir}")
         return []
@@ -80,6 +85,37 @@ def load_jsonl_files(
             logger.debug(f"  로드: {display_path} ({len(file_records)}건)")
             records.extend(file_records)
         logger.info(f"총 {len(records)}건 로드 ({len(files)}개 파일)")
+
+    # ── 카테고리 가중치 샘플링 ────────────────────────────────────────────────
+    if category_weights:
+        rng2 = random.Random(seed)
+        # 카테고리 기준 그룹화
+        groups: dict[str, list[dict]] = {}
+        for rec in records:
+            cat = rec.get("category", "__none__")
+            groups.setdefault(cat, []).append(rec)
+
+        resampled: list[dict] = []
+        for cat, cat_records in groups.items():
+            w = category_weights.get(cat, 1.0)
+            if w == 1.0:
+                resampled.extend(cat_records)
+            elif w > 1.0:
+                n_target    = round(len(cat_records) * w)
+                full_copies = n_target // len(cat_records)
+                remainder   = n_target % len(cat_records)
+                result = cat_records * full_copies + rng2.sample(cat_records, remainder)
+                logger.debug(f"  카테고리 '{cat}': {len(cat_records)}건 × {w} → {len(result)}건 (오버샘플)")
+                resampled.extend(result)
+            else:  # w < 1.0
+                n_target = max(1, round(len(cat_records) * w))
+                result   = rng2.sample(cat_records, n_target)
+                logger.debug(f"  카테고리 '{cat}': {len(cat_records)}건 × {w} → {len(result)}건 (언더샘플)")
+                resampled.extend(result)
+
+        rng2.shuffle(resampled)
+        logger.info(f"카테고리 가중치 적용 후: {len(resampled)}건 (원본 {len(records)}건)")
+        records = resampled
 
     return records
 
@@ -129,6 +165,7 @@ def load_training_data(
     max_length: int = DEFAULT_MAX_LENGTH,
     subset: Optional[str] = None,
     max_samples: int = -1,
+    category_weights: dict[str, float] | None = None,
 ) -> Dataset:
     """
     data_dir 하위 JSONL → HuggingFace Dataset 반환.
@@ -139,12 +176,13 @@ def load_training_data(
         max_length: 최대 토큰 수. 초과 샘플 필터링.
         subset: "conversation" | "function" | None(전체)
         max_samples: 파일별 비율 유지 stratified sampling (-1=전체)
+        category_weights: 카테고리별 가중치 (예: {"emotion": 2.0, "long_dialogue": 1.5})
     """
     base = ROOT / data_dir
     if subset:
         base = base / subset
 
-    records = load_jsonl_files(base, max_samples=max_samples)
+    records = load_jsonl_files(base, max_samples=max_samples, category_weights=category_weights)
     if not records:
         raise ValueError(f"로드된 데이터 없음: {base}")
 

@@ -7,24 +7,235 @@ Window {
     id: root
 
     // ── 크기 / 상태 ─────────────────────────────────────────────────────────
-    property bool isBubble: false
-    property string currentMode: "chat"   // "chat" | "function"
+    property bool   isBubble:          false   // false=풀창, true=PIP 모드
+    property bool   pipBubbleOpen:     false   // PIP 말풍선 표시 여부
+    property string currentMode:       "chat"  // "chat" | "function"
+    property string currentTag:        ""      // 선택된 기능 태그 key (""=없음)
+    property color  inputTagColor:     "#4A90D9" // 활성 태그 색상 → 입력창 테두리에 반영
+    property string backgroundImageUrl: bridge ? bridge.currentBackground : ""
+    property string currentMood:       bridge ? bridge.currentMood : "neutral"
+    property bool   inputReady:        true    // 전송 가능 여부
+    property bool   settingsOpen:      false   // 설정 패널 표시 여부
+    property string charListJson:      "[]"    // getCharacterList() 캐시
+    property string worldListJson:     "[]"    // getWorldList() 캐시
 
-    width:  isBubble ? 72  : 360
-    height: isBubble ? 72  : 520
-    flags:  Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+    // 창 해상도 (0=소형 432×624, 1=중형 520×760, 2=대형 620×900)
+    property int    windowScaleIndex:      1
+    readonly property var _winSizes: [ {w:432,h:624}, {w:520,h:760}, {w:620,h:900} ]
+
+    // 커스터마이징
+    property bool   emotionPanelOpen:      false
+    property bool   characterBuildOpen:    false
+    property bool   charSelectOpen:        false
+    property bool   charStatusOpen:        false
+    property bool   resetConfirmOpen:      false
+    property string charStatusJson:        "{}"
+    property string customPartsJson:       "{}"
+    property string allPartsListJson:      "{}"
+    property int    charIconVersion:       0     // 메인 아이콘 교체 시 증가 → 캐시 버스팅
+    property string pipBubbleDir:          "random"  // PIP 말풍선 방향
+
+    // 파일 변환 패널
+    property bool   fileOptionsOpen:       false
+    property string fileOptionsPaths:      "[]"
+
+    // 폴더 분류 패널
+    property bool   classifyPanelOpen:     false
+    property string classifyPath:          ""
+
+    // 파일 검색 결과 패널
+    property bool   fileSearchOpen:        false
+    property string fileSearchResults:     "[]"
+    property string fileSearchQuery:       ""
+    property string searchDirectory:       ""   // local_search 태그 선택 시 미리 저장
+
+    // 사이드 메뉴
+    property bool   sideMenuOpen:          false
+
+    // 기억 DB 관리 패널
+    property bool   memoryDbOpen:          false
+    property string memoryDbJson:          "{}"
+    property string worldDbJson:           "{}"
+    property string promptGuidesJson:      "{}"
+
+    // 세션 목록
+    property string sessionListJson:       "[]"
+
+    // 관리자 패널
+    property bool   adminPanelOpen:        false
+    property string adminConvJson:         "{}"
+
+    // 캐릭터 생성 패널
+    property bool   charCreateOpen:        false
+
+    // 세계관 생성 패널
+    property bool   worldCreateOpen:       false
+
+    // 세계관 이미지 관리 패널
+    property bool   worldImageOpen:        false
+    property string worldLocationJson:     "[]"
+
+    // 메뉴얼 패널
+    property bool   manualOpen:            false
+
+    // ── 테마 ──────────────────────────────────────────────────────────────────
+    property string currentTheme: "ocean"
+
+    readonly property var _themes: ({
+        "ocean": {
+            bgMain:         "#0E1C22",
+            bgTitle:        "#142830",
+            bgPanel:        "#122028",
+            bgInput:        "#182C38",
+            textPrimary:    "#A8D0D8",
+            accent:         "#5A9EA8",
+            tabInactive:    "#182830",
+            bubbleAssist:   "#142830",
+            tagBg:          "#101E28",
+            tagBorder:      "#1E3C48",
+            scrollbar:      "#2A5060",
+            charBtnBg:      "#102030",
+            charBtnHover:   "#183848",
+            statusBtnBg:    "#101C28",
+            statusBtnHover: "#183038"
+        },
+        "amber": {
+            bgMain:         "#1A1208",
+            bgTitle:        "#241A08",
+            bgPanel:        "#201608",
+            bgInput:        "#2C1E0A",
+            textPrimary:    "#E8C87A",
+            accent:         "#D4880A",
+            tabInactive:    "#281C0A",
+            bubbleAssist:   "#241A08",
+            tagBg:          "#1C1408",
+            tagBorder:      "#3A2808",
+            scrollbar:      "#A06010",
+            charBtnBg:      "#241800",
+            charBtnHover:   "#382200",
+            statusBtnBg:    "#1E1600",
+            statusBtnHover: "#2C1E00"
+        },
+        "violet": {
+            bgMain:         "#120E1C",
+            bgTitle:        "#1A1228",
+            bgPanel:        "#161020",
+            bgInput:        "#1E1630",
+            textPrimary:    "#C8B8E8",
+            accent:         "#8860D0",
+            tabInactive:    "#1A1426",
+            bubbleAssist:   "#1A1228",
+            tagBg:          "#120E1A",
+            tagBorder:      "#2A1E42",
+            scrollbar:      "#6040A8",
+            charBtnBg:      "#160E28",
+            charBtnHover:   "#221438",
+            statusBtnBg:    "#120E20",
+            statusBtnHover: "#1C1430"
+        }
+    })
+
+    readonly property var _th: _themes[currentTheme] || _themes["ocean"]
+
+    onCurrentThemeChanged: {
+        if (currentTag === "") root.inputTagColor = _th.accent
+    }
+
+    // PIP 모드 진입 시 아이콘 하단 Y 좌표 보존 (말풍선이 위로 펼쳐지도록)
+    property int pipAnchorY: 0
+
+    // 창 크기: 풀창은 width 바인딩만 사용. height는 heightAnim이 직접 제어
+    // (풀창↔PIP 전환 시 height 바인딩이 애니메이션에 의해 깨지는 문제 방지)
+    width:  isBubble ? (pipBubbleOpen || pipView.inputOpen ? 240 : 160) : _winSizes[windowScaleIndex].w
+
+    flags:  Qt.FramelessWindowHint | (root.isBubble ? Qt.WindowStaysOnTopHint | Qt.Tool : Qt.Window)
     color:  "transparent"
     visible: true
     title:  "Achat"
 
-    // 첫 렌더링 후 우하단 배치
+    // 첫 렌더링 후 우하단 배치 (height는 바인딩 없이 명시적으로 초기화)
     Component.onCompleted: {
+        if (bridge) root.windowScaleIndex = bridge.getWindowScale()
+        if (bridge) root.pipBubbleDir = bridge.getPipBubbleDir()
+        root.height = _winSizes[root.windowScaleIndex].h
         x = Screen.width  - width  - 40
         y = Screen.height - height - 60
+        _loadCustomization()
+        if (bridge) root.currentTheme = bridge.getTheme()
+
+        // 이전 세션 대화 기록 복원 (changeWorld 이전 — 기존 대화가 먼저 표시)
+        if (bridge) {
+            try {
+                var history = bridge.getSessionHistory()
+                for (var i = 0; i < history.length; i++) {
+                    messageModel.append({ "role": history[i].role, "content": history[i].content })
+                }
+                if (history.length > 0)
+                    Qt.callLater(() => { chatList.positionViewAtEnd() })
+            } catch(e) {}
+        }
+
+        // 앱 시작 시 default 세계관(Seaside) 자동 적용
+        if (bridge) {
+            try {
+                var dw = JSON.parse(bridge.getDefaultWorld())
+                if (dw.world_id && dw.scenario_id && dw.act_id)
+                    bridge.changeWorld(dw.world_id, dw.scenario_id, dw.act_id)
+            } catch(e) {}
+        }
     }
 
-    Behavior on width  { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
-    Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
+    function _loadCustomization() {
+        if (!bridge) return
+        try {
+            var obj = JSON.parse(bridge.loadCustomization())
+            customPartsJson = JSON.stringify(obj.parts || {})
+        } catch(e) {}
+    }
+
+    // PIP 말풍선이 열릴 때 y/height를 동시에 변경해 아이콘 위치를 고정
+    // (height Behavior와 y를 따로 움직이면 아이콘이 들떠 보이므로 명시적 애니메이션 사용)
+    NumberAnimation { id: yAnim;      target: root; property: "y";      duration: 200; easing.type: Easing.InOutQuad }
+    NumberAnimation { id: heightAnim; target: root; property: "height"; duration: 200; easing.type: Easing.InOutQuad }
+
+    onPipBubbleOpenChanged: {
+        if (!isBubble) return
+        // PipWindow 내부 상태 동기화 (외부에서 pipBubbleOpen을 바꾼 경우)
+        if (pipView.bubbleOpen !== pipBubbleOpen) pipView.bubbleOpen = pipBubbleOpen
+        // 높이 변경은 pipView.resizeRequested 신호가 처리
+    }
+
+    // PipWindow가 요청하는 높이로 애니메이션 (버블/입력창 토글 시)
+    Connections {
+        target: pipView
+        function onResizeRequested(h) {
+            if (!root.isBubble) return
+            yAnim.to = pipAnchorY - h; yAnim.start()
+            heightAnim.to = h;         heightAnim.start()
+        }
+    }
+
+    // PIP ↔ 풀창 전환: height를 명시적으로 관리 (선언적 바인딩 제거로 애니메이션 충돌 방지)
+    onIsBubbleChanged: {
+        if (isBubble) {
+            // 풀창 → PIP: 현재 bottom 위치 보존, 160px 아이콘으로 축소
+            yAnim.stop(); heightAnim.stop()
+            pipAnchorY = root.y + root.height
+            pipBubbleOpen = false
+            yAnim.to = pipAnchorY - 160; yAnim.start()
+            heightAnim.to = 160;         heightAnim.start()
+        } else {
+            // PIP → 풀창: 애니메이션 중단 후 height/y 명시적 복원
+            yAnim.stop(); heightAnim.stop()
+            var fh = _winSizes[root.windowScaleIndex].h
+            root.height = fh
+            // 아이콘 bottom 기준으로 풀창을 위로 배치, 화면 밖으로 나가지 않게 클램프
+            root.y = Math.min(Screen.height - fh - 20, Math.max(0, pipAnchorY - fh))
+        }
+    }
+
+    Behavior on width  { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+    // height는 PIP 말풍선 전환 시 yAnim/heightAnim이 직접 제어하므로 Behavior 제거
 
     // taskbar X 또는 Alt+F4 → 앱 완전 종료
     onClosing: Qt.quit()
@@ -33,18 +244,19 @@ Window {
     DragHandler {
         id: dragHandler
         target: null
+        enabled: !root.adminPanelOpen && !root.charCreateOpen
         onActiveChanged: if (active) root.startSystemMove()
     }
 
-    // ── hover 투명도 (HoverHandler — 이벤트 가로채지 않음) ────────────────
-    HoverHandler { id: windowHover }
-    opacity: windowHover.hovered || isBubble ? 1.0 : 0.85
-    Behavior on opacity { NumberAnimation { duration: 300 } }
+    // ── 항상 불투명 ──────────────────────────────────────────────────────
+    opacity: 1.0
 
-    // ── 한글 폰트 (Windows 폰트 경로에서 로드) ───────────────────────────
+    // ── 한글 폰트 (플랫폼별 경로) ─────────────────────────────────────────
     FontLoader {
         id: koreanFont
-        source: "file:///mnt/c/Windows/Fonts/malgun.ttf"
+        source: Qt.platform.os === "windows"
+                ? "file:///C:/Windows/Fonts/malgun.ttf"
+                : "file:///mnt/c/Windows/Fonts/malgun.ttf"
     }
 
     // ── 브리지 이벤트 수신 ───────────────────────────────────────────────
@@ -52,12 +264,35 @@ Window {
         target: bridge
 
         function onMessageAdded(role, content) {
+            // assistant 응답 추가 전 thinking placeholder("...") 제거
+            if (role === "assistant" && messageModel.count > 0) {
+                var last = messageModel.get(messageModel.count - 1)
+                if (last.content === "...") messageModel.remove(messageModel.count - 1)
+            }
             messageModel.append({ "role": role, "content": content })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+            // PIP 모드: assistant 응답이 오면 말풍선 자동 표시
+            if (role === "assistant" && root.isBubble) {
+                pipView.showBubble(content)
+                root.pipBubbleOpen = true
+            }
+        }
+
+        // **...** 편집 후 재분할: 기존 버블 제거 → 분할 버블 순서대로 삽입
+        function onMessageReplaced(index, segments) {
+            if (index < 0 || index >= messageModel.count) return
+            messageModel.remove(index, 1)
+            for (var i = 0; i < segments.length; i++) {
+                messageModel.insert(index + i, {
+                    "role":    segments[i].role,
+                    "content": segments[i].content
+                })
+            }
             Qt.callLater(() => { chatList.positionViewAtEnd() })
         }
 
         function onStatusChanged(status) {
-            sendBtn.enabled = (status === "ready")
+            root.inputReady = (status === "ready")
             inputField.enabled = (status === "ready")
             if (status === "thinking") {
                 messageModel.append({ "role": "assistant", "content": "..." })
@@ -72,6 +307,69 @@ Window {
         function onCharacterNameChanged(name) {
             // 바인딩 대신 직접 할당하지 않음 — charNameLabel.text 바인딩이 처리
         }
+
+        function onBackgroundChanged(url) {
+            root.backgroundImageUrl = url
+        }
+
+        function onMoodChanged(mood) {
+            root.currentMood = mood
+        }
+
+        // 캐릭터/세계관 변경 시 채팅창을 지우고 해당 세션의 이전 기록을 복원한다
+        function onChatReset(history) {
+            messageModel.clear()
+            for (var i = 0; i < history.length; i++) {
+                messageModel.append({ "role": history[i].role, "content": history[i].content })
+            }
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+
+        function onRagIndexRequired() {
+            ragDialog.open()
+        }
+
+        function onFlushDialogRequested(turns) {
+            flushDialog.totalTurns = turns
+            flushDialog.open()
+        }
+    }
+
+    // ── RAG 재인덱싱 안내 대화상자 ───────────────────────────────────────
+    Dialog {
+        id: ragDialog
+        title: "세계관 데이터 초기화 필요"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label {
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            text: "세계관 RAG 데이터베이스가 비어 있습니다.\n\n'확인'을 누르면 재인덱싱을 진행한 뒤 대화를 시작합니다.\n(처음 실행 시 약 10~30초 소요)"
+        }
+        onAccepted: {
+            bridge.reindexWorldKnowledge()
+        }
+    }
+
+    // ── 5일 경과 대화 정리 대화상자 ─────────────────────────────────────
+    Dialog {
+        id: flushDialog
+        property int totalTurns: 0
+        title: "대화기록 자동 정리"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.Yes | Dialog.No
+        Label {
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            text: "5일이 지나 대화기록이 자동으로 정리됩니다.\n최근 10턴만 남기고 이전 기록을 삭제합니다.\n\n진행하시겠습니까?"
+        }
+        onAccepted: {
+            bridge.confirmFlush()
+        }
     }
 
     // ── 메시지 모델 ──────────────────────────────────────────────────────
@@ -81,26 +379,335 @@ Window {
     Rectangle {
         id: container
         anchors.fill: parent
-        radius: root.isBubble ? width / 2 : 16
-        color:  root.isBubble ? "#4A90D9" : "#1E1E1E"
-        clip:   true
+        radius: root.isBubble ? 10 : 16
+        color:  root.isBubble ? "transparent" : root._th.bgMain
+        clip:   false
 
         Behavior on radius { NumberAnimation { duration: 200 } }
         Behavior on color  { ColorAnimation  { duration: 200 } }
 
-        // ── 버블 모드: 캐릭터 이니셜 + 더블클릭으로 확장 ────────────────
-        Text {
-            anchors.centerIn: parent
+        // ── PIP 마스코트 모드 ─────────────────────────────────────────────
+        PipWindow {
+            id: pipView
             visible: root.isBubble
-            text: bridge ? bridge.characterName.charAt(0).toUpperCase() : ""
-            color: "white"
-            font.pixelSize: 28
-            font.bold: true
-        }
-        MouseArea {
             anchors.fill: parent
-            visible: root.isBubble
-            onDoubleClicked: root.isBubble = false
+            fontFamily:      koreanFont.font.family
+            currentMood:     root.currentMood
+            characterId:     bridge ? bridge.characterId : ""
+            partsJson:       root.customPartsJson
+            iconVersion:     root.charIconVersion
+            inputEnabled:    root.inputReady
+            bubbleDirection: root.pipBubbleDir
+
+            onBubbleOpenChanged: root.pipBubbleOpen = bubbleOpen
+
+            onExpandRequested: {
+                root.pipBubbleOpen = false
+                root.isBubble = false
+            }
+
+            onMessageSent: function(text) {
+                // bridge.sendMessage → messageAdded("user") emit → Connections.onMessageAdded가 처리
+                // (직접 append 금지 — 중복 방지)
+                bridge.sendMessage(text, root.currentMode, root.currentTag)
+            }
+        }
+
+        // ── 표정 / 아이콘 지정 패널 오버레이 ────────────────────────────
+        EmotionPanel {
+            anchors.fill: parent
+            visible: root.emotionPanelOpen && !root.isBubble
+            z: 20
+            fontFamily:  koreanFont.font.family
+            characterId: bridge ? bridge.characterId : ""
+            onCloseRequested: root.emotionPanelOpen = false
+        }
+
+        // ── 캐릭터 커스텀 패널 오버레이 ──────────────────────────────────
+        CharacterBuildPanel {
+            anchors.fill: parent
+            visible: root.characterBuildOpen && !root.isBubble
+            z: 20
+            fontFamily:        koreanFont.font.family
+            partsJson:         root.customPartsJson
+            allPartsListJson:  root.allPartsListJson
+            characterListJson: root.charListJson
+            onCloseRequested: root.characterBuildOpen = false
+            onSavedAsIcon: function(charId, pJson) {
+                bridge.exportCompositeAsPng(charId, "icon", pJson)
+                if (charId === bridge.characterId)
+                    root.customPartsJson = pJson
+            }
+            onSavedAsEmotion: function(charId, mood, pJson) {
+                bridge.exportCompositeAsPng(charId, "emotion_" + mood, pJson)
+            }
+        }
+
+        // ── 설정 패널 오버레이 ────────────────────────────────────────────
+        SettingsPanel {
+            anchors.fill: parent
+            visible: root.settingsOpen && !root.isBubble
+            z: 10
+            fontFamily:          koreanFont.font.family
+            characterListJson:   root.charListJson
+            worldListJson:       root.worldListJson
+            currentTheme:        root.currentTheme
+            currentCharId:       bridge ? bridge.characterId : ""
+            sessionListJson:     root.sessionListJson
+            activeSessionId:     bridge ? bridge.activeSessionId : ""
+            currentWindowScale:  root.windowScaleIndex
+            pipBubbleDir:        root.pipBubbleDir
+            onCloseRequested: root.settingsOpen = false
+            onPipBubbleDirChangeRequested: function(dir) {
+                root.pipBubbleDir = dir
+                if (bridge) bridge.savePipBubbleDir(dir)
+            }
+            onWindowScaleChangeRequested: function(scaleIdx) {
+                root.windowScaleIndex = scaleIdx
+                root.height = root._winSizes[scaleIdx].h
+                if (bridge) bridge.saveWindowScale(scaleIdx)
+            }
+            onThemeChangeRequested: function(themeId) {
+                root.currentTheme = themeId
+                if (bridge) bridge.saveTheme(themeId)
+            }
+            onEmotionPanelRequested: {
+                root.emotionPanelOpen = true
+            }
+            onCharacterCreateRequested: {
+                root.charCreateOpen = true
+            }
+            onCharacterBuildRequested: {
+                root.allPartsListJson   = bridge.getAllPartsList()
+                root.customPartsJson    = bridge ? JSON.stringify(JSON.parse(bridge.loadCustomization()).parts || {}) : "{}"
+                root.characterBuildOpen = true
+            }
+            onNewSessionRequested: function(keepMemory) {
+                bridge.newSession(keepMemory)
+            }
+            onResetSessionRequested: {
+                bridge.resetSession()
+            }
+            onResetConfirmRequested: {
+                root.settingsOpen    = false
+                root.charListJson    = bridge.getCharacterList()
+                root.resetConfirmOpen = true
+            }
+            onMemoryDBRequested: {
+                root.memoryDbJson = bridge.getMemoryDB()
+                root.memoryDbOpen = true
+            }
+            onWorldCreateRequested: {
+                root.worldCreateOpen = true
+            }
+            onWorldImageRequested: {
+                root.worldLocationJson = bridge.getWorldLocations()
+                root.worldImageOpen    = true
+            }
+            onAdminRequested: {
+                root.adminConvJson  = bridge.getConvParams()
+                root.adminPanelOpen = true
+            }
+            onSessionSwitchRequested: function(sessionId) {
+                bridge.switchSession(sessionId)
+                root.charStatusJson = bridge.getCharacterStatus()
+            }
+        }
+
+        // ── 캐릭터 변경 패널 오버레이 ─────────────────────────────────────
+        CharacterSelectPanel {
+            anchors.fill: parent
+            visible: root.charSelectOpen && !root.isBubble
+            z: 20
+            fontFamily:        koreanFont.font.family
+            characterListJson: root.charListJson
+            onCloseRequested:  root.charSelectOpen = false
+            onCharacterChanged: function(charId) {
+                bridge.changeCharacter(charId)
+                // world_id가 없는 경우 첫 번째 세계관/act를 자동 지정
+                var dw = bridge.getDefaultWorld()
+                try {
+                    var d = JSON.parse(dw)
+                    if (d.world_id && d.scenario_id && d.act_id)
+                        bridge.changeWorld(d.world_id, d.scenario_id, d.act_id)
+                } catch(e) {}
+            }
+            onAddRequested: {
+                root.charSelectOpen = false
+                root.charCreateOpen = true
+            }
+        }
+
+        // ── 캐릭터 상태 패널 오버레이 ─────────────────────────────────────
+        CharacterStatusPanel {
+            anchors.fill: parent
+            visible: root.charStatusOpen && !root.isBubble
+            z: 20
+            fontFamily:  koreanFont.font.family
+            statusJson:  root.charStatusJson
+            onCloseRequested: root.charStatusOpen = false
+        }
+
+        // ── 캐릭터 초기화 확인 패널 오버레이 ─────────────────────────────
+        ResetConfirmPanel {
+            anchors.fill: parent
+            visible: root.resetConfirmOpen && !root.isBubble
+            z: 20
+            fontFamily:        koreanFont.font.family
+            characterListJson: root.charListJson
+            onCloseRequested:  root.resetConfirmOpen = false
+            onResetConfirmed: function(charId) {
+                bridge.resetCharacter(charId)
+                // 초기화 후 상태창 갱신
+                if (root.charStatusOpen)
+                    root.charStatusJson = bridge.getCharacterStatus()
+            }
+        }
+
+        // ── 기억 DB 관리 패널 오버레이 ───────────────────────────────────
+        MemoryDBPanel {
+            anchors.fill: parent
+            visible: root.memoryDbOpen && !root.isBubble
+            z: 22
+            fontFamily:        koreanFont.font.family
+            dbJson:            root.memoryDbJson
+            worldDbJson:       root.worldDbJson
+            promptGuidesJson:  root.promptGuidesJson
+            onCloseRequested:  root.memoryDbOpen = false
+            onDeleteRequested: function(entryId) {
+                bridge.deleteMemoryEntry(entryId)
+            }
+            onAddRequested: function(content, metaJson) {
+                bridge.addMemoryEntry(content, metaJson)
+            }
+            onUpdateRequested: function(entryId, newContent, metaJson) {
+                bridge.updateMemoryEntry(entryId, newContent, metaJson)
+            }
+            onTabRequested: function(tabIndex) {
+                if (tabIndex === 1)
+                    root.worldDbJson = bridge.getWorldKnowledgeDB()
+                else if (tabIndex === 2)
+                    root.promptGuidesJson = bridge.getPromptGuidesDB()
+            }
+            onReindexRequested: {
+                bridge.reindexWorldKnowledge()
+                root.worldDbJson = bridge.getWorldKnowledgeDB()
+            }
+        }
+
+        // ── bridge.memoryChanged → DB 패널 자동 갱신 ─────────────────────
+        Connections {
+            target: bridge
+            function onMemoryChanged() {
+                if (root.memoryDbOpen)
+                    root.memoryDbJson = bridge.getMemoryDB()
+            }
+        }
+
+        // ── bridge.imageImported → 메인 아이콘 캐시 버스팅 ───────────────
+        Connections {
+            target: bridge
+            function onImageImported(slotType, result) {
+                if (slotType === "icon") root.charIconVersion++
+            }
+        }
+
+        // ── bridge.locationImageImported → 세계관 이미지 패널 갱신 ───────
+        Connections {
+            target: bridge
+            function onLocationImageImported(worldId, location) {
+                if (root.worldImageOpen)
+                    root.worldLocationJson = bridge.getWorldLocations()
+            }
+        }
+
+        // ── bridge.sleepStateChanged → PIP 절전 상태 반영 ────────────────
+        Connections {
+            target: bridge
+            function onSleepStateChanged(sleeping) {
+                if (root.isBubble)
+                    pipView.isSleeping = sleeping
+            }
+        }
+
+        // ── PIP 절전/깨우기 연결 ─────────────────────────────────────────
+        Connections {
+            target: pipView
+            function onSleepRequested() { if (bridge) bridge.enterSleep() }
+            function onWakeRequested()  { if (bridge) bridge.wakeUp()     }
+        }
+
+        // ── 관리자 패널 오버레이 ──────────────────────────────────────────
+        AdminPanel {
+            anchors.fill: parent
+            visible: root.adminPanelOpen && !root.isBubble
+            z: 22
+            fontFamily:  koreanFont.font.family
+            convJson:    root.adminConvJson
+            affection:   bridge ? bridge.currentAffection : 30
+            affLocked:   bridge ? bridge.affectionLocked  : false
+            currentMood: root.currentMood
+            onCloseRequested: root.adminPanelOpen = false
+            onAffectionSet: function(v) {
+                bridge.setAffection(v)
+                root.charStatusJson = bridge.getCharacterStatus()
+            }
+            onAffectionLocked: function(v) {
+                bridge.lockAffection(v)
+            }
+            onAffectionUnlocked: {
+                bridge.unlockAffection()
+            }
+            onConvParamChanged: function(param, tierOrKey, value) {
+                bridge.setConvParam(param, tierOrKey, value)
+                root.adminConvJson = bridge.getConvParams()
+            }
+            onMoodSet: function(mood) {
+                bridge.setMood(mood)
+                root.charStatusJson = bridge.getCharacterStatus()
+            }
+        }
+
+        // ── 캐릭터 생성 패널 오버레이 ─────────────────────────────────────
+        CharacterCreatePanel {
+            anchors.fill: parent
+            visible: root.charCreateOpen && !root.isBubble
+            z: 25
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.charCreateOpen = false
+            onSaveRequested: function(jsonData) {
+                var newId = bridge.saveNewCharacter(jsonData)
+                if (newId !== "") {
+                    root.charListJson  = bridge.getCharacterList()
+                    root.charCreateOpen = false
+                }
+            }
+        }
+
+        // ── 세계관 생성 패널 오버레이 ────────────────────────────────────
+        WorldCreatePanel {
+            anchors.fill: parent
+            visible: root.worldCreateOpen && !root.isBubble
+            z: 25
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.worldCreateOpen = false
+        }
+
+        WorldImagePanel {
+            anchors.fill: parent
+            visible: root.worldImageOpen && !root.isBubble
+            z: 25
+            fontFamily:    koreanFont.font.family
+            worldsJson:    root.worldLocationJson
+            onCloseRequested: root.worldImageOpen = false
+        }
+
+        ManualPanel {
+            anchors.fill: parent
+            visible: root.manualOpen && !root.isBubble
+            z: 26
+            fontFamily: koreanFont.font.family
+            onCloseRequested: root.manualOpen = false
         }
 
         // ── 확장 모드 ────────────────────────────────────────────────────
@@ -113,8 +720,8 @@ Window {
             Rectangle {
                 id: titleBar
                 Layout.fillWidth: true
-                height: 38
-                color: "#2A2A2A"
+                height: 44
+                color: root._th.bgTitle
                 radius: 16
 
 
@@ -124,20 +731,117 @@ Window {
                     Text {
                         id: charNameLabel
                         text: bridge ? bridge.characterName : ""
-                        color: "#E0E0E0"
-                        font.pixelSize: 13
+                        color: root._th.textPrimary
+                        font.pixelSize: 15
                         font.bold: true
                         font.family: koreanFont.font.family
                     }
 
+                    // 캐릭터 변경 버튼
+                    Rectangle {
+                        width: 66; height: 22; radius: 4
+                        color: charSelectBtnHov.containsMouse ? root._th.charBtnHover : root._th.charBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "캐릭터 변경"
+                            color: root._th.accent; font.pixelSize: 11
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: charSelectBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.charListJson = bridge.getCharacterList()
+                                root.charSelectOpen = true
+                            }
+                        }
+                    }
+
+                    // 상태 버튼
+                    Rectangle {
+                        width: 36; height: 22; radius: 4
+                        color: charStatusBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "상태"
+                            color: root._th.accent; font.pixelSize: 11
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: charStatusBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.charStatusJson = bridge.getCharacterStatus()
+                                root.charStatusOpen = true
+                            }
+                        }
+                    }
+
+                    // 관리자 버튼
+                    Rectangle {
+                        width: 34; height: 22; radius: 4
+                        color: adminBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "관리"
+                            color: root._th.accent; font.pixelSize: 11; font.bold: true
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: adminBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.adminConvJson = bridge.getConvParams()
+                                root.adminPanelOpen = true
+                            }
+                        }
+                    }
+
+                    // 메뉴얼 버튼
+                    Rectangle {
+                        width: 22; height: 22; radius: 11
+                        color: manualBtnHov.containsMouse ? root._th.statusBtnHover : root._th.statusBtnBg
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text {
+                            anchors.centerIn: parent; text: "?"
+                            color: root._th.accent; font.pixelSize: 12; font.bold: true
+                            font.family: koreanFont.font.family
+                        }
+                        MouseArea {
+                            id: manualBtnHov; anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.manualOpen = true
+                        }
+                    }
+
                     Item { Layout.fillWidth: true }
+
+                    // 설정 버튼
+                    Rectangle {
+                        width: 22; height: 22; radius: 4
+                        color: settingsHover.containsMouse ? "#3C3C3C" : "transparent"
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Text { anchors.centerIn: parent; text: "≡"; color: "#B0B0B0"; font.pixelSize: 15 }
+                        MouseArea {
+                            id: settingsHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.charListJson    = bridge.getCharacterList()
+                                root.worldListJson   = bridge.getWorldList()
+                                root.sessionListJson = bridge.listSessions(bridge.characterId)
+                                root.settingsOpen    = true
+                            }
+                        }
+                    }
 
                     // 버블 축소 버튼
                     Rectangle {
-                        width: 20; height: 20; radius: 10
+                        width: 22; height: 22; radius: 11
                         color: bubbleHover.containsMouse ? "#E09400" : "#F0A500"
                         Behavior on color { ColorAnimation { duration: 150 } }
-                        Text { anchors.centerIn: parent; text: "●"; color: "white"; font.pixelSize: 9 }
+                        Text { anchors.centerIn: parent; text: "●"; color: "white"; font.pixelSize: 10 }
                         MouseArea {
                             id: bubbleHover
                             anchors.fill: parent
@@ -149,10 +853,10 @@ Window {
 
                     // 닫기 버튼
                     Rectangle {
-                        width: 20; height: 20; radius: 10
+                        width: 22; height: 22; radius: 11
                         color: closeHover.containsMouse ? "#C03030" : "#E05050"
                         Behavior on color { ColorAnimation { duration: 150 } }
-                        Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 9 }
+                        Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 10 }
                         MouseArea {
                             id: closeHover
                             anchors.fill: parent
@@ -168,7 +872,7 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 height: 32
-                color: "#252525"
+                color: root._th.bgPanel
 
                 RowLayout {
                     anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
@@ -181,21 +885,27 @@ Window {
                             Layout.fillWidth: true
                             height: 22
                             radius: 6
-                            color: root.currentMode === modelData.mode ? "#4A90D9" : "#3C3C3C"
+                            color: root.currentMode === modelData.mode ? root._th.accent : root._th.tabInactive
                             Behavior on color { ColorAnimation { duration: 150 } }
 
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData.label
                                 color: root.currentMode === modelData.mode ? "white" : "#888"
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 font.family: koreanFont.font.family
                             }
 
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.currentMode = modelData.mode
+                                onClicked: {
+                                    root.currentMode = modelData.mode
+                                    if (modelData.mode === "chat") {
+                                        root.currentTag      = ""
+                                        root.inputTagColor   = "#4A90D9"
+                                    }
+                                }
                             }
                         }
                     }
@@ -203,41 +913,183 @@ Window {
             }
 
             // 채팅 영역
-            ListView {
-                id: chatList
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                spacing: 4
-                bottomMargin: 8
-                topMargin: 8
-                leftMargin: 4
-                rightMargin: 4
 
-                model: messageModel
-
-                delegate: ChatBubble {
-                    width: chatList.width - 8
-                    role: model.role
-                    content: model.content
-                    fontFamily: koreanFont.font.family
+                // act별 배경 이미지 (이미지가 없으면 숨김 — 기존 다크 배경 유지)
+                Image {
+                    id: bgImage
+                    anchors.fill: parent
+                    source: root.backgroundImageUrl
+                    fillMode: Image.PreserveAspectCrop
+                    visible: root.backgroundImageUrl !== ""
+                    opacity: 0.55
+                    Behavior on opacity { NumberAnimation { duration: 400 } }
                 }
 
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                    contentItem: Rectangle {
-                        implicitWidth: 4
-                        radius: 2
-                        color: "#555"
+                ListView {
+                    id: chatList
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: parent.height - 314  // 캐릭터 아이콘 가시 영역(354-40=314px) 제외
+                    clip: true
+                    spacing: 4
+                    bottomMargin: 8
+                    topMargin: 8
+                    leftMargin: 4
+                    rightMargin: 4
+
+                    model: messageModel
+
+                    delegate: ChatBubble {
+                        width: chatList.width - 8
+                        role:       model.role
+                        content:    model.content
+                        modelIndex: model.index
+                        editable:   model.role === "assistant" || model.role === "narrator"
+                        fontFamily: koreanFont.font.family
+                        userBubbleColor:   root._th.accent
+                        assistBubbleColor: root._th.bubbleAssist
+
+                        onEditConfirmed: function(idx, oldText, newText) {
+                            messageModel.setProperty(idx, "content", newText)
+                            if (bridge) bridge.editMessage(idx, oldText, newText)
+                        }
                     }
+
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
+                    }
+                }
+
+                // ── 기능 태그 pills (기능 모드일 때만 표시) ──────────────────
+                // 대화 모드: 이 영역은 숨김 (차후 도트 애니메이션 예정)
+                Item {
+                    visible: root.currentMode === "function"
+                    anchors {
+                        left:   parent.left;  leftMargin:  305  // 캐릭터(283) + 간격(22)
+                        right:  parent.right; rightMargin: 8
+                        bottom: parent.bottom
+                    }
+                    height: 112
+                    z: 1
+
+                    Flow {
+                        anchors { fill: parent; topMargin: 8 }
+                        spacing: 6
+
+                        Repeater {
+                            model: [
+                                { key: "file_convert",    label: "#파일 변환",      color: "#4E7FB5" },
+                                { key: "prompt_convert",  label: "#프롬프트 변환",  color: "#7A6BAA" },
+                                { key: "folder_classify", label: "#폴더 분류",      color: "#3D8A72" },
+                                { key: "local_search",    label: "#파일 검색",      color: "#6A8A3D" },
+                                { key: "help",            label: "#?",              color: "#7A7A7A" },
+                            ]
+
+                            Rectangle {
+                                property bool _active: root.currentTag === modelData.key
+                                height: 24
+                                width:  tagLabel.implicitWidth + 18
+                                radius: 12
+
+                                color: _active ? modelData.color : root._th.tagBg
+                                border.color: _active ? modelData.color : root._th.tagBorder
+                                border.width: 1
+                                Behavior on color        { ColorAnimation { duration: 150 } }
+                                Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                                Text {
+                                    id: tagLabel
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    color: "white"
+                                    font.pixelSize: 11
+                                    font.family: koreanFont.font.family
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onEntered: if (!parent._active) parent.border.color = root._th.scrollbar
+                                    onExited:  if (!parent._active) parent.border.color = root._th.tagBorder
+                                    onClicked: {
+                                        if (root.currentTag === modelData.key) {
+                                            // 같은 태그 재클릭 → 태그만 해제 (모드는 유지)
+                                            root.currentTag    = ""
+                                            root.inputTagColor = root._th.accent
+                                            root.searchDirectory = ""
+                                        } else {
+                                            root.currentTag    = modelData.key
+                                            root.currentMode   = "function"
+                                            root.inputTagColor = modelData.color
+                                            root.searchDirectory = ""
+
+                                            // 파일/폴더가 필요한 태그는 즉시 다이얼로그 열기
+                                            if (modelData.key === "file_convert") {
+                                                var pathsJson = bridge.browseFilesForOptions()
+                                                var paths = []
+                                                try { paths = JSON.parse(pathsJson) } catch(e) {}
+                                                if (paths.length > 0) {
+                                                    root.fileOptionsPaths = pathsJson
+                                                    root.fileOptionsOpen  = true
+                                                } else {
+                                                    // 취소 시 태그만 해제
+                                                    root.currentTag    = ""
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            } else if (modelData.key === "folder_classify") {
+                                                var fp = bridge.browseFolderForClassify()
+                                                if (fp) {
+                                                    root.classifyPath      = fp
+                                                    root.classifyPanelOpen = true
+                                                } else {
+                                                    root.currentTag    = ""
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            } else if (modelData.key === "local_search") {
+                                                var sd = bridge.browseSearchDirectory()
+                                                if (sd) {
+                                                    root.searchDirectory = sd
+                                                } else {
+                                                    root.currentTag    = ""
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // SD 캐릭터 — 입력창 테두리에 걸치는 형태
+                // 하반신 40px가 아래 입력 영역에 의해 자연스럽게 가려짐
+                CharacterDisplay {
+                    id: charDisplay
+                    z: 2
+                    width: 283; height: 354
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: -40   // 40px 아래 입력창 영역으로 오버랩
+                    x: -40
+                    characterId: bridge ? bridge.characterId : ""
+                    partsJson:   root.customPartsJson
+                    currentMood: root.currentMood
+                    iconVersion: root.charIconVersion
                 }
             }
 
             // 입력 영역
             Rectangle {
                 Layout.fillWidth: true
-                height: 48
-                color: "#252525"
+                height: 56
+                color: root._th.bgPanel
                 radius: 16
 
                 RowLayout {
@@ -246,10 +1098,12 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 32
+                        height: 38
                         radius: 8
-                        color: "#2A2A2A"
-                        border.color: inputField.activeFocus ? "#4A90D9" : "#444"
+                        color: root._th.bgInput
+                        border.color: inputField.activeFocus
+                                      ? root.inputTagColor
+                                      : (root.currentTag !== "" ? Qt.darker(root.inputTagColor, 1.5) : "#444")
                         Behavior on border.color { ColorAnimation { duration: 150 } }
 
                         TextInput {
@@ -257,14 +1111,16 @@ Window {
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: TextInput.AlignVCenter
                             color: "#E0E0E0"
-                            font.pixelSize: 13
+                            font.pixelSize: 14
                             font.family: koreanFont.font.family
                             clip: true
 
                             Text {
                                 anchors.fill: parent
                                 verticalAlignment: Text.AlignVCenter
-                                text: "메시지 입력..."
+                                text: root.currentTag !== ""
+                                      ? (root._tagHints[root.currentTag] || "입력하세요...")
+                                      : "텍스트 입력  *행동이나 감정 묘사*"
                                 color: "#555"
                                 font: inputField.font
                                 visible: inputField.text === "" && !inputField.activeFocus
@@ -275,28 +1131,27 @@ Window {
                     }
 
                     Rectangle {
-                        width: 32; height: 32
+                        width: 38; height: 38
                         radius: 8
-                        color: sendBtn.enabled
+                        color: root.inputReady
                                ? (sendBtnHover.containsMouse ? "#357ABD" : "#4A90D9")
                                : "#333"
                         Behavior on color { ColorAnimation { duration: 150 } }
 
                         Text {
                             id: sendBtn
-                            property bool enabled: true
                             anchors.centerIn: parent
-                            text: enabled ? "▶" : "…"
-                            color: enabled ? "white" : "#666"
-                            font.pixelSize: 13
+                            text: root.inputReady ? "▶" : "…"
+                            color: root.inputReady ? "white" : "#666"
+                            font.pixelSize: 14
                         }
 
                         MouseArea {
                             id: sendBtnHover
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: sendBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: if (sendBtn.enabled) sendMessage()
+                            cursorShape: root.inputReady ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: if (root.inputReady) sendMessage()
                         }
                     }
                 }
@@ -304,11 +1159,109 @@ Window {
         }
     }
 
+    // ── 태그별 placeholder 힌트 ─────────────────────────────────────────────
+    readonly property var _tagHints: ({
+        "file_convert":    "변환하거나 이름을 바꿀 파일을 선택하세요...",
+        "prompt_convert":  "변환할 프롬프트를 입력하세요...",
+        "folder_classify": "분류 기준을 입력하세요...",
+        "local_search":    "검색어를 입력하세요...",
+        "help":            "궁금하신 기능의 이름을 입력하세요...",
+    })
+
     // ── 메시지 전송 ─────────────────────────────────────────────────────────
     function sendMessage() {
         var text = inputField.text.trim()
         if (text === "") return
+        // 기능 모드에서 태그 미선택 시 안내
+        if (root.currentMode === "function" && root.currentTag === "") {
+            messageModel.append({ "role": "system", "content": "기능 태그를 먼저 선택해주세요." })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+            return
+        }
+
+        // #? 도움말: 키워드로 해당 기능 설명 표시 (태그·모드 유지 — 다른 태그와 동일)
+        if (root.currentTag === "help") {
+            var helpResult = bridge.getHelpByKeyword(text)
+            messageModel.append({ "role": "system", "content": helpResult })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+            inputField.text = ""
+            return
+        }
+
+        // file_convert / folder_classify: 태그 클릭 시 이미 다이얼로그가 열리므로 여기서는 처리하지 않음
+        if (root.currentMode === "function" &&
+            (root.currentTag === "file_convert" || root.currentTag === "folder_classify")) {
+            return
+        }
+
+        // 파일 검색 도구: 태그 선택 시 저장된 searchDirectory 재사용 (없으면 다시 요청)
+        if (root.currentMode === "function" && root.currentTag === "local_search") {
+            var searchDir = root.searchDirectory
+            if (!searchDir) {
+                searchDir = bridge.browseSearchDirectory()
+                if (!searchDir) return
+                root.searchDirectory = searchDir
+            }
+            var searchQuery = text
+            root.fileSearchQuery   = searchQuery
+            root.fileSearchResults = bridge.searchFiles(searchQuery, searchDir, "")
+            root.fileSearchOpen    = true
+            inputField.text = ""
+            return
+        }
+
         inputField.text = ""
-        bridge.sendMessage(text)
+        bridge.sendMessage(text, root.currentMode, root.currentTag)
+    }
+
+    // ── 파일 옵션 패널 오버레이 ─────────────────────────────────────────────
+    FileOptionsPanel {
+        id: fileOptionsPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.fileOptionsOpen
+        fontFamily: koreanFont.font.family
+        pathsJson:  root.fileOptionsPaths
+
+        onCloseRequested: {
+            root.fileOptionsOpen = false
+        }
+        onResultReady: function(message) {
+            messageModel.append({ "role": "assistant", "content": message })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+    }
+
+    // ── 폴더 분류 패널 오버레이 ──────────────────────────────────────────────
+    FolderClassifyPanel {
+        id: classifyPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.classifyPanelOpen
+        fontFamily: koreanFont.font.family
+        folderPath: root.classifyPath
+
+        onCloseRequested: {
+            root.classifyPanelOpen = false
+        }
+        onResultReady: function(message) {
+            messageModel.append({ "role": "assistant", "content": message })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
+        }
+    }
+
+    // ── 파일 검색 결과 패널 오버레이 ─────────────────────────────────────────
+    FileSearchPanel {
+        id: fileSearchPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.fileSearchOpen
+        fontFamily: koreanFont.font.family
+        resultsJson: root.fileSearchResults
+        query:       root.fileSearchQuery
+
+        onCloseRequested: {
+            root.fileSearchOpen = false
+        }
     }
 }

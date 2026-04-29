@@ -1,3 +1,16 @@
 module AchatUI
 singleton Style 1.0 Style.qml
 ChatBubble 1.0 ChatBubble.qml
+PipWindow 1.0 PipWindow.qml
+SettingsPanel 1.0 SettingsPanel.qml
+CharacterDisplay 1.0 CharacterDisplay.qml
+CustomizationPanel 1.0 CustomizationPanel.qml
+CharacterSelectPanel 1.0 CharacterSelectPanel.qml
+CharacterStatusPanel 1.0 CharacterStatusPanel.qml
+ResetConfirmPanel 1.0 ResetConfirmPanel.qml
+MemoryDBPanel 1.0 MemoryDBPanel.qml
+AdminPanel 1.0 AdminPanel.qml
+CharacterCreatePanel 1.0 CharacterCreatePanel.qml
+SideMenuPanel 1.0 SideMenuPanel.qml
+ManualPanel 1.0 ManualPanel.qml
+WorldImagePanel 1.0 WorldImagePanel.qml

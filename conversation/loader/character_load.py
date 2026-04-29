@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-REQUIRED_FIELDS = ["id", "name", "speech_style", "rules", "memory_voice", "state"]
+REQUIRED_FIELDS = ["id", "name", "speech", "rules", "memory_voice", "state"]
 
 
 def load_character(yaml_path: str | Path) -> dict:
@@ -18,8 +18,9 @@ def load_character(yaml_path: str | Path) -> dict:
     with open(path, encoding="utf-8") as f:
         data: dict = yaml.safe_load(f)
 
-    missing = [field for field in REQUIRED_FIELDS if field not in data]
-    if missing:
-        logger.warning(f"[character_load] 누락 필드 {missing} — {path.name}")
+    if data.get("id") != "default":
+        missing = [field for field in REQUIRED_FIELDS if field not in data]
+        if missing:
+            logger.warning(f"[character_load] 누락 필드 {missing} — {path.name}")
 
     return data

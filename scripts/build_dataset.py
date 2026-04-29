@@ -191,7 +191,7 @@ def main():
         logger.error(f"log_dir 없음: {log_dir}")
         sys.exit(1)
 
-    jsonl_files = sorted(log_dir.glob("*.jsonl"))
+    jsonl_files = sorted(log_dir.glob("**/*.jsonl"))
     if not jsonl_files:
         logger.warning(f"JSONL 파일 없음: {log_dir}")
         sys.exit(0)
