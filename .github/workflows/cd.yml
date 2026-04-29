@@ -48,6 +48,30 @@ jobs:
       - name: 배포 패키지 생성 (소스 전용, GGUF 제외)
         run: bash scripts/package_deploy.sh
 
+      - name: training log 미포함 검증
+        run: |
+          # dist 디렉토리에 training/ 없어야 함
+          if [ -d "dist/achat/training" ]; then
+            echo "ERROR: dist/achat/training/ 이 배포 패키지에 포함됨" >&2
+            exit 1
+          fi
+          # zip 내부에도 training/ 경로 없어야 함
+          if unzip -l dist/achat.zip | grep -q "achat/training/"; then
+            echo "ERROR: achat.zip 에 training/ 경로가 포함됨" >&2
+            exit 1
+          fi
+          # deploy 환경에서 enable_play_log=False 검증
+          python3 - <<'EOF'
+          import os, sys
+          os.environ["ACHAT_ENV"] = "deploy"
+          sys.path.insert(0, "dist/achat")
+          import config
+          cfg = config.get_config()
+          assert not cfg.get("enable_play_log", True), \
+              "enable_play_log must be False in deploy config"
+          print("OK: training log 수집 비활성화 확인 완료")
+          EOF
+
       - name: zip 아티팩트 업로드
         uses: actions/upload-artifact@v4
         with:
