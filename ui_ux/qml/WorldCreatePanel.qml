@@ -161,6 +161,7 @@ Item {
                 MouseArea {
                     id: wcSaveHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        Qt.inputMethod.commit()
                         var wid = wcWorldId.text.trim()
                         if (!wid) { wcErrText.text = "세계관 ID를 입력하세요."; return }
 

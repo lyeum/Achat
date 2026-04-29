@@ -233,22 +233,36 @@ Item {
                     height: 40
                     color: "transparent"
 
-                    Rectangle {
-                        anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                        width: addBtnLabel.implicitWidth + 20; height: 26; radius: 5
-                        color: addBtnHov.containsMouse ? "#2A3A6A" : "#1E2A50"
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Text {
-                            id: addBtnLabel
-                            anchors.centerIn: parent
-                            text: dbRoot._addFormOpen ? "▲ 폼 닫기" : "+ 항목 추가"
-                            color: "#8AB4F8"; font.pixelSize: 13
-                            font.family: dbRoot.fontFamily
+                    Row {
+                        anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+
+                        Rectangle {
+                            width: addBtnLabel.implicitWidth + 20; height: 26; radius: 5
+                            color: addBtnHov.containsMouse ? "#2A3A6A" : "#1E2A50"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Text {
+                                id: addBtnLabel
+                                anchors.centerIn: parent
+                                text: dbRoot._addFormOpen ? "▲ 폼 닫기" : "+ 항목 추가"
+                                color: "#8AB4F8"; font.pixelSize: 13
+                                font.family: dbRoot.fontFamily
+                            }
+                            MouseArea {
+                                id: addBtnHov; anchors.fill: parent
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: dbRoot._addFormOpen = !dbRoot._addFormOpen
+                            }
                         }
-                        MouseArea {
-                            id: addBtnHov; anchors.fill: parent
-                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: dbRoot._addFormOpen = !dbRoot._addFormOpen
+
+                        Rectangle {
+                            width: memRefreshLbl.implicitWidth + 20; height: 26; radius: 5
+                            color: memRefreshHov.containsMouse ? "#2A3A2A" : "#1A2A1A"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Text { id: memRefreshLbl; anchors.centerIn: parent; text: "새로고침"; color: "#60A860"; font.pixelSize: 13; font.family: dbRoot.fontFamily }
+                            MouseArea { id: memRefreshHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: dbRoot.dbJson = bridge.getMemoryDB()
+                            }
                         }
                     }
 
@@ -342,6 +356,7 @@ Item {
                                 id: saveHov; anchors.fill: parent
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                 onClicked: {
+                                    Qt.inputMethod.commit()
                                     var c = addContent.text.trim()
                                     if (!c) return
                                     var tags = addTags.text.split(",").map(function(s){ return s.trim() }).filter(function(s){ return s.length > 0 })
@@ -580,6 +595,7 @@ Item {
                                                             MouseArea {
                                                                 id: confHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                                                 onClicked: {
+                                                                    Qt.inputMethod.commit()
                                                                     var tags = editTags.text.split(",").map(function(s){ return s.trim() }).filter(function(s){ return s.length > 0 })
                                                                     var meta = { importance: editImportance.value, tags: tags, location: editLocation.text.trim(), session_id: "manual" }
                                                                     dbRoot.updateRequested(modelData.id, editContent.text.trim(), JSON.stringify(meta))
@@ -947,13 +963,27 @@ Item {
                     anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                     height: 40; color: "transparent"
 
-                    Rectangle {
+                    Row {
                         anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                        width: gAddLbl.implicitWidth + 20; height: 26; radius: 5
-                        color: gAddHov.containsMouse ? "#2A3A6A" : "#1E2A50"
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { id: gAddLbl; anchors.centerIn: parent; text: dbRoot._guideAddFormOpen ? "▲ 폼 닫기" : "+ 항목 추가"; color: "#8AB4F8"; font.pixelSize: 13; font.family: dbRoot.fontFamily }
-                        MouseArea { id: gAddHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: dbRoot._guideAddFormOpen = !dbRoot._guideAddFormOpen }
+                        spacing: 6
+
+                        Rectangle {
+                            width: gAddLbl.implicitWidth + 20; height: 26; radius: 5
+                            color: gAddHov.containsMouse ? "#2A3A6A" : "#1E2A50"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Text { id: gAddLbl; anchors.centerIn: parent; text: dbRoot._guideAddFormOpen ? "▲ 폼 닫기" : "+ 항목 추가"; color: "#8AB4F8"; font.pixelSize: 13; font.family: dbRoot.fontFamily }
+                            MouseArea { id: gAddHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: dbRoot._guideAddFormOpen = !dbRoot._guideAddFormOpen }
+                        }
+
+                        Rectangle {
+                            width: gRefreshLbl.implicitWidth + 20; height: 26; radius: 5
+                            color: gRefreshHov.containsMouse ? "#2A3A2A" : "#1A2A1A"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Text { id: gRefreshLbl; anchors.centerIn: parent; text: "새로고침"; color: "#60A860"; font.pixelSize: 13; font.family: dbRoot.fontFamily }
+                            MouseArea { id: gRefreshHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: dbRoot.promptGuidesJson = bridge.getPromptGuidesDB()
+                            }
+                        }
                     }
 
                     Rectangle {

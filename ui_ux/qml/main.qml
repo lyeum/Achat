@@ -1170,6 +1170,7 @@ Window {
 
     // ── 메시지 전송 ─────────────────────────────────────────────────────────
     function sendMessage() {
+        Qt.inputMethod.commit()          // 한국어 IME 미확정 조합 문자 강제 확정
         var text = inputField.text.trim()
         if (text === "") return
         // 기능 모드에서 태그 미선택 시 안내

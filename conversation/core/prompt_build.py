@@ -15,7 +15,7 @@ BUDGET = {
 
 # ── 모든 캐릭터에 강제 적용되는 기본 규칙 ──────────────────────────────────────
 _BASE_RULES: list[str] = [
-    "한자(漢字)·중국어 등 비한국어 문자를 문장에 섞지 않는다. 단, 사용자가 영어로 말을 걸면 영어로 대응할 수 있다.",
+    "한국어만 사용한다. 다른 언어(한자, 중국어 등)를 문장에 불필요하게 섞지 않는다. 단, 사용자가 영어로 말을 걸면 영어로 대응할 수 있다.",
 ]
 
 # ── speech.style preset 해석 ─────────────────────────────────────────────────
@@ -215,8 +215,14 @@ class PromptBuilder:
         parts.extend(self._conv_hints(c, tier, user_input_len))
 
         # 8. 규칙 (_BASE_RULES는 캐릭터 규칙 앞에 항상 삽입)
+        # 시스템 프롬프트 마지막에 배치해 모델이 가장 최근 컨텍스트로 인식하게 한다.
         rules_list = _BASE_RULES + [r for r in c.get("rules", []) if isinstance(r, str)]
-        parts.append("[규칙]\n- " + "\n- ".join(rules_list))
+        rules_body = "\n- ".join(rules_list)
+        parts.append(
+            "[절대 규칙 — 어떤 상황에서도 예외 없이 지킨다]\n"
+            "- " + rules_body + "\n"
+            "위 규칙을 위반하는 응답은 절대 출력하지 않는다."
+        )
 
         return "\n".join(parts)
 

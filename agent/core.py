@@ -8,11 +8,12 @@ from loguru import logger
 
 # prompt_convert fallback: ASCII 전용 모델명 패턴 (한국어 \w 포함 방지)
 _PROMPT_CONVERT_MODEL_RE = re.compile(
-    r"(stable[\s\-]diffusion(?:\s+[a-zA-Z0-9._-]+){0,2}"
+    r"(stable[\s\-]diffusion(?:[\s\-][a-zA-Z0-9._-]+){0,2}"
     r"|sdxl(?:\s+[a-zA-Z0-9._-]+){0,1}"
-    r"|midjourney(?:\s+[a-zA-Z0-9._-]+){0,1}"
-    r"|dall[\s\-]e(?:\s+[a-zA-Z0-9._-]+){0,1}"
-    r"|flux(?:\s+[a-zA-Z0-9._-]+){0,2}"
+    r"|midjourney(?:\s+v?[0-9._-]+)?"
+    r"|dall[\s\-]e(?:[\s\-][a-zA-Z0-9._-]+){0,1}"
+    r"|flux(?:[.\s][a-zA-Z0-9._-]+){0,2}"
+    r"|novel[\s\-]?ai(?:\s+[a-zA-Z0-9._-]+){0,1}"
     r"|leonardo(?:\s+[a-zA-Z0-9._-]+){0,2}"
     r"|imagen(?:\s+[a-zA-Z0-9._-]+){0,1})",
     re.IGNORECASE,

@@ -1136,6 +1136,20 @@ class ChatBridge(QObject):
                         self.messageAdded.emit("narrator", narr_content)
                     else:
                         self.chatReset.emit(history)
+                elif self._agent.session is not None and not world_changed:
+                    # 같은 세계관 내 장소 이동 — chatReset 없이 나레이션 버블만 추가
+                    if self._location and not getattr(self._agent, "_stub", True):
+                        try:
+                            from narration.world_trigger import check_place_trigger
+                            _s = getattr(self._agent, "session", None)
+                            _r = getattr(getattr(self._agent, "router", None), "rag", None)
+                            if _s and _r:
+                                _narr = check_place_trigger(self._location, _s, _r)
+                                if _narr:
+                                    _, narr_content = _narr
+                                    self.messageAdded.emit("narrator", narr_content)
+                        except Exception:
+                            pass
             except Exception as e:  # noqa: BLE001
                 self.messageAdded.emit("system", f"[세계관 변경 실패] {e}")
             return
