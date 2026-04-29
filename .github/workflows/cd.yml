@@ -10,6 +10,9 @@ on:
         description: '릴리즈 태그 (예: v0.1.0)'
         required: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── 태그 이름 추출 (공통) ─────────────────────────────────────────────────────
   tag-name:
@@ -82,8 +85,8 @@ jobs:
 
       - name: PyInstaller 설치 및 Achat.exe 빌드
         run: |
-          pip install --quiet pyinstaller
-          python -m pyinstaller deploy\achat.spec --distpath deploy\dist --workpath deploy\build --noconfirm
+          python -m pip install --quiet pyinstaller
+          python -m PyInstaller deploy\achat.spec --distpath deploy\dist --workpath deploy\build --noconfirm
         shell: cmd
 
       - name: AchatSetup.exe 빌드 (Inno Setup)
