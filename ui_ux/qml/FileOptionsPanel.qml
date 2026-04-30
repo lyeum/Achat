@@ -23,6 +23,10 @@ Item {
         _mode = 0
     }
 
+    function _refreshPaths(json) {
+        fileOptRoot.pathsJson = json
+    }
+
     // ── 배경 딤 ───────────────────────────────────────────────────────────────
     Rectangle {
         anchors.fill: parent
@@ -51,32 +55,94 @@ Item {
             anchors.margins: 16
             spacing: 12
 
-            // 헤더
-            Text {
-                text: "파일 변환"
-                font.pixelSize: 14
-                font.bold: true
-                font.family: fileOptRoot.fontFamily
-                color: "#A8D0E0"
+            // 헤더 + 선택 버튼
+            RowLayout {
+                width: parent.width
+                spacing: 8
+
+                Text {
+                    text: "파일 변환"
+                    font.pixelSize: 14
+                    font.bold: true
+                    font.family: fileOptRoot.fontFamily
+                    color: "#A8D0E0"
+                    Layout.fillWidth: false
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // 파일 선택 버튼
+                Rectangle {
+                    width: 72; height: 26; radius: 5
+                    color: selFileHov.containsMouse ? "#2A4858" : "#1E3848"
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "파일 선택"
+                        font.pixelSize: 12
+                        font.family: fileOptRoot.fontFamily
+                        color: "#7ABAC8"
+                    }
+                    MouseArea {
+                        id: selFileHov
+                        anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: fileOptRoot._refreshPaths(bridge.browseFilesForOptions())
+                    }
+                }
+
+                // 폴더 선택 버튼
+                Rectangle {
+                    width: 72; height: 26; radius: 5
+                    color: selFolderHov.containsMouse ? "#2A4858" : "#1E3848"
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "폴더 선택"
+                        font.pixelSize: 12
+                        font.family: fileOptRoot.fontFamily
+                        color: "#7ABAC8"
+                    }
+                    MouseArea {
+                        id: selFolderHov
+                        anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: fileOptRoot._refreshPaths(bridge.browseFolderForFileOptions())
+                    }
+                }
             }
 
-            // 선택된 파일 목록 (최대 3개 표시)
+            // 선택된 파일 목록 (최대 3개 표시) — 미선택 시 안내 메시지
             Rectangle {
                 width: parent.width
-                height: Math.min(fileOptRoot._paths.length, 3) * 20 + 8
+                height: fileOptRoot._paths.length > 0
+                    ? Math.min(fileOptRoot._paths.length, 3) * 20 + 8
+                    : 28
                 color: "#121820"
                 radius: 6
                 clip: true
+
+                // 미선택 안내
+                Text {
+                    anchors.centerIn: parent
+                    visible: fileOptRoot._paths.length === 0
+                    text: "위 버튼으로 파일 또는 폴더를 선택하세요"
+                    font.pixelSize: 12
+                    font.family: fileOptRoot.fontFamily
+                    color: "#3A5060"
+                }
+
                 Column {
                     anchors { fill: parent; margins: 4 }
                     spacing: 0
+                    visible: fileOptRoot._paths.length > 0
                     Repeater {
                         model: Math.min(fileOptRoot._paths.length, 3)
                         Text {
                             width: parent.width
                             text: {
                                 var p = fileOptRoot._paths[index] || ""
-                                var name = p.split("/").pop()
+                                var name = p.split(/[/\\]/).pop()
                                 return (index === 2 && fileOptRoot._paths.length > 3)
                                     ? "... 외 " + (fileOptRoot._paths.length - 2) + "개"
                                     : name

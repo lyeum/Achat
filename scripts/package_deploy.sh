@@ -48,7 +48,13 @@ rsync -a --exclude='__pycache__' \
          --exclude='*.log' \
          --exclude='pyproject.toml' \
          --exclude='pyproject-deploy.toml' \
+         --exclude='ui_ux/assets/preferences.json' \
          "$ROOT/" "$DIST/"
+
+# ── assets 명시 복사 (gitignore 대상이므로 rsync 후 별도 처리) ────────────────
+echo "    assets 복사 (characters / icons / background)..."
+rsync -a --exclude='preferences.json' \
+         "$ROOT/ui_ux/assets/" "$DIST/ui_ux/assets/"
 
 # ── pyproject-deploy.toml → pyproject.toml ────────────────────────────────────
 echo "    pyproject-deploy.toml → pyproject.toml"
@@ -75,8 +81,15 @@ GGUF 파일 생성 방법:
 EOF
 fi
 
-# ── chroma_deploy 초기 디렉토리 ─────────────────────────────────────────────
-mkdir -p "$DIST/chroma_deploy"
+# ── chroma_deploy 복사 (prompt_guides 등 사전 시딩 포함) ─────────────────────
+if [[ -d "$ROOT/chroma_deploy" ]]; then
+    echo "    chroma_deploy/ 복사..."
+    rsync -a "$ROOT/chroma_deploy/" "$DIST/chroma_deploy/"
+else
+    echo "    chroma_deploy/ 없음 — seed_prompt_guides.py 실행..."
+    ACHAT_ENV=deploy uv run python "$ROOT/scripts/seed_prompt_guides.py"
+    rsync -a "$ROOT/chroma_deploy/" "$DIST/chroma_deploy/"
+fi
 
 # ── zip 압축 ─────────────────────────────────────────────────────────────────
 echo "[3/4] zip 압축: dist/achat.zip"

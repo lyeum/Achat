@@ -121,6 +121,9 @@ class ChatBridge(QObject):
         self._current_bg: str = self._build_bg_url()
         self._current_mood: str = self._read_mood()
 
+        # 기능 모드: 앱 세션 내 마지막으로 사용한 디렉토리 (앱 종료 시 초기화)
+        self._last_tool_dir: str = ""
+
 
     # ── Property ──────────────────────────────────────────────────────────────
 
@@ -1136,6 +1139,20 @@ class ChatBridge(QObject):
                         self.messageAdded.emit("narrator", narr_content)
                     else:
                         self.chatReset.emit(history)
+                elif self._agent.session is not None and not world_changed:
+                    # 같은 세계관 내 장소 이동 — chatReset 없이 나레이션 버블만 추가
+                    if self._location and not getattr(self._agent, "_stub", True):
+                        try:
+                            from narration.world_trigger import check_place_trigger
+                            _s = getattr(self._agent, "session", None)
+                            _r = getattr(getattr(self._agent, "router", None), "rag", None)
+                            if _s and _r:
+                                _narr = check_place_trigger(self._location, _s, _r)
+                                if _narr:
+                                    _, narr_content = _narr
+                                    self.messageAdded.emit("narrator", narr_content)
+                        except Exception:
+                            pass
             except Exception as e:  # noqa: BLE001
                 self.messageAdded.emit("system", f"[세계관 변경 실패] {e}")
             return
@@ -1310,8 +1327,7 @@ class ChatBridge(QObject):
             return False  # 현재 활성 세션 삭제 불가
 
         try:
-            self._session_manager._evict_session(char_id, session_id)
-            return True
+            return self._session_manager.delete_session(char_id, session_id)
         except Exception:  # noqa: BLE001
             return False
 
@@ -1473,6 +1489,15 @@ class ChatBridge(QObject):
     # 이미지 포맷 변환이 가능한 확장자 집합
     _IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
+    def _start_dir(self) -> str:
+        """파일 다이얼로그의 시작 디렉토리를 반환한다. 이전 작업 경로 → 홈."""
+        return self._last_tool_dir if self._last_tool_dir else str(Path.home())
+
+    def _update_last_dir(self, path: str) -> None:
+        """선택된 파일/폴더 경로로 _last_tool_dir 를 갱신한다."""
+        p = Path(path)
+        self._last_tool_dir = str(p if p.is_dir() else p.parent)
+
     @Slot(result=str)
     def browseFilesForOptions(self) -> str:
         """파일 선택 다이얼로그를 열어 선택된 경로 목록을 JSON으로 반환한다.
@@ -1485,9 +1510,37 @@ class ChatBridge(QObject):
         """
         from PySide6.QtWidgets import QFileDialog
         paths, _ = QFileDialog.getOpenFileNames(
-            None, "파일 선택", str(Path.home()), "모든 파일 (*)"
+            None, "파일 선택", self._start_dir(), "모든 파일 (*)"
         )
+        if paths:
+            self._update_last_dir(paths[0])
         return json.dumps(paths, ensure_ascii=False)
+
+    @Slot(result=str)
+    def browseFolderForFileOptions(self) -> str:
+        """폴더 선택 다이얼로그를 열어 폴더 내 파일 경로 목록을 JSON으로 반환한다.
+
+        폴더를 선택하면 해당 폴더의 직속 파일들을 모두 반환한다 (재귀 없음).
+
+        Returns
+        -------
+        str
+            ``["/path/to/file1.png", ...]`` 형태의 JSON.
+            취소 또는 빈 폴더면 ``"[]"`` 반환.
+        """
+        from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            None, "폴더 선택",
+            self._start_dir(),
+            QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not folder:
+            return "[]"
+        self._update_last_dir(folder)
+        files = sorted(
+            str(p) for p in Path(folder).iterdir() if p.is_file()
+        )
+        return json.dumps(files, ensure_ascii=False)
 
     @Slot(str, str, str, result=str)
     def applyFileOptions(self, paths_json: str, rename_to: str, new_ext: str) -> str:
@@ -1578,13 +1631,21 @@ class ChatBridge(QObject):
     def browseFolderForClassify(self) -> str:
         """폴더 선택 다이얼로그를 열어 선택된 경로를 반환한다.
 
+        DontUseNativeDialog 를 사용해 폴더 내 파일도 탐색기에서 볼 수 있도록 한다.
+
         Returns
         -------
         str
             선택된 폴더 경로 문자열. 취소하면 빈 문자열.
         """
         from PySide6.QtWidgets import QFileDialog
-        path = QFileDialog.getExistingDirectory(None, "분류할 폴더 선택", str(Path.home()))
+        path = QFileDialog.getExistingDirectory(
+            None, "분류할 폴더 선택",
+            self._start_dir(),
+            QFileDialog.Option.DontUseNativeDialog,
+        )
+        if path:
+            self._update_last_dir(path)
         return path or ""
 
     @Slot(str, str, bool, result=str)
@@ -1619,7 +1680,13 @@ class ChatBridge(QObject):
     def browseSearchDirectory(self) -> str:
         """검색할 디렉토리 선택 다이얼로그를 열어 경로를 반환한다."""
         from PySide6.QtWidgets import QFileDialog
-        path = QFileDialog.getExistingDirectory(None, "검색할 폴더 선택", str(Path.home()))
+        path = QFileDialog.getExistingDirectory(
+            None, "검색할 폴더 선택",
+            self._start_dir(),
+            QFileDialog.Option.DontUseNativeDialog,
+        )
+        if path:
+            self._update_last_dir(path)
         return path or ""
 
     @Slot(str, str, str, result=str)
@@ -1693,6 +1760,15 @@ class ChatBridge(QObject):
             import os
             try:
                 os.startfile(p)  # type: ignore[attr-defined]
+                return
+            except Exception:
+                pass
+            # fallback: Windows shell association
+            try:
+                _subprocess.Popen(
+                    ["cmd.exe", "/c", "start", "", p],
+                    creationflags=0x08000000,  # CREATE_NO_WINDOW
+                )
             except Exception:
                 pass
             return
@@ -1725,6 +1801,41 @@ class ChatBridge(QObject):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl as _QUrl
         QDesktopServices.openUrl(_QUrl.fromLocalFile(p))
+
+    # ── 이미지 크롭 ──────────────────────────────────────────────────────────────
+
+    @Slot(result=str)
+    def browseFolderForCrop(self) -> str:
+        """이미지 크롭 대상 폴더 선택 다이얼로그를 열어 경로를 반환한다."""
+        from PySide6.QtWidgets import QFileDialog
+        path = QFileDialog.getExistingDirectory(
+            None, "크롭할 이미지 폴더 선택",
+            self._start_dir(),
+            QFileDialog.Option.DontUseNativeDialog,
+        )
+        if path:
+            self._update_last_dir(path)
+        return path or ""
+
+    @Slot(str, str, int, int, bool, result=str)
+    def applyImageCrop(
+        self,
+        folder_path: str,
+        direction: str,
+        width: int,
+        height: int,
+        dry_run: bool,
+    ) -> str:
+        """CropperTool 을 직접 실행하고 결과를 반환한다."""
+        from tools.folder.cropper import CropperTool
+        tool = CropperTool()
+        return tool.execute({
+            "target":    folder_path,
+            "direction": direction,
+            "width":     width  if width  > 0 else None,
+            "height":    height if height > 0 else None,
+            "dry_run":   dry_run,
+        })
 
     @Slot(str)
     def openUrl(self, url: str) -> None:

@@ -28,6 +28,7 @@ Item {
     signal memoryDBRequested()
     signal adminRequested()
     signal sessionSwitchRequested(string sessionId)
+    signal sessionDeleteRequested(string sessionId)
     signal worldCreateRequested()
     signal worldImageRequested()
     signal windowScaleChangeRequested(int scaleIdx)
@@ -516,10 +517,7 @@ Item {
                                         MouseArea {
                                             id: sessDelHov; anchors.fill: parent; hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor; preventStealing: true
-                                            onClicked: {
-                                                bridge.deleteSession(modelData.session_id)
-                                                settingsRoot.sessionListJson = bridge.listSessions(bridge.characterId)
-                                            }
+                                            onClicked: settingsRoot.sessionDeleteRequested(modelData.session_id)
                                         }
                                     }
                                 }

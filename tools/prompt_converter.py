@@ -116,7 +116,7 @@ class PromptConverterTool(BaseTool):
         "너는 프롬프트 변환 도구의 파라미터를 추출하는 역할이다.\n"
         "사용자의 요청을 분석해서 아래 JSON 형식으로만 응답해라:\n"
         '{"model": "<대상 AI 모델명>", "content": "<변환할 내용>"}\n\n'
-        "model: 사용자가 언급한 AI 모델 이름 (예: Stable Diffusion 1.5, Midjourney, DALL-E 3, FLUX)\n"
+        "model: 사용자가 언급한 AI 모델 이름 (예: Stable Diffusion 1.5, Midjourney, DALL-E 3, FLUX.1, NovelAI)\n"
         "content: 해당 모델로 생성하고 싶은 내용 (모델명 제외)\n"
         "model이 명시되지 않으면 빈 문자열로 설정해라.\n\n"
         "예시:\n"
@@ -126,6 +126,10 @@ class PromptConverterTool(BaseTool):
         '출력: {"model": "Midjourney", "content": "사이버펑크 도시 밤 풍경"}\n\n'
         "입력: DALL-E 3 모델에게 귀여운 강아지 픽셀아트를 생성하라고 하고 싶은데\n"
         '출력: {"model": "DALL-E 3", "content": "귀여운 강아지 픽셀아트"}\n\n'
+        "입력: FLUX.1로 해질녘 바닷가 풍경 그려줘\n"
+        '출력: {"model": "FLUX.1", "content": "해질녘 바닷가 풍경"}\n\n'
+        "입력: NovelAI로 은발에 파란 눈 소녀 캐릭터 만들어줘\n"
+        '출력: {"model": "NovelAI", "content": "은발에 파란 눈 소녀 캐릭터"}\n\n'
         "입력: stable-diffusion 1.5 모델에게 귀여운 고양이의 픽셀아트를 생성하라고 하고싶은데 뭐라고 하면 될까?\n"
         '출력: {"model": "Stable Diffusion 1.5", "content": "귀여운 고양이 픽셀아트"}'
     )
@@ -198,7 +202,8 @@ class PromptConverterTool(BaseTool):
 
         system = (
             f"너는 '{model}' 모델 전용 프롬프트 엔지니어다.\n"
-            "아래 가이드를 참고해서 사용자의 요청을 해당 모델에 최적화된 프롬프트로 변환해라.\n"
+            "사용자가 한국어로 요청을 입력할 수 있다. 내용을 정확히 파악해서 "
+            "아래 가이드에 따라 해당 모델에 최적화된 프롬프트로 변환해라.\n"
             "출력은 변환된 프롬프트만 작성하고, 설명이나 전처리 없이 바로 사용 가능한 형태로 반환해라.\n\n"
             + context_block
         )

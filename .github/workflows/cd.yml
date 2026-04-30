@@ -10,6 +10,9 @@ on:
         description: '릴리즈 태그 (예: v0.1.0)'
         required: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── 태그 이름 추출 (공통) ─────────────────────────────────────────────────────
   tag-name:
@@ -44,6 +47,30 @@ jobs:
 
       - name: 배포 패키지 생성 (소스 전용, GGUF 제외)
         run: bash scripts/package_deploy.sh
+
+      - name: training log 미포함 검증
+        run: |
+          # dist 디렉토리에 training/ 없어야 함
+          if [ -d "dist/achat/training" ]; then
+            echo "ERROR: dist/achat/training/ 이 배포 패키지에 포함됨" >&2
+            exit 1
+          fi
+          # zip 내부에도 training/ 경로 없어야 함
+          if unzip -l dist/achat.zip | grep -q "achat/training/"; then
+            echo "ERROR: achat.zip 에 training/ 경로가 포함됨" >&2
+            exit 1
+          fi
+          # deploy 환경에서 enable_play_log=False 검증
+          python3 - <<'EOF'
+          import os, sys
+          os.environ["ACHAT_ENV"] = "deploy"
+          sys.path.insert(0, "dist/achat")
+          import config
+          cfg = config.get_config()
+          assert not cfg.get("enable_play_log", True), \
+              "enable_play_log must be False in deploy config"
+          print("OK: training log 수집 비활성화 확인 완료")
+          EOF
 
       - name: zip 아티팩트 업로드
         uses: actions/upload-artifact@v4
@@ -82,9 +109,16 @@ jobs:
 
       - name: PyInstaller 설치 및 Achat.exe 빌드
         run: |
-          pip install --quiet pyinstaller
-          python -m pyinstaller deploy\achat.spec --distpath deploy\dist --workpath deploy\build --noconfirm
+          python -m pip install --quiet pyinstaller
+          python -m PyInstaller deploy\achat.spec --distpath deploy\dist --workpath deploy\build --noconfirm
         shell: cmd
+
+      - name: HF 토큰 주입
+        run: |
+          (Get-Content deploy\achat_setup.iss) `
+            -replace '__HF_MODEL_TOKEN__', '${{ secrets.HF_MODEL_TOKEN }}' |
+            Set-Content deploy\achat_setup.iss
+        shell: pwsh
 
       - name: AchatSetup.exe 빌드 (Inno Setup)
         run: |
@@ -132,8 +166,8 @@ jobs:
 
             1. `AchatSetup.exe` 다운로드 후 실행
             2. 설치 경로 지정 (기본: `C:\Achat`)
-            3. 마법사 완료 → 자동으로 의존성 설치 + 앱 실행
-            4. `models/` 폴더에 `model_q4km.gguf` 복사 후 재실행
+            3. 마법사 완료 → 의존성 설치 + 모델 파일 자동 다운로드 (~2GB, 수 분 소요)
+            4. 완료 후 앱 자동 실행
 
             **제거:** 제어판 → 프로그램 추가/제거 → Achat 제거
             (`.venv`, `chroma_deploy`, 세션 데이터 포함 전체 삭제)
@@ -141,19 +175,9 @@ jobs:
             ### 방법 B — 소스 zip (개발자용)
 
             1. `achat.zip` 다운로드 후 압축 해제
-            2. `models/` 폴더에 `model_q4km.gguf` 복사
+            2. `models/` 폴더에 `model_q4km.gguf` 복사 ([모델 파일 다운로드](https://huggingface.co/Trusia/Achat_conversation))
             3. `uv sync` 실행 (최초 1회)
             4. `uv run python main.py` 실행
-
-            ## 모델 파일 (별도 배포)
-
-            `model_q4km.gguf` (~2GB) 는 용량 문제로 Release에 포함되지 않습니다.
-
-            ```
-            # Linux 개발 환경에서 직접 생성
-            uv run python scripts/merge_lora.py --adapter output/LoRA_v11/adapter --output_dir output/merged_v11
-            bash scripts/convert_to_gguf.sh --merged output/merged_v11 --out_dir output/gguf --llama_cpp ~/llama.cpp
-            ```
 
             ## 시스템 요구사항
 

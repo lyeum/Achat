@@ -38,7 +38,9 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; 출력
 OutputDir=dist
 OutputBaseFilename=AchatSetup
+#if FileExists(AddBackslash(SourcePath) + "..\ui_ux\assets\icons\app.ico")
 SetupIconFile={#SrcRoot}\ui_ux\assets\icons\app.ico
+#endif
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -66,19 +68,25 @@ Source: "dist\{#MyAppExeName}";             DestDir: "{app}";           Flags: i
 Source: "dist\uv.exe";                      DestDir: "{app}";           Flags: ignoreversion
 
 ; Python 소스 (main.py + 패키지)
-Source: "{#SrcRoot}\main.py";              DestDir: "{app}";           Flags: ignoreversion
-Source: "{#SrcRoot}\config.py";            DestDir: "{app}";           Flags: ignoreversion
-Source: "{#SrcRoot}\pyproject.toml";       DestDir: "{app}";           Flags: ignoreversion
-Source: "{#SrcRoot}\uv.lock";              DestDir: "{app}";           Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SrcRoot}\main.py";                  DestDir: "{app}";           Flags: ignoreversion
+Source: "{#SrcRoot}\config.py";                DestDir: "{app}";           Flags: ignoreversion
+Source: "{#SrcRoot}\pyproject-deploy.toml";    DestDir: "{app}"; DestName: "pyproject.toml"; Flags: ignoreversion
 
 ; Python 패키지 디렉토리
-Source: "{#SrcRoot}\ui_ux\*";              DestDir: "{app}\ui_ux";     Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcRoot}\conversation\*";       DestDir: "{app}\conversation"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcRoot}\memory\*";             DestDir: "{app}\memory";    Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcRoot}\rag\*";               DestDir: "{app}\rag";       Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\agent\*";              DestDir: "{app}\agent";         Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\api\*";                DestDir: "{app}\api";           Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\conversation\*";       DestDir: "{app}\conversation";  Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\memory\*";             DestDir: "{app}\memory";        Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\narration\*";          DestDir: "{app}\narration";     Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\rag\*";               DestDir: "{app}\rag";           Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\tools\*";              DestDir: "{app}\tools";         Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\ui_ux\*";              DestDir: "{app}\ui_ux";         Flags: ignoreversion recursesubdirs createallsubdirs
 
-; models 폴더 (gguf 제외 — README.txt만 안내)
-Source: "{#SrcRoot}\models\README.txt";   DestDir: "{app}\models";    Flags: ignoreversion skipifsourcedoesntexist
+; ── 설치 시 생성할 디렉토리 ──────────────────────────────────────────────────
+[Dirs]
+Name: "{app}\models"
+Name: "{app}\data\sessions"
+Name: "{app}\chroma_deploy"
 
 ; ── 언인스톨 시 삭제할 디렉토리/파일 ─────────────────────────────────────────
 ; [Files]의 Flags:deleteafterinstall은 설치 후 즉시 삭제용.
@@ -114,3 +122,71 @@ Filename: "{app}\uv.exe"; Parameters: "sync"; WorkingDir: "{app}"; \
 ; 설치 완료 후 앱 바로 실행 (선택)
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} 실행"; \
     Flags: nowait postinstall skipifsilent
+
+; ── 모델 파일 자동 다운로드 ────────────────────────────────────────────────────
+[Code]
+var
+  DownloadPage: TOutputProgressWizardPage;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateOutputProgressPage(
+    '모델 파일 다운로드',
+    '모델 파일(~2GB)을 다운로드하고 있습니다.' + #13#10 +
+    '네트워크 속도에 따라 수 분 이상 소요될 수 있습니다. 잠시 기다려 주세요.');
+end;
+
+procedure DownloadModel;
+var
+  ScriptPath, ModelPath: string;
+  ResultCode: Integer;
+  Lines: TArrayOfString;
+begin
+  ModelPath := ExpandConstant('{app}\models\model_q4km.gguf');
+  if FileExists(ModelPath) then
+    Exit;
+
+  if MsgBox(
+      '모델 파일(~2GB)을 지금 다운로드하시겠습니까?' + #13#10 + #13#10 +
+      '  예        — 자동으로 다운로드합니다 (인터넷 연결 필요, 수 분 소요)' + #13#10 +
+      '  아니오  — 건너뜁니다. 나중에 models\ 폴더에 직접 복사할 수 있습니다.',
+      mbConfirmation, MB_YESNO) = IDNO then
+    Exit;
+
+  ScriptPath := ExpandConstant('{tmp}\dl_model.ps1');
+
+  SetArrayLength(Lines, 6);
+  Lines[0] := '$url   = "https://huggingface.co/Trusia/Achat_conversation/resolve/main/model_q4km.gguf"';
+  Lines[1] := '$dest  = "' + ModelPath + '"';
+  Lines[2] := '$token = "__HF_MODEL_TOKEN__"';
+  Lines[3] := 'New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null';
+  Lines[4] := '$h     = @{ Authorization = "Bearer $token" }';
+  Lines[5] := 'Invoke-WebRequest -Uri $url -Headers $h -OutFile $dest -UseBasicParsing';
+  SaveStringsToFile(ScriptPath, Lines, False);
+
+  DownloadPage.Show;
+  DownloadPage.SetProgress(0, 1);
+  DownloadPage.SetText('다운로드 중...', '');
+  try
+    if not Exec('powershell.exe',
+        '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      MsgBox(
+        '모델 파일 다운로드에 실패했습니다.' + #13#10 +
+        '설치 완료 후 models\ 폴더에 model_q4km.gguf를 직접 복사하세요.',
+        mbError, MB_OK)
+    else if ResultCode <> 0 then
+      MsgBox(
+        '다운로드 중 오류가 발생했습니다 (코드: ' + IntToStr(ResultCode) + ').' + #13#10 +
+        '설치 완료 후 models\ 폴더에 model_q4km.gguf를 직접 복사하세요.',
+        mbError, MB_OK);
+  finally
+    DownloadPage.Hide;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    DownloadModel;
+end;

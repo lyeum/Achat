@@ -49,6 +49,10 @@ Window {
     property string fileSearchQuery:       ""
     property string searchDirectory:       ""   // local_search 태그 선택 시 미리 저장
 
+    // 이미지 크롭 패널
+    property bool   imageCropPanelOpen:    false
+    property string imageCropPath:         ""
+
     // 사이드 메뉴
     property bool   sideMenuOpen:          false
 
@@ -511,6 +515,10 @@ Window {
             onSessionSwitchRequested: function(sessionId) {
                 bridge.switchSession(sessionId)
                 root.charStatusJson = bridge.getCharacterStatus()
+            }
+            onSessionDeleteRequested: function(sessionId) {
+                bridge.deleteSession(sessionId)
+                root.sessionListJson = bridge.listSessions(bridge.characterId)
             }
         }
 
@@ -988,6 +996,7 @@ Window {
                                 { key: "prompt_convert",  label: "#프롬프트 변환",  color: "#7A6BAA" },
                                 { key: "folder_classify", label: "#폴더 분류",      color: "#3D8A72" },
                                 { key: "local_search",    label: "#파일 검색",      color: "#6A8A3D" },
+                                { key: "image_crop",      label: "#이미지 크롭",    color: "#8A5A3D" },
                                 { key: "help",            label: "#?",              color: "#7A7A7A" },
                             ]
 
@@ -1032,17 +1041,9 @@ Window {
 
                                             // 파일/폴더가 필요한 태그는 즉시 다이얼로그 열기
                                             if (modelData.key === "file_convert") {
-                                                var pathsJson = bridge.browseFilesForOptions()
-                                                var paths = []
-                                                try { paths = JSON.parse(pathsJson) } catch(e) {}
-                                                if (paths.length > 0) {
-                                                    root.fileOptionsPaths = pathsJson
-                                                    root.fileOptionsOpen  = true
-                                                } else {
-                                                    // 취소 시 태그만 해제
-                                                    root.currentTag    = ""
-                                                    root.inputTagColor = root._th.accent
-                                                }
+                                                // 다이얼로그 없이 패널을 바로 열어 내부에서 선택
+                                                root.fileOptionsPaths = "[]"
+                                                root.fileOptionsOpen  = true
                                             } else if (modelData.key === "folder_classify") {
                                                 var fp = bridge.browseFolderForClassify()
                                                 if (fp) {
@@ -1056,6 +1057,15 @@ Window {
                                                 var sd = bridge.browseSearchDirectory()
                                                 if (sd) {
                                                     root.searchDirectory = sd
+                                                } else {
+                                                    root.currentTag    = ""
+                                                    root.inputTagColor = root._th.accent
+                                                }
+                                            } else if (modelData.key === "image_crop") {
+                                                var cp = bridge.browseFolderForCrop()
+                                                if (cp) {
+                                                    root.imageCropPath      = cp
+                                                    root.imageCropPanelOpen = true
                                                 } else {
                                                     root.currentTag    = ""
                                                     root.inputTagColor = root._th.accent
@@ -1165,11 +1175,13 @@ Window {
         "prompt_convert":  "변환할 프롬프트를 입력하세요...",
         "folder_classify": "분류 기준을 입력하세요...",
         "local_search":    "검색어를 입력하세요...",
+        "image_crop":      "크롭 설정 후 실행 버튼을 누르세요...",
         "help":            "궁금하신 기능의 이름을 입력하세요...",
     })
 
     // ── 메시지 전송 ─────────────────────────────────────────────────────────
     function sendMessage() {
+        Qt.inputMethod.commit()          // 한국어 IME 미확정 조합 문자 강제 확정
         var text = inputField.text.trim()
         if (text === "") return
         // 기능 모드에서 태그 미선택 시 안내
@@ -1188,9 +1200,11 @@ Window {
             return
         }
 
-        // file_convert / folder_classify: 태그 클릭 시 이미 다이얼로그가 열리므로 여기서는 처리하지 않음
+        // 패널 기반 태그: Enter 입력 무시 (패널 내부 버튼으로만 실행)
         if (root.currentMode === "function" &&
-            (root.currentTag === "file_convert" || root.currentTag === "folder_classify")) {
+            (root.currentTag === "file_convert" ||
+             root.currentTag === "folder_classify" ||
+             root.currentTag === "image_crop")) {
             return
         }
 
@@ -1256,12 +1270,31 @@ Window {
         anchors.fill: parent
         z: 15
         visible: root.fileSearchOpen
-        fontFamily: koreanFont.font.family
-        resultsJson: root.fileSearchResults
-        query:       root.fileSearchQuery
+        fontFamily:      koreanFont.font.family
+        resultsJson:     root.fileSearchResults
+        query:           root.fileSearchQuery
+        searchDirectory: root.searchDirectory
 
         onCloseRequested: {
             root.fileSearchOpen = false
+        }
+    }
+
+    // ── 이미지 크롭 패널 오버레이 ─────────────────────────────────────────────
+    ImageCropPanel {
+        id: imageCropPanel
+        anchors.fill: parent
+        z: 15
+        visible: root.imageCropPanelOpen
+        fontFamily: koreanFont.font.family
+        folderPath: root.imageCropPath
+
+        onCloseRequested: {
+            root.imageCropPanelOpen = false
+        }
+        onResultReady: function(message) {
+            messageModel.append({ "role": "assistant", "content": message })
+            Qt.callLater(() => { chatList.positionViewAtEnd() })
         }
     }
 }

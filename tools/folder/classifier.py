@@ -53,15 +53,23 @@ class ClassifierTool(BaseTool):
     system_prompt = (
         "너는 파일 분류 도구의 파라미터를 추출하는 역할이다.\n"
         "사용자의 요청을 분석해서 아래 JSON 형식으로만 응답해라:\n"
-        '{"target": "<분류할 디렉토리 경로>", "rule": "확장자별" 또는 "종류별", "dry_run": true 또는 false}\n'
+        '{"target": "<분류할 디렉토리 경로>", "rule": "확장자별" 또는 "종류별" 또는 "키워드별", '
+        '"keywords": {"<키워드>": "<폴더명>", ...}, "dry_run": true 또는 false}\n'
+        "rule이 '키워드별'일 때: keywords 항목에 {파일명에 포함될 단어: 이동할 폴더명} 형식으로 작성해라.\n"
+        "keywords는 rule이 '키워드별'일 때만 사용한다. 나머지 rule에서는 빈 객체({})로 설정해라.\n"
         "dry_run이 true이면 실제로 파일을 이동하지 않고 미리보기만 한다.\n"
-        "경로가 명시되지 않으면 target은 현재 디렉토리(\".\")로 설정해라."
+        "경로가 명시되지 않으면 target은 현재 디렉토리(\".\")로 설정해라.\n\n"
+        "예시:\n"
+        "입력: 다운로드 폴더에서 파일명에 '보고서'가 있으면 reports 폴더로, '회의'가 있으면 meetings 폴더로 정리해줘\n"
+        '출력: {"target": "~/Downloads", "rule": "키워드별", '
+        '"keywords": {"보고서": "reports", "회의": "meetings"}, "dry_run": false}'
     )
 
     def execute(self, params: dict) -> str:
         target = Path(params.get("target", ".")).expanduser().resolve()
         rule = params.get("rule", "종류별")
         dry_run = params.get("dry_run", True)
+        keywords: dict[str, str] = params.get("keywords") or {}
 
         if not target.exists():
             return f"오류: 경로가 존재하지 않습니다 — {target}"
@@ -73,16 +81,31 @@ class ClassifierTool(BaseTool):
             return f"분류할 파일이 없습니다: {target}"
 
         moves: list[tuple[Path, Path]] = []
-        for f in files:
-            ext = f.suffix.lower()
-            if rule == "확장자별":
-                folder_name = ext.lstrip(".") if ext else "no_ext"
-            else:
-                folder_name = CATEGORY_MAP.get(ext, "others")
 
-            dest_dir = target / folder_name
-            dest = dest_dir / f.name
-            moves.append((f, dest))
+        if rule == "키워드별":
+            if not keywords:
+                return "오류: 키워드별 분류에는 keywords 항목이 필요합니다. (예: {\"보고서\": \"reports\"})"
+            for f in files:
+                name_lower = f.name.lower()
+                folder_name = None
+                for kw, dest_folder in keywords.items():
+                    if kw.lower() in name_lower:
+                        folder_name = dest_folder
+                        break
+                if folder_name is None:
+                    continue  # 매칭 키워드 없으면 이동 안 함
+                moves.append((f, target / folder_name / f.name))
+        else:
+            for f in files:
+                ext = f.suffix.lower()
+                if rule == "확장자별":
+                    folder_name = ext.lstrip(".") if ext else "no_ext"
+                else:
+                    folder_name = CATEGORY_MAP.get(ext, "others")
+                moves.append((f, target / folder_name / f.name))
+
+        if not moves:
+            return "이동 대상 파일이 없습니다. (키워드와 일치하는 파일명이 없음)" if rule == "키워드별" else "이동 대상 파일이 없습니다."
 
         if dry_run:
             lines = [f"[미리보기] {m[0].name} → {m[1].parent.name}/" for m in moves]

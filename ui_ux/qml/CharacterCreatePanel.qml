@@ -356,6 +356,7 @@ Item {
                                         // onTextChanged 대신 editingFinished 사용:
                                         // onTextChanged에서 f_rules 재할당 시 Repeater 전체 재생성 → 커서 리셋 버그
                                         onEditingFinished: {
+                                            Qt.inputMethod.commit()
                                             var tmp = createRoot.f_rules.slice()
                                             tmp[index] = text
                                             createRoot.f_rules = tmp
@@ -598,6 +599,7 @@ Item {
                             id: saveH; anchors.fill: parent; hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
+                                Qt.inputMethod.commit()
                                 var id = createRoot.f_id.trim()
                                 var nm = createRoot.f_name.trim()
                                 if (!id || !nm) {

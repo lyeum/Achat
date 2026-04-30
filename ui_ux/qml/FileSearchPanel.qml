@@ -8,15 +8,25 @@ import QtQuick.Layouts 1.15
 Item {
     id: searchRoot
 
-    property string fontFamily:    ""
-    property string resultsJson:   "[]"   // searchFiles() 반환값
-    property string query:         ""     // 검색어 (표시용)
+    property string fontFamily:      ""
+    property string resultsJson:     "[]"   // searchFiles() 반환값
+    property string query:           ""     // 검색어 (표시용)
+    property string searchDirectory: ""     // 재검색용 디렉토리
 
-    property var    _results:      []
-    property string _error:        ""
-    property string _selectedPath: ""
+    property var    _results:        []
+    property string _error:          ""
+    property string _selectedPath:   ""
+    property string extFilter:        ""     // "" = 전체, "jpg,png,..." = 이미지 등
 
     signal closeRequested()
+
+    // 확장자 필터 변경 시 재검색
+    onExtFilterChanged: {
+        if (searchRoot.query && searchRoot.searchDirectory) {
+            var raw = bridge.searchFiles(searchRoot.query, searchRoot.searchDirectory, searchRoot.extFilter)
+            searchRoot.resultsJson = raw
+        }
+    }
 
     onResultsJsonChanged: {
         try {
@@ -81,6 +91,42 @@ Item {
                 color: searchRoot._error ? "#C05050" : "#5A8090"
                 width: parent.width
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            }
+
+            // 확장자 필터 칩
+            Row {
+                spacing: 4
+                Repeater {
+                    model: [
+                        { label: "전체",  ext: "" },
+                        { label: "이미지", ext: "jpg,jpeg,png,webp,bmp,tiff,gif" },
+                        { label: "문서",  ext: "txt,md,pdf,docx,hwp,hwpx,xlsx,csv" },
+                        { label: "코드",  ext: "py,js,ts,java,cpp,c,h,cs,go,rs,sh" },
+                    ]
+                    Rectangle {
+                        width: filterLbl.implicitWidth + 14
+                        height: 22; radius: 11
+                        color: searchRoot.extFilter === modelData.ext
+                            ? "#2A5060" : (filterHov.containsMouse ? "#1E3040" : "#161C28")
+                        border.color: searchRoot.extFilter === modelData.ext ? "#5A9EA8" : "transparent"
+                        border.width: 1
+                        Behavior on color { ColorAnimation { duration: 100 } }
+                        Text {
+                            id: filterLbl
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pixelSize: 11
+                            font.family: searchRoot.fontFamily
+                            color: searchRoot.extFilter === modelData.ext ? "#A8D0D8" : "#506070"
+                        }
+                        MouseArea {
+                            id: filterHov
+                            anchors.fill: parent
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: searchRoot.extFilter = modelData.ext
+                        }
+                    }
+                }
             }
         }
 

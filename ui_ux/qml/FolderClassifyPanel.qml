@@ -10,6 +10,7 @@ Item {
     property string folderPath:  ""    // browseFolderForClassify() 반환값
 
     property int    _rule:       0     // 0=종류별, 1=확장자별
+    property string _previewText: ""  // 미리보기 결과 (인라인 표시)
 
     signal closeRequested()
     signal resultReady(string message)
@@ -135,6 +136,36 @@ Item {
                 }
             }
 
+            // ── 미리보기 결과 영역 (인라인) ──────────────────────────────────
+            Rectangle {
+                width: parent.width
+                height: 120
+                visible: classifyRoot._previewText !== ""
+                color: "#0E1520"
+                radius: 6
+                clip: true
+
+                ScrollView {
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle { color: "transparent" }
+                        background: Rectangle { color: "transparent" }
+                    }
+                    Text {
+                        width: parent.width
+                        text: classifyRoot._previewText
+                        font.pixelSize: 12
+                        font.family: classifyRoot.fontFamily
+                        color: "#7ABAC8"
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    }
+                }
+            }
+
             // ── 버튼 행 ───────────────────────────────────────────────────────
             Row {
                 spacing: 6
@@ -166,7 +197,7 @@ Item {
                     }
                 }
 
-                // 미리보기 버튼 (dry_run=true)
+                // 미리보기 버튼 (dry_run=true) — 결과를 인라인 영역에 표시
                 Rectangle {
                     width: 70; height: 30; radius: 6
                     color: previewHov.containsMouse ? "#2A4858" : "#1E3848"
@@ -184,9 +215,9 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             var rule = classifyRoot._rule === 0 ? "종류별" : "확장자별"
-                            var result = bridge.applyFolderClassify(classifyRoot.folderPath, rule, true)
-                            classifyRoot.resultReady(result)
-                            // 미리보기는 패널 유지
+                            classifyRoot._previewText = bridge.applyFolderClassify(
+                                classifyRoot.folderPath, rule, true
+                            )
                         }
                     }
                 }
