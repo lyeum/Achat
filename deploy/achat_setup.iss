@@ -68,19 +68,25 @@ Source: "dist\{#MyAppExeName}";             DestDir: "{app}";           Flags: i
 Source: "dist\uv.exe";                      DestDir: "{app}";           Flags: ignoreversion
 
 ; Python 소스 (main.py + 패키지)
-Source: "{#SrcRoot}\main.py";              DestDir: "{app}";           Flags: ignoreversion
-Source: "{#SrcRoot}\config.py";            DestDir: "{app}";           Flags: ignoreversion
-Source: "{#SrcRoot}\pyproject.toml";       DestDir: "{app}";           Flags: ignoreversion
-Source: "{#SrcRoot}\uv.lock";              DestDir: "{app}";           Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SrcRoot}\main.py";                  DestDir: "{app}";           Flags: ignoreversion
+Source: "{#SrcRoot}\config.py";                DestDir: "{app}";           Flags: ignoreversion
+Source: "{#SrcRoot}\pyproject-deploy.toml";    DestDir: "{app}"; DestName: "pyproject.toml"; Flags: ignoreversion
 
 ; Python 패키지 디렉토리
-Source: "{#SrcRoot}\ui_ux\*";              DestDir: "{app}\ui_ux";     Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcRoot}\conversation\*";       DestDir: "{app}\conversation"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcRoot}\memory\*";             DestDir: "{app}\memory";    Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcRoot}\rag\*";               DestDir: "{app}\rag";       Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\agent\*";              DestDir: "{app}\agent";         Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\api\*";                DestDir: "{app}\api";           Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\conversation\*";       DestDir: "{app}\conversation";  Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\memory\*";             DestDir: "{app}\memory";        Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\narration\*";          DestDir: "{app}\narration";     Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\rag\*";               DestDir: "{app}\rag";           Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\tools\*";              DestDir: "{app}\tools";         Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcRoot}\ui_ux\*";              DestDir: "{app}\ui_ux";         Flags: ignoreversion recursesubdirs createallsubdirs
 
-; models 폴더 (gguf 제외 — README.txt만 안내)
-Source: "{#SrcRoot}\models\README.txt";   DestDir: "{app}\models";    Flags: ignoreversion skipifsourcedoesntexist
+; ── 설치 시 생성할 디렉토리 ──────────────────────────────────────────────────
+[Dirs]
+Name: "{app}\models"
+Name: "{app}\data\sessions"
+Name: "{app}\chroma_deploy"
 
 ; ── 언인스톨 시 삭제할 디렉토리/파일 ─────────────────────────────────────────
 ; [Files]의 Flags:deleteafterinstall은 설치 후 즉시 삭제용.
@@ -138,6 +144,13 @@ var
 begin
   ModelPath := ExpandConstant('{app}\models\model_q4km.gguf');
   if FileExists(ModelPath) then
+    Exit;
+
+  if MsgBox(
+      '모델 파일(~2GB)을 지금 다운로드하시겠습니까?' + #13#10 + #13#10 +
+      '  예        — 자동으로 다운로드합니다 (인터넷 연결 필요, 수 분 소요)' + #13#10 +
+      '  아니오  — 건너뜁니다. 나중에 models\ 폴더에 직접 복사할 수 있습니다.',
+      mbConfirmation, MB_YESNO) = IDNO then
     Exit;
 
   ScriptPath := ExpandConstant('{tmp}\dl_model.ps1');
