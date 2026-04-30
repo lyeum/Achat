@@ -142,12 +142,13 @@ begin
 
   ScriptPath := ExpandConstant('{tmp}\dl_model.ps1');
 
-  SetArrayLength(Lines, 5);
+  SetArrayLength(Lines, 6);
   Lines[0] := '$url   = "https://huggingface.co/Trusia/Achat_conversation/resolve/main/model_q4km.gguf"';
   Lines[1] := '$dest  = "' + ModelPath + '"';
   Lines[2] := '$token = "__HF_MODEL_TOKEN__"';
-  Lines[3] := '$h     = @{ Authorization = "Bearer $token" }';
-  Lines[4] := 'Invoke-WebRequest -Uri $url -Headers $h -OutFile $dest -UseBasicParsing';
+  Lines[3] := 'New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null';
+  Lines[4] := '$h     = @{ Authorization = "Bearer $token" }';
+  Lines[5] := 'Invoke-WebRequest -Uri $url -Headers $h -OutFile $dest -UseBasicParsing';
   SaveStringsToFile(ScriptPath, Lines, False);
 
   DownloadPage.Show;
