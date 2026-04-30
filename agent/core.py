@@ -48,6 +48,7 @@ from memory.long_term import LongTermMemory
 from tools.base import BaseTool
 from tools.folder.classifier import ClassifierTool
 from tools.folder.converter import ConverterTool
+from tools.folder.cropper import CropperTool
 from tools.folder.renamer import RenamerTool
 from tools.prompt_converter import PromptConverterTool
 from tools.search.local_search import LocalSearchTool
@@ -56,6 +57,7 @@ from tools.search.local_search import LocalSearchTool
 _STATIC_TOOLS: list[BaseTool] = [
     ClassifierTool(),
     ConverterTool(),
+    CropperTool(),
     RenamerTool(),
     LocalSearchTool(),
 ]
@@ -64,6 +66,7 @@ _STATIC_TOOLS: list[BaseTool] = [
 # 순서 중요: 더 구체적인 키워드가 위에 있어야 "변환" 같은 공통 단어에 먼저 걸리지 않음
 _KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("프롬프트", "prompt", "명확하게", "간결하게", "상세하게", "질문형", "지시형"), "prompt_convert"),
+    (("크롭", "crop", "잘라", "자르"), "image_crop"),
     (("이름", "rename", "renamer", "파일명"), "file_rename"),
     (("분류", "정리", "폴더"), "folder_classify"),
     (("이미지", "image", "png", "jpg", "jpeg", "webp", "bmp", "tiff"), "image_convert"),
