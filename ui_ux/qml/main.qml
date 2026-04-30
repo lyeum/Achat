@@ -516,6 +516,10 @@ Window {
                 bridge.switchSession(sessionId)
                 root.charStatusJson = bridge.getCharacterStatus()
             }
+            onSessionDeleteRequested: function(sessionId) {
+                bridge.deleteSession(sessionId)
+                root.sessionListJson = bridge.listSessions(bridge.characterId)
+            }
         }
 
         // ── 캐릭터 변경 패널 오버레이 ─────────────────────────────────────

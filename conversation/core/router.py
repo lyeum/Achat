@@ -55,7 +55,6 @@ class ConversationRouter:
         )
         self.rag     = WorldRetriever(config)
         self._trigger_n: int    = config.get("memory_trigger_n", 10)
-        self._aff_gate: float   = config.get("aff_gate_threshold", 0.6)
         self._pending_narration: tuple[str, str] | None = None  # (title, document) — bridge가 turn 후 읽어 UI emit
         self._narration_monitor = NarrationMonitor()  # 키워드 기반 하드코딩 나레이션 (세션 내 1회)
 
@@ -127,14 +126,8 @@ class ConversationRouter:
         triggered = state_mod.check_trigger_events(self.session, user_input, self.character)
         if not triggered:
             new_mood = state_mod.update_mood(self.session, user_input, self.character)
-            # semantic 중요도 게이팅: 잡담(0.0) 발화는 affection 변화 억제
-            importance = summarizer.score_importance(user_input)
-            if importance >= self._aff_gate:
-                state_mod.update_affection(self.session, new_mood, self.character)
-            else:
-                logger.debug(
-                    f"[router] aff 게이팅 — importance={importance:.2f} < {self._aff_gate} → 변화 억제"
-                )
+            # neutral mood → delta=0 in update_affection, no change needed
+            state_mod.update_affection(self.session, new_mood, self.character)
         aff_delta = abs(self.session.affection - aff_before)
 
         # 6-6: 어시스턴트 응답에서 약속 패턴 감지 → character_notes 추가
@@ -274,7 +267,10 @@ class ConversationRouter:
         summary = summarizer.summarize(
             self.session.dialogue_log, self.llm, self._trigger_n
         )
-        score = summarizer.score_importance(summary)
+        # score against raw dialogue — keywords exist in original turns, not in paraphrased summary
+        recent = self.session.dialogue_log[-(self._trigger_n * 2):]
+        raw_text = " ".join(m["content"] for m in recent)
+        score = summarizer.score_importance(raw_text)
         summarizer.write_to_vdb(
             summary, score, self.session, self.long_term, self.character,
             trigger_n=self._trigger_n,

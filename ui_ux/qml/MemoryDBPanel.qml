@@ -381,6 +381,10 @@ Item {
                     anchors.right: parent.right
                     clip: true
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical: ScrollBar {
+                        contentItem: Rectangle { color: "transparent" }
+                        background:  Rectangle { color: "transparent" }
+                    }
 
                     Column {
                         id: memCol
@@ -752,6 +756,10 @@ Item {
                 ScrollView {
                     anchors.top: worldAddForm.bottom; anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
                     clip: true; ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical: ScrollBar {
+                        contentItem: Rectangle { color: "transparent" }
+                        background:  Rectangle { color: "transparent" }
+                    }
 
                     Column {
                         id: worldChunkCol
@@ -1053,6 +1061,10 @@ Item {
                 ScrollView {
                     anchors.top: guideAddForm.bottom; anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
                     clip: true; ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical: ScrollBar {
+                        contentItem: Rectangle { color: "transparent" }
+                        background:  Rectangle { color: "transparent" }
+                    }
 
                     Column {
                         id: guidesCol

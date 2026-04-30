@@ -1327,8 +1327,7 @@ class ChatBridge(QObject):
             return False  # 현재 활성 세션 삭제 불가
 
         try:
-            self._session_manager._evict_session(char_id, session_id)
-            return True
+            return self._session_manager.delete_session(char_id, session_id)
         except Exception:  # noqa: BLE001
             return False
 

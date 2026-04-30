@@ -434,8 +434,9 @@ class TestAffectionSemanticGating:
         for env_name, cfg in _CONFIGS.items():
             assert "aff_gate_threshold" in cfg, f"{env_name} config에 aff_gate_threshold 없음"
 
-    def test_router_reads_aff_gate_from_config(self):
-        """ConversationRouter가 config에서 aff_gate_threshold를 읽어야 한다."""
+    def test_router_initializes_without_aff_gate(self):
+        """ConversationRouter는 mood 기반 affection 게이팅을 사용한다.
+        keyword threshold(_aff_gate) 속성은 더 이상 존재하지 않는다."""
         from unittest.mock import MagicMock
         from conversation.core.router import ConversationRouter
         from conversation.core.session import ConversationSession
@@ -451,7 +452,7 @@ class TestAffectionSemanticGating:
         with patch("rag.retrieve.WorldRetriever.__init__", return_value=None), \
              patch("rag.retrieve.WorldRetriever.query", return_value=[]):
             router = ConversationRouter(char, world, session, llm, lt, cfg)
-        assert router._aff_gate == 0.75
+        assert not hasattr(router, "_aff_gate")
 
     def test_low_importance_suppresses_affection(self):
         """잡담(importance=0.0) 발화는 affection을 변화시키지 않는다."""
