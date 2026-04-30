@@ -113,6 +113,13 @@ jobs:
           python -m PyInstaller deploy\achat.spec --distpath deploy\dist --workpath deploy\build --noconfirm
         shell: cmd
 
+      - name: HF 토큰 주입
+        run: |
+          (Get-Content deploy\achat_setup.iss) `
+            -replace '__HF_MODEL_TOKEN__', '${{ secrets.HF_MODEL_TOKEN }}' |
+            Set-Content deploy\achat_setup.iss
+        shell: pwsh
+
       - name: AchatSetup.exe 빌드 (Inno Setup)
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -159,8 +166,8 @@ jobs:
 
             1. `AchatSetup.exe` 다운로드 후 실행
             2. 설치 경로 지정 (기본: `C:\Achat`)
-            3. 마법사 완료 → 자동으로 의존성 설치 + 앱 실행
-            4. `models/` 폴더에 `model_q4km.gguf` 복사 후 재실행
+            3. 마법사 완료 → 의존성 설치 + 모델 파일 자동 다운로드 (~2GB, 수 분 소요)
+            4. 완료 후 앱 자동 실행
 
             **제거:** 제어판 → 프로그램 추가/제거 → Achat 제거
             (`.venv`, `chroma_deploy`, 세션 데이터 포함 전체 삭제)
@@ -168,19 +175,9 @@ jobs:
             ### 방법 B — 소스 zip (개발자용)
 
             1. `achat.zip` 다운로드 후 압축 해제
-            2. `models/` 폴더에 `model_q4km.gguf` 복사
+            2. `models/` 폴더에 `model_q4km.gguf` 복사 ([모델 파일 다운로드](https://huggingface.co/Trusia/Achat_conversation))
             3. `uv sync` 실행 (최초 1회)
             4. `uv run python main.py` 실행
-
-            ## 모델 파일 (별도 배포)
-
-            `model_q4km.gguf` (~2GB) 는 용량 문제로 Release에 포함되지 않습니다.
-
-            ```
-            # Linux 개발 환경에서 직접 생성
-            uv run python scripts/merge_lora.py --adapter output/LoRA_v11/adapter --output_dir output/merged_v11
-            bash scripts/convert_to_gguf.sh --merged output/merged_v11 --out_dir output/gguf --llama_cpp ~/llama.cpp
-            ```
 
             ## 시스템 요구사항
 

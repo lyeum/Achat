@@ -116,3 +116,63 @@ Filename: "{app}\uv.exe"; Parameters: "sync"; WorkingDir: "{app}"; \
 ; 설치 완료 후 앱 바로 실행 (선택)
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} 실행"; \
     Flags: nowait postinstall skipifsilent
+
+; ── 모델 파일 자동 다운로드 ────────────────────────────────────────────────────
+[Code]
+var
+  DownloadPage: TOutputProgressWizardPage;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateOutputProgressPage(
+    '모델 파일 다운로드',
+    '모델 파일(~2GB)을 다운로드하고 있습니다.' + #13#10 +
+    '네트워크 속도에 따라 수 분 이상 소요될 수 있습니다. 잠시 기다려 주세요.');
+end;
+
+procedure DownloadModel;
+var
+  ScriptPath, ModelPath: string;
+  ResultCode: Integer;
+  Lines: TArrayOfString;
+begin
+  ModelPath := ExpandConstant('{app}\models\model_q4km.gguf');
+  if FileExists(ModelPath) then
+    Exit;
+
+  ScriptPath := ExpandConstant('{tmp}\dl_model.ps1');
+
+  SetArrayLength(Lines, 5);
+  Lines[0] := '$url   = "https://huggingface.co/Trusia/Achat_conversation/resolve/main/model_q4km.gguf"';
+  Lines[1] := '$dest  = "' + ModelPath + '"';
+  Lines[2] := '$token = "__HF_MODEL_TOKEN__"';
+  Lines[3] := '$h     = @{ Authorization = "Bearer $token" }';
+  Lines[4] := 'Invoke-WebRequest -Uri $url -Headers $h -OutFile $dest -UseBasicParsing';
+  SaveStringsToFile(ScriptPath, Lines, False);
+
+  DownloadPage.Show;
+  DownloadPage.SetProgress(0, 1);
+  DownloadPage.SetText('다운로드 중...', '');
+  try
+    if not Exec('powershell.exe',
+        '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      MsgBox(
+        '모델 파일 다운로드에 실패했습니다.' + #13#10 +
+        '설치 완료 후 models\ 폴더에 model_q4km.gguf를 직접 복사하세요.',
+        mbError, MB_OK)
+    else if ResultCode <> 0 then
+      MsgBox(
+        '다운로드 중 오류가 발생했습니다 (코드: ' + IntToStr(ResultCode) + ').' + #13#10 +
+        '설치 완료 후 models\ 폴더에 model_q4km.gguf를 직접 복사하세요.',
+        mbError, MB_OK);
+  finally
+    DownloadPage.Hide;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    DownloadModel;
+end;
