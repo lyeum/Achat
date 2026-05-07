@@ -113,7 +113,6 @@ Achat/
 │   ├─ loader/
 │   │   ├─ __init__.py               ✅ 패키지 초기화
 │   │   ├─ character_load.py         ✅ 캐릭터 YAML → dict (필수 필드 검증 포함)
-│   │   ├─ chracter_load.py          ⚠️ 오타 파일 — 0 bytes 빈 파일. 삭제 필요
 │   │   ├─ memory_load.py            ✅ M_default.json → ChromaDB 초기 삽입용 리스트
 │   │   └─ world_load.py             ✅ 세계관 YAML → dict (get_act 헬퍼 포함)
 │   │
@@ -153,7 +152,7 @@ Achat/
 │
 ├─ memory/
 │   ├─ __init__.py                   ✅ 패키지 초기화
-│   ├─ long_term.py                  ✅ ChromaDB store/query (bge-m3, threshold 0.52, importance≥0.5)
+│   ├─ long_term.py                  ✅ ChromaDB store/query (bge-m3, vdb_threshold 0.60, dedup/quota/TTL)
 │   │                                   CRUD 메서드 추가: delete_entry / add_entry / update_entry
 │   ├─ short_term.py                 ✅ get_recent() — 슬라이딩 윈도우
 │   ├─ summarizer.py                 ✅ N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
@@ -191,7 +190,7 @@ Achat/
 │   │                                   story 섹션 전용 트리거 키워드: [...] 파싱
 │   │                                   ChromaDB 메타: {world_id, section, item_title, trigger_keywords}
 │   │                                   ~~⚠️ 고정 크기 청킹~~ → ✅ 섹션 기반 청킹으로 전환 완료 (2026-04-09)
-│   ├─ retrieve.py                   ✅ WorldRetriever.query() — 매 턴 실행, threshold 0.52
+│   ├─ retrieve.py                   ✅ WorldRetriever.query() — 매 턴 실행, rag_threshold 0.55
 │   │                                   컬렉션 미존재 안전 처리 / add_document() 동적 upsert
 │   │                                   query_by_meta(world_id, section) 신규 — 섹션 전체 반환 (2026-04-09)
 │   ├─ world_nav.py                  ✅ detect_move_intent() — 키워드 필터 + LLM 추출(max_tokens=15)
@@ -300,7 +299,7 @@ Achat/
 │   │   └─ verify_phases.py          ✅ Phase 2/3 실환경 검증 (12턴 자동 대화, 5항목 PASS, 수동 실행)
 │   │                                   LLM 풀 로드 필요 — 수동 실행만
 │   │
-│   ├─ data/                         📄 학습 데이터 총 3,170건 / 57파일 (v11 기준, 2026-04-14)
+│   ├─ data/                         📄 학습 데이터 총 3,983건 / 71파일 (v12 데이터 포함, 채택 모델은 v11)
 │   │   │                               시스템 프롬프트: `너는 {char_name}이다.` + 카테고리 속성 (2026-04-02)
 │   │   ├─ affection/                📄 친밀도 단계별 데이터 (15파일)
 │   │   │                               stranger/acquaintance/familiar/affection_low~high/close/friendly/intimate

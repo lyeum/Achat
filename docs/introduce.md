@@ -91,7 +91,7 @@ User Input
     │       ▼                      ▼                            │
     │   [단기 메모리]         [장기 메모리 VDB]                 │
     │    최근 5턴 + session_context  시맨틱 유사도 검색         │
-    │    (검색 없이)            (bge-m3, 임계값 0.52)           │
+    │    (검색 없이)            (bge-m3, 임계값 0.60)           │
     │       │                      │                            │
     │       └──────────┬───────────┘                            │
     │                  ▼                                         │
@@ -284,7 +284,7 @@ Achat/
 │
 ├─ rag/                            # RAG 파이프라인
 │   ├─ index.py                   # 세계관 문서 섹션 기반 청킹 + ChromaDB 인덱싱
-│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, threshold 0.52)
+│   ├─ retrieve.py                # 시맨틱 유사도 검색 (bge-m3, rag_threshold 0.55)
 │   ├─ world_nav.py               # 이동 의도 감지 + 동적 장소 생성
 │   └─ sources/world/Seaside.md   # 통합 세계관 소스 (## culture / ## place / ## story)
 │
@@ -340,7 +340,7 @@ Achat/
 │   │   ├─ klue_regression.py     # KLUE 회귀 평가 (lm-eval 필요, 선택적)
 │   │   ├─ speed_bench.py         # 추론 속도 벤치마크 (수동)
 │   │   └─ verify_phases.py       # Phase 2/3 실환경 검증 (12턴)
-│   ├─ data/                      # 학습 데이터 (3,632건, 66파일, v12 기준)
+│   ├─ data/                      # 학습 데이터 (3,983건, 71파일, v12 데이터 포함 / 채택 모델은 v11)
 │   │   ├─ affection/             # 친밀도 6단계 (stranger~intimate) + formal/ 6단계
 │   │   ├─ common/                # memory_ref / ai_tell_removal / world_context_use 등
 │   │   ├─ emotion/               # 감정 상태별 (12종)
@@ -420,7 +420,7 @@ Achat/
 - [x] `agent/state.py` — mood_triggers 키워드 매칭 (8종), affection 증감
 - [x] `agent/core.py` — 전체 컴포넌트 초기화 + 대화 모드 진입점 `chat()`
 - [x] `memory/short_term.py` — `get_recent()` + `evict_to_context()` (5턴 초과 시 eviction)
-- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, threshold 0.52, dedup/quota/TTL)
+- [x] `memory/long_term.py` — ChromaDB store/query (bge-m3, vdb_threshold 0.60, dedup/quota/TTL)
 - [x] `memory/summarizer.py` — N턴 트리거 + LLM 요약 + 키워드 중요도 scoring + VDB 저장
 - [x] `conversation/core/router.py` — `handle_turn()` 전체 턴 파이프라인
 - [x] `conversation/core/prompt_build.py` — `_layer_e()` 추가 (session_context + character_notes)
@@ -431,7 +431,7 @@ Achat/
 > 목표: 세계관 문서 시맨틱 검색 연동
 
 - [x] `rag/index.py` — 세계관 문서 섹션 기반 청킹 + ChromaDB 인덱싱 (bge-m3, cosine space)
-- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, threshold 0.52 미만 빈 리스트 반환
+- [x] `rag/retrieve.py` — `WorldRetriever.query()` 매 턴 실행, rag_threshold 0.55 미만 빈 리스트 반환
 - [x] `rag/sources/world/Seaside.md` — 통합 세계관 소스 (`## culture / ## place / ## story`)
 - [x] `conversation/core/prompt_build.py` — `assemble(rag_results=)` 추가, Layer B에 RAG 결과 병합
 - [x] `conversation/core/router.py` — RAG 검색 연동
